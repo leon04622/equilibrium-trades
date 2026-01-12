@@ -1,0 +1,126 @@
+# Equilibrium - Beginner-Friendly Trading Platform
+
+## Overview
+Equilibrium is a beginner-friendly trading platform that teaches users a specific trading strategy using 21 SMA and 200 SMA crossovers. The platform features:
+- TradingView chart integration with all indicators
+- AI-powered pattern detection using OpenAI (via Replit AI Integrations)
+- Comprehensive pattern library with 18+ patterns and educational content
+- Subscription tiers with premium liquidity heatmap feature
+- Hyperliquid connection UI for trading
+
+## Architecture
+
+### Frontend (React + TypeScript)
+- **Framework**: Vite + React 18
+- **Styling**: Tailwind CSS with custom design system
+- **State Management**: TanStack Query for server state
+- **Routing**: Wouter
+- **UI Components**: Shadcn/ui with custom components
+- **Charts**: TradingView embedded widget
+
+### Backend (Express + TypeScript)
+- **Framework**: Express.js
+- **AI**: OpenAI via Replit AI Integrations (gpt-5.1)
+- **Storage**: In-memory storage (MemStorage)
+- **Streaming**: Server-Sent Events for pattern detection
+
+## Project Structure
+```
+client/
+├── src/
+│   ├── components/           # Reusable UI components
+│   │   ├── trading-view-chart.tsx    # TradingView widget
+│   │   ├── pattern-card.tsx          # Pattern display cards
+│   │   ├── pattern-modal.tsx         # Educational modal
+│   │   ├── sma-indicator.tsx         # SMA analysis display
+│   │   ├── live-pattern-card.tsx     # Live detected patterns
+│   │   ├── liquidity-heatmap.tsx     # Premium heatmap feature
+│   │   └── app-sidebar.tsx           # Navigation sidebar
+│   ├── pages/                # Route pages
+│   │   ├── dashboard.tsx     # Main dashboard
+│   │   ├── trading.tsx       # Live trading with chart
+│   │   ├── patterns.tsx      # Pattern library
+│   │   ├── learn.tsx         # Educational modules
+│   │   ├── signals.tsx       # AI signals page
+│   │   ├── heatmap.tsx       # Liquidity heatmap (premium)
+│   │   ├── hyperliquid.tsx   # Exchange connection
+│   │   ├── pricing.tsx       # Subscription tiers
+│   │   └── settings.tsx      # User settings
+│   ├── lib/
+│   │   ├── patterns.ts       # Pattern definitions (18+ patterns)
+│   │   └── theme.tsx         # Theme provider
+│   └── App.tsx               # Main app with routing
+
+server/
+├── routes.ts                 # API endpoints
+├── storage.ts                # In-memory storage implementation
+├── pattern-detection.ts      # AI pattern analysis using OpenAI
+└── replit_integrations/
+    └── chat/                 # OpenAI chat integration
+
+shared/
+├── schema.ts                 # TypeScript types and schemas
+└── models/chat.ts            # Chat model schemas
+```
+
+## API Endpoints
+
+### Patterns
+- `GET /api/patterns/active` - Get active detected patterns
+- `GET /api/patterns/symbol/:symbol` - Get patterns by symbol
+- `POST /api/detect-patterns` - AI pattern detection (SSE streaming)
+- `PATCH /api/patterns/:id/status` - Update pattern status
+
+### Market Data
+- `GET /api/market/:symbol` - Get market condition (SMA values, trend)
+
+### SMA Signals
+- `GET /api/signals/sma` - Get recent SMA signals
+- `POST /api/signals/sma` - Create SMA signal
+
+### Subscriptions
+- `GET /api/subscriptions` - Get all subscription tiers
+- `GET /api/subscriptions/:id` - Get single tier
+
+## Trading Strategy (21/200 SMA Crossover)
+1. Watch for 21 SMA to cross 200 SMA on 1-minute chart
+2. Confirm price is above 200 SMA on 5-minute chart (for longs)
+3. Look for continuation patterns: bull flags, triangles, pennants
+4. For shorts: 21 SMA below 200 SMA, look for bear flags
+
+## Subscription Tiers
+- **Starter** ($0/mo): Pattern library, basic charts, 5 educational modules
+- **Pro** ($49/mo): AI pattern detection, real-time alerts, trade recommendations
+- **Elite** ($149/mo): Liquidity heatmap, order flow, 1-on-1 coaching
+
+## Pattern Library (18+ Patterns)
+### Continuation Patterns
+- Bull Flag, Bear Flag, Pennant
+- Ascending/Descending/Symmetrical Triangles
+- Cup and Handle
+
+### Reversal Patterns
+- Head and Shoulders, Inverse H&S
+- Double Top/Bottom, Triple Top/Bottom
+- Diamond, Rising/Falling Wedge
+- Engulfing patterns, Morning/Evening Star
+
+## Design System
+- **Primary**: Blue (#3b82f6)
+- **Bullish**: Green (hsl 142 76% 36%)
+- **Bearish**: Red (hsl 0 84% 60%)
+- **Fonts**: Inter (body), Plus Jakarta Sans (headings), JetBrains Mono (code)
+- **Theme**: Light and dark mode with toggle
+
+## Development Commands
+```bash
+npm run dev        # Start development server
+npm run db:push    # Push database schema (if using DB)
+```
+
+## Recent Changes
+- January 2026: Initial MVP build with full frontend and backend
+- AI pattern detection using OpenAI gpt-5.1
+- TradingView chart widget integration
+- 18+ trading patterns with educational content
+- Subscription tiers with pricing page
