@@ -69,7 +69,21 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
   const [zoom, setZoom] = useState([50]);
   const [showCrosshair, setShowCrosshair] = useState(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [scrollPosition, setScrollPosition] = useState(100); // 100 = live (rightmost), 0 = oldest
+  const [historyFrames, setHistoryFrames] = useState<HeatmapData[][][]>([]);
+  const maxHistoryFrames = 300; // Store up to 5 minutes of history at 1 frame/sec
+  const isLive = scrollPosition >= 95;
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Get the heatmap data to display based on scroll position
+  const displayHeatmap = (() => {
+    if (isLive || historyFrames.length === 0) {
+      return heatmapData;
+    }
+    // Map scroll position (0-94) to history frame index
+    const frameIndex = Math.floor((scrollPosition / 95) * historyFrames.length);
+    return historyFrames[Math.min(frameIndex, historyFrames.length - 1)] || heatmapData;
+  })();
 
   // Fetch current ticker and order book
   const { data: tickers = [] } = useQuery<any[]>({
@@ -112,6 +126,14 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
           setHeatmapData(message.data.heatmap);
           setLargeOrders(message.data.largeOrders);
           setCurrentPrice(message.data.currentPrice);
+          // Always store history frames for scrolling
+          setHistoryFrames((prev: HeatmapData[][][]) => {
+            const newFrames: HeatmapData[][][] = [...prev, message.data.heatmap];
+            if (newFrames.length > maxHistoryFrames) {
+              return newFrames.slice(-maxHistoryFrames);
+            }
+            return newFrames;
+          });
         }
       } catch (e) {
         console.error("Error parsing heatmap message:", e);
@@ -153,7 +175,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
     ctx.fillStyle = "#0d0d0d";
     ctx.fillRect(0, 0, width, height);
 
-    if (heatmapData.length === 0) {
+    if (displayHeatmap.length === 0) {
       // Draw placeholder gradient
       const gradient = ctx.createLinearGradient(0, 0, 0, height);
       gradient.addColorStop(0, "rgba(239, 68, 68, 0.1)");
@@ -164,8 +186,8 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       return;
     }
 
-    const columns = heatmapData.length;
-    const rows = heatmapData[0]?.length || 0;
+    const columns = displayHeatmap.length;
+    const rows = displayHeatmap[0]?.length || 0;
 
     if (rows === 0 || columns === 0) return;
 
@@ -174,7 +196,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
     // Find max volume for color scaling
     let maxVolume = 0;
-    for (const column of heatmapData) {
+    for (const column of displayHeatmap) {
       for (const cell of column) {
         maxVolume = Math.max(maxVolume, cell.bidVolume, cell.askVolume);
       }
@@ -211,7 +233,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
     // Draw heatmap cells
     for (let col = 0; col < columns; col++) {
       for (let row = 0; row < rows; row++) {
-        const cell = heatmapData[col][row];
+        const cell = displayHeatmap[col][row];
         const x = col * cellWidth;
         const y = (rows - row - 1) * cellHeight;
 
@@ -234,10 +256,11 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       }
     }
 
-    // Draw volume bubbles (dots) for recent trades - Bookmap style
+    // Draw volume bubbles (dots) for recent trades - Bookmap style (only show when live)
+    if (isLive) {
     for (const order of largeOrders) {
-      if (heatmapData[0]) {
-        const priceLevels = heatmapData[0].map((d) => d.priceLevel);
+      if (displayHeatmap[0]) {
+        const priceLevels = displayHeatmap[0].map((d) => d.priceLevel);
         const minPrice = Math.min(...priceLevels);
         const maxPrice = Math.max(...priceLevels);
 
@@ -265,11 +288,12 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
         }
       }
     }
+    } // end if isLive
 
     // Draw BBO (Best Bid/Offer) lines
     const displayPrice = currentPrice || tickerPrice;
-    if (displayPrice > 0 && heatmapData[0]) {
-      const priceLevels = heatmapData[0].map((d) => d.priceLevel);
+    if (displayPrice > 0 && displayHeatmap[0]) {
+      const priceLevels = displayHeatmap[0].map((d) => d.priceLevel);
       const minPrice = Math.min(...priceLevels);
       const maxPrice = Math.max(...priceLevels);
 
@@ -325,7 +349,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       ctx.lineTo(width, y);
       ctx.stroke();
     }
-  }, [heatmapData, largeOrders, currentPrice, tickerPrice, showCrosshair, mousePos]);
+  }, [displayHeatmap, largeOrders, currentPrice, tickerPrice, showCrosshair, mousePos, isLive]);
 
   // Redraw when data changes
   useEffect(() => {
@@ -426,11 +450,11 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       <div className="flex items-center justify-between gap-4 px-3 py-2 bg-[#1a1a1a] border-b border-[#333]">
         <div className="flex items-center gap-3">
           <Badge
-            variant={wsConnected ? "default" : "destructive"}
+            variant={wsConnected ? (isLive ? "default" : "secondary") : "destructive"}
             className="text-xs"
           >
             <Activity className="h-3 w-3 mr-1" />
-            {wsConnected ? "LIVE" : "Connecting..."}
+            {wsConnected ? (isLive ? "LIVE" : "HISTORY") : "Connecting..."}
           </Badge>
           <span className="text-sm font-semibold text-white">{coin}/USDC</span>
           {(currentPrice || tickerPrice) > 0 && (
@@ -474,6 +498,37 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
             <ZoomIn className="h-3 w-3 text-white/50" />
           </div>
         </div>
+      </div>
+
+      {/* Timeline scrollbar */}
+      <div className="h-6 bg-[#111] border-b border-[#333] flex items-center gap-2 px-3">
+        <span className="text-[10px] text-white/40">Timeline ({historyFrames.length} frames)</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={scrollPosition}
+          onChange={(e) => setScrollPosition(parseInt(e.target.value))}
+          className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-400"
+          data-testid="slider-timeline"
+        />
+        <span className={cn(
+          "text-[10px] min-w-[50px] text-right font-mono",
+          isLive ? "text-yellow-400" : "text-white/60"
+        )}>
+          {isLive ? "LIVE" : `${Math.round((100 - scrollPosition) / 100 * 5)}m ago`}
+        </span>
+        {!isLive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-2 text-[10px] text-yellow-400"
+            onClick={() => setScrollPosition(100)}
+            data-testid="button-go-live"
+          >
+            Go Live
+          </Button>
+        )}
       </div>
 
       {/* Main Content */}

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -83,7 +84,7 @@ export function LiveChat() {
     const q = question.toLowerCase();
     
     if (q.includes("wallet") || q.includes("connect")) {
-      return "To connect your wallet, go to the Hyperliquid page from the sidebar and click 'Connect Wallet'. We support MetaMask, WalletConnect, and other popular wallets. Need more help with wallet setup?";
+      return "To connect your wallet, go to the Connect Exchange page from the sidebar and click 'Connect Wallet'. We support MetaMask, WalletConnect, and other popular wallets. Need more help with wallet setup?";
     }
     if (q.includes("sma") || q.includes("strategy") || q.includes("21") || q.includes("200")) {
       return "The 21/200 SMA strategy is a trend-following approach. When the 21-period SMA crosses above the 200-period SMA, it signals a potential uptrend (bullish). When it crosses below, it signals a potential downtrend (bearish). Check our Learn section for detailed tutorials!";
@@ -101,25 +102,23 @@ export function LiveChat() {
     return "Thanks for your question! Our team will get back to you shortly. In the meantime, check out our Learn section for tutorials, or explore the Pattern Library to learn about trading patterns.";
   };
 
-  if (!isOpen) {
-    return (
-      <Button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 h-14 w-14 rounded-full shadow-lg z-50"
-        size="icon"
-        data-testid="button-open-chat"
-      >
-        <MessageCircle className="h-6 w-6" />
-      </Button>
-    );
-  }
-
-  return (
+  const chatContent = !isOpen ? (
+    <Button
+      onClick={() => setIsOpen(true)}
+      className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg"
+      size="icon"
+      style={{ zIndex: 9999 }}
+      data-testid="button-open-chat"
+    >
+      <MessageCircle className="h-6 w-6" />
+    </Button>
+  ) : (
     <div
       className={cn(
-        "fixed bottom-4 right-4 z-50 flex flex-col bg-background border rounded-lg shadow-xl transition-all duration-200",
+        "fixed bottom-6 right-6 flex flex-col bg-background border rounded-lg shadow-xl transition-all duration-200",
         isMinimized ? "w-72 h-14" : "w-80 sm:w-96 h-[500px]"
       )}
+      style={{ zIndex: 9999 }}
       data-testid="live-chat-widget"
     >
       <div className="flex items-center justify-between px-4 py-3 border-b bg-primary text-primary-foreground rounded-t-lg">
@@ -261,4 +260,6 @@ export function LiveChat() {
       )}
     </div>
   );
+
+  return createPortal(chatContent, document.body);
 }

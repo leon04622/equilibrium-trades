@@ -19,6 +19,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshCcw, Sparkles, Settings, Info } from "lucide-react";
 import { tradingPatterns } from "@/lib/patterns";
+import { IndicatorPanel } from "@/components/indicator-panel";
+import { TradeHistory } from "@/components/trade-history";
 import type { LivePattern, MarketCondition, PatternDefinition } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -273,12 +275,15 @@ export default function Trading() {
         {/* Order Entry Panel */}
         <div className="w-64 xl:w-72 border-l flex-col hidden xl:flex">
           <ScrollArea className="flex-1">
-            <div className="p-3">
+            <div className="p-3 space-y-3">
               <OrderEntry 
                 coin={coin} 
                 currentPrice={price} 
                 onOrderSubmit={handleOrderSubmit}
               />
+              
+              {/* Trade History */}
+              <TradeHistory coin={coin} />
             </div>
           </ScrollArea>
         </div>
@@ -287,6 +292,9 @@ export default function Trading() {
         <div className="w-72 xl:w-80 border-l flex flex-col hidden lg:flex">
           <ScrollArea className="flex-1">
             <div className="p-3 space-y-3">
+              {/* Indicator Panel */}
+              <IndicatorPanel />
+              
               {/* SMA Indicator */}
               {isLoadingMarket ? (
                 <Card>

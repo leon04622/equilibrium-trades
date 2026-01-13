@@ -9,6 +9,7 @@ import {
   CreditCard,
   TrendingUp,
   Flame,
+  Wallet,
 } from "lucide-react";
 import {
   Sidebar,
@@ -69,7 +70,12 @@ const toolsNavItems = [
 
 const accountNavItems = [
   {
-    title: "Hyperliquid",
+    title: "Portfolio",
+    url: "/portfolio",
+    icon: Wallet,
+  },
+  {
+    title: "Connect Exchange",
     url: "/hyperliquid",
     icon: TrendingUp,
   },

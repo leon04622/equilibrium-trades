@@ -37,7 +37,7 @@ export default function Hyperliquid() {
     setIsConnecting(false);
     toast({
       title: "Connected!",
-      description: "Your Hyperliquid account is now connected",
+      description: "Your exchange account is now connected to Equilibrium",
     });
   };
 
@@ -47,7 +47,7 @@ export default function Hyperliquid() {
     setApiSecret("");
     toast({
       title: "Disconnected",
-      description: "Your Hyperliquid account has been disconnected",
+      description: "Your exchange account has been disconnected from Equilibrium",
     });
   };
 
@@ -65,7 +65,7 @@ export default function Hyperliquid() {
           </Badge>
         </div>
         <p className="text-muted-foreground">
-          Connect your Hyperliquid account to trade directly from Equilibrium
+          Connect your exchange account to trade directly from the Equilibrium platform
         </p>
       </div>
 

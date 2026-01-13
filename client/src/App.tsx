@@ -18,6 +18,7 @@ import Heatmap from "@/pages/heatmap";
 import Hyperliquid from "@/pages/hyperliquid";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
+import Portfolio from "@/pages/portfolio";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/hyperliquid" component={Hyperliquid} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/settings" component={Settings} />
+      <Route path="/portfolio" component={Portfolio} />
       <Route component={NotFound} />
     </Switch>
   );
