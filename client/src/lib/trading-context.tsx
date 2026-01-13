@@ -50,6 +50,11 @@ export interface Indicator {
   color: string;
 }
 
+interface OrderResult {
+  success: boolean;
+  error?: string;
+}
+
 interface TradingContextType {
   connected: boolean;
   address: string;
@@ -58,9 +63,11 @@ interface TradingContextType {
   orders: Order[];
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
+  currentPrices: Record<string, number>;
+  isPriceReady: (coin: string) => boolean;
   connect: (address?: string) => void;
   disconnect: () => void;
-  placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => void;
+  placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => OrderResult;
   closePosition: (positionId: string) => void;
   cancelOrder: (orderId: string) => void;
   setIndicators: (indicators: Indicator[]) => void;
@@ -178,14 +185,23 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return { position: newPosition, margin };
   }, []);
 
-  const placeOrder = useCallback((orderData: Omit<Order, "id" | "status" | "createdAt">) => {
+  const placeOrder = useCallback((orderData: Omit<Order, "id" | "status" | "createdAt">): OrderResult => {
     const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const now = new Date();
     const fillPrice = orderData.price || currentPrices[orderData.coin] || 0;
+    
+    if (fillPrice <= 0) {
+      return { success: false, error: "Price not available. Please wait for market data." };
+    }
+    
     const margin = (orderData.quantity * fillPrice) / orderData.leverage;
 
+    if (margin <= 0) {
+      return { success: false, error: "Invalid order amount." };
+    }
+    
     if (margin > balance) {
-      return;
+      return { success: false, error: "Insufficient balance for this order." };
     }
 
     if (orderData.type === "market") {
@@ -223,6 +239,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         timestamp: now,
       };
       setTradeHistory(prev => [tradeRecord, ...prev]);
+      return { success: true };
     } else {
       setBalance(prev => prev - margin);
       
@@ -233,6 +250,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         createdAt: now,
       };
       setOrders(prev => [...prev, newOrder]);
+      return { success: true };
     }
   }, [balance, currentPrices]);
 
@@ -282,6 +300,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const updatePrices = useCallback((prices: Record<string, number>) => {
     setCurrentPrices(prices);
   }, []);
+
+  const isPriceReady = useCallback((coin: string): boolean => {
+    const price = currentPrices[coin];
+    return typeof price === 'number' && price > 0;
+  }, [currentPrices]);
 
   useEffect(() => {
     if (Object.keys(currentPrices).length === 0) return;
@@ -361,6 +384,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       orders,
       tradeHistory,
       indicators,
+      currentPrices,
+      isPriceReady,
       connect,
       disconnect,
       placeOrder,

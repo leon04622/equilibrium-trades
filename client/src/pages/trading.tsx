@@ -21,6 +21,7 @@ import { RefreshCcw, Sparkles, Settings, Info } from "lucide-react";
 import { tradingPatterns } from "@/lib/patterns";
 import { IndicatorPanel } from "@/components/indicator-panel";
 import { TradeHistory } from "@/components/trade-history";
+import { useTrading } from "@/lib/trading-context";
 import type { LivePattern, MarketCondition, PatternDefinition } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ export default function Trading() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [activeTab, setActiveTab] = useState<"chart" | "orderbook" | "trades">("chart");
   const { toast } = useToast();
+  const { updatePrices } = useTrading();
 
   // Build TradingView symbol from coin - use Binance as TradingView source for reliability
   const tvSymbol = `BINANCE:${coin}USDT`;
@@ -74,6 +76,18 @@ export default function Trading() {
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const priceChange = prevPrice > 0 ? price - prevPrice : 0;
   const priceChangePercent = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+
+  useEffect(() => {
+    if (tickers.length > 0) {
+      const prices: Record<string, number> = {};
+      tickers.forEach((t: any) => {
+        if (t.coin && t.markPx) {
+          prices[t.coin] = parseFloat(t.markPx);
+        }
+      });
+      updatePrices(prices);
+    }
+  }, [tickers, updatePrices]);
 
   const displayMarketCondition: MarketCondition = marketCondition || {
     symbol: `${coin}/USDC`,

@@ -83,12 +83,14 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const isValidOrder = () => {
     const qty = getQuantity();
     if (qty <= 0) return false;
+    const orderPrice = getPrice();
+    if (orderPrice <= 0) return false;
     if (orderType === "limit") {
       const p = parseFloat(price);
       if (isNaN(p) || p <= 0) return false;
     }
     const margin = calculateMargin();
-    if (margin > balance) return false;
+    if (margin <= 0 || margin > balance) return false;
     return true;
   };
 
@@ -98,24 +100,43 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       return;
     }
 
-    if (!isValidOrder()) return;
+    if (!isValidOrder()) {
+      if (getPrice() <= 0) {
+        toast({
+          title: "Price not available",
+          description: "Waiting for market data. Please try again.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
     
     const orderPrice = getPrice();
+    const qty = getQuantity();
     
-    placeOrder({
+    const result = placeOrder({
       coin,
       side,
       type: orderType,
-      quantity: getQuantity(),
+      quantity: qty,
       price: orderPrice,
       stopLoss: showSLTP && stopLoss ? parseFloat(stopLoss) : undefined,
       takeProfit: showSLTP && takeProfit ? parseFloat(takeProfit) : undefined,
       leverage: leverage[0],
     });
 
+    if (!result.success) {
+      toast({
+        title: "Order Failed",
+        description: result.error || "Unable to place order",
+        variant: "destructive",
+      });
+      return;
+    }
+
     toast({
       title: `${side === "buy" ? "Long" : "Short"} Position Opened`,
-      description: `${getQuantity()} ${coin} at $${formatPrice(orderPrice)} with ${leverage[0]}x leverage`,
+      description: `${qty} ${coin} at $${formatPrice(orderPrice)} with ${leverage[0]}x leverage`,
     });
 
     setQuantity("");
@@ -126,7 +147,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     onOrderSubmit?.({
       side,
       type: orderType,
-      quantity: getQuantity(),
+      quantity: qty,
       price: orderPrice,
       leverage: leverage[0],
     });
