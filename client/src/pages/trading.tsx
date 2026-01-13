@@ -370,7 +370,7 @@ export default function Trading() {
       </div>
 
       {/* Bottom positions panel */}
-      <PositionsPanel connected={false} />
+      <PositionsPanel />
 
       <PatternModal pattern={selectedPattern} open={modalOpen} onOpenChange={setModalOpen} />
     </div>

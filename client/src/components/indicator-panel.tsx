@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,79 +17,11 @@ import {
   BarChart3
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface Indicator {
-  id: string;
-  name: string;
-  type: "overlay" | "oscillator";
-  enabled: boolean;
-  settings: Record<string, number | string | boolean>;
-  color: string;
-}
+import { useTrading, type Indicator } from "@/lib/trading-context";
 
 interface IndicatorPanelProps {
   className?: string;
-  onIndicatorChange?: (indicators: Indicator[]) => void;
 }
-
-const defaultIndicators: Indicator[] = [
-  {
-    id: "sma21",
-    name: "SMA 21",
-    type: "overlay",
-    enabled: true,
-    settings: { period: 21 },
-    color: "#3b82f6",
-  },
-  {
-    id: "sma200",
-    name: "SMA 200",
-    type: "overlay",
-    enabled: true,
-    settings: { period: 200 },
-    color: "#f59e0b",
-  },
-  {
-    id: "ema9",
-    name: "EMA 9",
-    type: "overlay",
-    enabled: false,
-    settings: { period: 9 },
-    color: "#8b5cf6",
-  },
-  {
-    id: "rsi",
-    name: "RSI",
-    type: "oscillator",
-    enabled: false,
-    settings: { period: 14, overbought: 70, oversold: 30 },
-    color: "#ec4899",
-  },
-  {
-    id: "macd",
-    name: "MACD",
-    type: "oscillator",
-    enabled: false,
-    settings: { fast: 12, slow: 26, signal: 9 },
-    color: "#06b6d4",
-  },
-  {
-    id: "bb",
-    name: "Bollinger Bands",
-    type: "overlay",
-    enabled: false,
-    settings: { period: 20, stdDev: 2 },
-    color: "#10b981",
-  },
-  {
-    id: "vwap",
-    name: "VWAP",
-    type: "overlay",
-    enabled: false,
-    settings: {},
-    color: "#f43f5e",
-  },
-];
 
 const availableIndicators = [
   { id: "ema", name: "EMA", type: "overlay" },
@@ -104,8 +36,8 @@ const availableIndicators = [
   { id: "supertrend", name: "SuperTrend", type: "overlay" },
 ];
 
-export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelProps) {
-  const [indicators, setIndicators] = useState<Indicator[]>(defaultIndicators);
+export function IndicatorPanel({ className }: IndicatorPanelProps) {
+  const { indicators, setIndicators } = useTrading();
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedIndicator, setExpandedIndicator] = useState<string | null>(null);
 
@@ -114,13 +46,11 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
       ind.id === id ? { ...ind, enabled: !ind.enabled } : ind
     );
     setIndicators(updated);
-    onIndicatorChange?.(updated);
   };
 
   const removeIndicator = (id: string) => {
     const updated = indicators.filter(ind => ind.id !== id);
     setIndicators(updated);
-    onIndicatorChange?.(updated);
   };
 
   const updateSettings = (id: string, key: string, value: number | string) => {
@@ -128,7 +58,6 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
       ind.id === id ? { ...ind, settings: { ...ind.settings, [key]: value } } : ind
     );
     setIndicators(updated);
-    onIndicatorChange?.(updated);
   };
 
   const addIndicator = (type: string) => {
@@ -146,7 +75,6 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
     
     const updated = [...indicators, newIndicator];
     setIndicators(updated);
-    onIndicatorChange?.(updated);
     setIsExpanded(false);
   };
 
@@ -176,7 +104,6 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
       </CardHeader>
       
       <CardContent className="pt-0 px-4 pb-4">
-        {/* Add indicator dropdown */}
         {isExpanded && (
           <div className="mb-4 p-3 bg-muted/50 rounded-lg">
             <p className="text-xs text-muted-foreground mb-2">Add Indicator</p>
@@ -204,7 +131,6 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
           </div>
         )}
 
-        {/* Active indicators */}
         <div className="space-y-2">
           {indicators.map(indicator => (
             <div
@@ -229,6 +155,7 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
                   <Switch
                     checked={indicator.enabled}
                     onCheckedChange={() => toggleIndicator(indicator.id)}
+                    className="scale-75"
                     data-testid={`switch-${indicator.id}`}
                   />
                   <Button
@@ -246,29 +173,30 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
                       <ChevronDown className="h-3 w-3" />
                     )}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                    onClick={() => removeIndicator(indicator.id)}
-                    data-testid={`button-remove-${indicator.id}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
+                  {!["sma21", "sma200"].includes(indicator.id) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 hover:text-destructive"
+                      onClick={() => removeIndicator(indicator.id)}
+                      data-testid={`button-remove-${indicator.id}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  )}
                 </div>
               </div>
-
-              {/* Settings panel */}
+              
               {expandedIndicator === indicator.id && Object.keys(indicator.settings).length > 0 && (
-                <div className="px-2 pb-2 pt-1 border-t space-y-2">
+                <div className="px-3 pb-3 pt-1 border-t space-y-2">
                   {Object.entries(indicator.settings).map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between gap-2">
-                      <Label className="text-xs capitalize">{key}</Label>
+                    <div key={key} className="flex items-center gap-2">
+                      <Label className="text-[10px] capitalize w-16">{key}</Label>
                       <Input
                         type="number"
-                        value={typeof value === 'boolean' ? (value ? 1 : 0) : value}
-                        onChange={(e) => updateSettings(indicator.id, key, parseInt(e.target.value) || 0)}
-                        className="h-7 w-20 text-xs"
+                        value={value as number}
+                        onChange={(e) => updateSettings(indicator.id, key, Number(e.target.value))}
+                        className="h-7 text-xs font-mono"
                         data-testid={`input-${indicator.id}-${key}`}
                       />
                     </div>
@@ -279,13 +207,11 @@ export function IndicatorPanel({ className, onIndicatorChange }: IndicatorPanelP
           ))}
         </div>
 
-        {indicators.length === 0 && (
-          <div className="text-center py-6 text-muted-foreground">
-            <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No indicators added</p>
-            <p className="text-xs">Click "Add" to add indicators</p>
-          </div>
-        )}
+        <div className="mt-3 p-2 bg-primary/5 rounded-lg">
+          <p className="text-[10px] text-muted-foreground text-center">
+            Enabled indicators will display on the chart. Toggle switches to show/hide.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

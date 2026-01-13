@@ -8,22 +8,14 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ShieldCheck, Target, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
+import { ShieldCheck, Target, AlertTriangle, TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { useTrading } from "@/lib/trading-context";
+import { useToast } from "@/hooks/use-toast";
 
 interface OrderEntryProps {
   coin: string;
   currentPrice: number;
-  onOrderSubmit?: (order: OrderData) => void;
-}
-
-interface OrderData {
-  side: "buy" | "sell";
-  type: "market" | "limit";
-  quantity: number;
-  price?: number;
-  stopLoss?: number;
-  takeProfit?: number;
-  leverage: number;
+  onOrderSubmit?: (order: any) => void;
 }
 
 export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProps) {
@@ -35,6 +27,9 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [leverage, setLeverage] = useState([5]);
+
+  const { connected, balance, connect, placeOrder } = useTrading();
+  const { toast } = useToast();
 
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -57,6 +52,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     const qty = getQuantity();
     const orderPrice = getPrice();
     return qty * orderPrice;
+  };
+
+  const calculateMargin = () => {
+    return calculateEstimate() / leverage[0];
   };
 
   const calculatePnL = () => {
@@ -88,22 +87,49 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       const p = parseFloat(price);
       if (isNaN(p) || p <= 0) return false;
     }
+    const margin = calculateMargin();
+    if (margin > balance) return false;
     return true;
   };
 
   const handleSubmit = () => {
+    if (!connected) {
+      connect();
+      return;
+    }
+
     if (!isValidOrder()) return;
     
-    const order: OrderData = {
+    const orderPrice = getPrice();
+    
+    placeOrder({
+      coin,
       side,
       type: orderType,
       quantity: getQuantity(),
-      price: orderType === "limit" ? getPrice() : undefined,
+      price: orderPrice,
       stopLoss: showSLTP && stopLoss ? parseFloat(stopLoss) : undefined,
       takeProfit: showSLTP && takeProfit ? parseFloat(takeProfit) : undefined,
       leverage: leverage[0],
-    };
-    onOrderSubmit?.(order);
+    });
+
+    toast({
+      title: `${side === "buy" ? "Long" : "Short"} Position Opened`,
+      description: `${getQuantity()} ${coin} at $${formatPrice(orderPrice)} with ${leverage[0]}x leverage`,
+    });
+
+    setQuantity("");
+    setPrice("");
+    setStopLoss("");
+    setTakeProfit("");
+
+    onOrderSubmit?.({
+      side,
+      type: orderType,
+      quantity: getQuantity(),
+      price: orderPrice,
+      leverage: leverage[0],
+    });
   };
 
   const pnl = calculatePnL();
@@ -113,12 +139,29 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       <CardHeader className="pb-3">
         <CardTitle className="text-sm flex items-center justify-between">
           <span>Place Order</span>
-          <Badge variant="outline" className="font-mono text-xs">
-            {coin}/USDC
-          </Badge>
+          <div className="flex items-center gap-2">
+            {connected && (
+              <Badge variant="outline" className="font-mono text-xs">
+                <Wallet className="h-3 w-3 mr-1" />
+                ${balance.toFixed(2)}
+              </Badge>
+            )}
+            <Badge variant="outline" className="font-mono text-xs">
+              {coin}/USDC
+            </Badge>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {!connected && (
+          <div className="p-3 bg-primary/10 rounded-lg text-center">
+            <p className="text-xs text-muted-foreground mb-2">Connect wallet to start trading</p>
+            <Button size="sm" onClick={() => connect()} data-testid="button-connect-order">
+              Connect Wallet
+            </Button>
+          </div>
+        )}
+
         <Tabs value={side} onValueChange={(v) => setSide(v as "buy" | "sell")}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger
@@ -193,7 +236,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
                   variant="outline"
                   size="sm"
                   className="flex-1 h-6 text-[10px]"
-                  onClick={() => setQuantity((0.1 * (pct / 100)).toFixed(4))}
+                  onClick={() => {
+                    const maxQty = (balance * leverage[0]) / currentPrice;
+                    setQuantity((maxQty * (pct / 100)).toFixed(4));
+                  }}
                   data-testid={`quantity-${pct}`}
                 >
                   {pct}%
@@ -231,9 +277,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
                 TP / SL
               </Label>
             </div>
-            <span className="text-xs text-muted-foreground">
-              Est: ${formatPrice(calculateEstimate())}
-            </span>
+            <div className="text-right text-xs">
+              <div className="text-muted-foreground">Margin: ${formatPrice(calculateMargin())}</div>
+              <div className="text-muted-foreground">Est: ${formatPrice(calculateEstimate())}</div>
+            </div>
           </div>
 
           {showSLTP && (
@@ -307,15 +354,20 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         <Button
           className={cn(
             "w-full font-semibold",
-            side === "buy"
-              ? "bg-bullish hover:bg-bullish/90"
-              : "bg-bearish hover:bg-bearish/90"
+            !connected
+              ? ""
+              : side === "buy"
+                ? "bg-bullish hover:bg-bullish/90"
+                : "bg-bearish hover:bg-bearish/90"
           )}
           onClick={handleSubmit}
-          disabled={!isValidOrder()}
+          disabled={connected && !isValidOrder()}
           data-testid="button-submit-order"
         >
-          {side === "buy" ? "Buy / Long" : "Sell / Short"} {coin}
+          {!connected 
+            ? "Connect Wallet to Trade"
+            : `${side === "buy" ? "Buy / Long" : "Sell / Short"} ${coin}`
+          }
         </Button>
 
         <p className="text-[10px] text-center text-muted-foreground">

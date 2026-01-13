@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
+import { TradingProvider } from "@/lib/trading-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -48,26 +49,28 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <TooltipProvider>
-          <SidebarProvider style={style as React.CSSProperties}>
-            <div className="flex h-screen w-full overflow-hidden">
-              <AppSidebar />
-              <SidebarInset className="flex flex-col flex-1 min-w-0">
-                <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sticky top-0 z-50 bg-background">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <ThemeToggle />
-                </header>
-                <ScrollArea className="flex-1">
-                  <main className="min-h-0">
-                    <Router />
-                  </main>
-                </ScrollArea>
-              </SidebarInset>
-            </div>
-          </SidebarProvider>
-          <LiveChat />
-          <Toaster />
-        </TooltipProvider>
+        <TradingProvider>
+          <TooltipProvider>
+            <SidebarProvider style={style as React.CSSProperties}>
+              <div className="flex h-screen w-full overflow-hidden">
+                <AppSidebar />
+                <SidebarInset className="flex flex-col flex-1 min-w-0">
+                  <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sticky top-0 z-50 bg-background">
+                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <ThemeToggle />
+                  </header>
+                  <ScrollArea className="flex-1">
+                    <main className="min-h-0">
+                      <Router />
+                    </main>
+                  </ScrollArea>
+                </SidebarInset>
+              </div>
+            </SidebarProvider>
+            <LiveChat />
+            <Toaster />
+          </TooltipProvider>
+        </TradingProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
