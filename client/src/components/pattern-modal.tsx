@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { PatternDiagram } from "@/components/pattern-diagram";
 import { cn } from "@/lib/utils";
 import type { PatternDefinition } from "@shared/schema";
 
@@ -103,6 +104,16 @@ export function PatternModal({ pattern, open, onOpenChange }: PatternModalProps)
 
         <ScrollArea className="max-h-[60vh]">
           <div className="px-6 pb-6 space-y-6">
+            {/* Pattern Diagram */}
+            <div>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-2">
+                Pattern Visualization
+              </h3>
+              <PatternDiagram patternId={pattern.id} className="h-32" />
+            </div>
+
+            <Separator />
+
             <div>
               <h3 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-2">
                 Description

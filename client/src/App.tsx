@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { LiveChat } from "@/components/live-chat";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
@@ -62,6 +63,7 @@ function App() {
               </SidebarInset>
             </div>
           </SidebarProvider>
+          <LiveChat />
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>

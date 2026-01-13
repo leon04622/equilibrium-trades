@@ -7,6 +7,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PatternDiagram } from "@/components/pattern-diagram";
 import { cn } from "@/lib/utils";
 import type { PatternDefinition } from "@shared/schema";
 
@@ -125,8 +126,9 @@ export function PatternCard({ pattern, onLearnMore, compact = false }: PatternCa
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
+      <CardContent className="pt-0 space-y-3">
+        <PatternDiagram patternId={pattern.id} className="h-20" />
+        <p className="text-sm text-muted-foreground line-clamp-2">
           {pattern.description}
         </p>
         <Button 

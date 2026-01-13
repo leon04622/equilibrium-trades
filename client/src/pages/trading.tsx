@@ -8,12 +8,15 @@ import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
 import { PositionsPanel } from "@/components/positions-panel";
 import { PatternModal } from "@/components/pattern-modal";
+import { OrderEntry } from "@/components/order-entry";
+import { ChartPatternOverlay } from "@/components/chart-pattern-overlay";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import { RefreshCcw, Sparkles, Settings, Info } from "lucide-react";
 import { tradingPatterns } from "@/lib/patterns";
 import type { LivePattern, MarketCondition, PatternDefinition } from "@shared/schema";
@@ -40,9 +43,17 @@ export default function Trading() {
   const [livePatterns, setLivePatterns] = useState<LivePattern[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [activeTab, setActiveTab] = useState<"chart" | "orderbook" | "trades">("chart");
+  const { toast } = useToast();
 
   // Build TradingView symbol from coin - use Binance as TradingView source for reliability
   const tvSymbol = `BINANCE:${coin}USDT`;
+
+  const handleOrderSubmit = (order: any) => {
+    toast({
+      title: `${order.side === "buy" ? "Buy" : "Sell"} Order Submitted`,
+      description: `${order.quantity} ${coin} at ${order.type === "market" ? "market price" : `$${order.price}`}`,
+    });
+  };
 
   // Fetch market condition from API
   const { data: marketCondition, isLoading: isLoadingMarket } = useQuery<MarketCondition>({
@@ -243,13 +254,33 @@ export default function Trading() {
           </div>
 
           {/* Chart/OrderBook/Trades content */}
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 relative">
             {activeTab === "chart" && (
-              <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+              <>
+                <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+                <ChartPatternOverlay 
+                  patterns={livePatterns} 
+                  currentPrice={price} 
+                  chartHeight={400} 
+                />
+              </>
             )}
             {activeTab === "orderbook" && <OrderBook coin={coin} />}
             {activeTab === "trades" && <RecentTrades coin={coin} />}
           </div>
+        </div>
+
+        {/* Order Entry Panel */}
+        <div className="w-64 xl:w-72 border-l flex-col hidden xl:flex">
+          <ScrollArea className="flex-1">
+            <div className="p-3">
+              <OrderEntry 
+                coin={coin} 
+                currentPrice={price} 
+                onOrderSubmit={handleOrderSubmit}
+              />
+            </div>
+          </ScrollArea>
         </div>
 
         {/* Right panel - Patterns and SMA */}
