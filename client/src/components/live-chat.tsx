@@ -105,7 +105,7 @@ export function LiveChat() {
   const chatContent = !isOpen ? (
     <Button
       onClick={() => setIsOpen(true)}
-      className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg"
+      className="fixed bottom-4 right-4 h-14 w-14 rounded-full shadow-lg animate-pulse hover:animate-none"
       size="icon"
       style={{ zIndex: 9999 }}
       data-testid="button-open-chat"
@@ -115,8 +115,8 @@ export function LiveChat() {
   ) : (
     <div
       className={cn(
-        "fixed bottom-6 right-6 flex flex-col bg-background border rounded-lg shadow-xl transition-all duration-200",
-        isMinimized ? "w-72 h-14" : "w-80 sm:w-96 h-[500px]"
+        "fixed bottom-4 right-4 flex flex-col bg-background border rounded-lg shadow-xl transition-all duration-200",
+        isMinimized ? "w-72 h-14" : "w-80 sm:w-96 h-[450px] max-h-[80vh]"
       )}
       style={{ zIndex: 9999 }}
       data-testid="live-chat-widget"

@@ -272,8 +272,8 @@ export default function Trading() {
           </div>
         </div>
 
-        {/* Order Entry Panel */}
-        <div className="w-64 xl:w-72 border-l flex-col hidden xl:flex">
+        {/* Order Entry Panel - visible on md+ screens */}
+        <div className="w-64 xl:w-72 border-l flex-col hidden md:flex">
           <ScrollArea className="flex-1">
             <div className="p-3 space-y-3">
               <OrderEntry 
@@ -288,7 +288,7 @@ export default function Trading() {
           </ScrollArea>
         </div>
 
-        {/* Right panel - Patterns and SMA */}
+        {/* Right panel - Patterns and SMA - visible on lg+ screens */}
         <div className="w-72 xl:w-80 border-l flex flex-col hidden lg:flex">
           <ScrollArea className="flex-1">
             <div className="p-3 space-y-3">
