@@ -1,100 +1,173 @@
-import { Flame, Lock, TrendingUp, TrendingDown, Info } from "lucide-react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Flame, Lock, TrendingUp, TrendingDown, Info, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LiquidityHeatmap } from "@/components/liquidity-heatmap";
-import { Link } from "wouter";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+
+interface Ticker {
+  coin: string;
+  markPx: string;
+  prevDayPx: string;
+}
 
 export default function Heatmap() {
+  const [selectedCoin, setSelectedCoin] = useState("BTC");
+  const [isElite, setIsElite] = useState(true); // Demo: unlocked for testing
+
+  // Fetch available coins
+  const { data: tickers = [] } = useQuery<Ticker[]>({
+    queryKey: ["/api/hyperliquid/tickers"],
+    refetchInterval: 10000,
+  });
+
+  const currentTicker = tickers.find((t) => t.coin === selectedCoin);
+  const price = currentTicker ? parseFloat(currentTicker.markPx) : 0;
+  const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
+  const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+
+  const formatPrice = (p: number) => {
+    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    if (p >= 1) return p.toFixed(2);
+    return p.toFixed(4);
+  };
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <Flame className="h-8 w-8 text-warning" />
-          <h1 className="text-3xl font-display font-bold">Liquidity Heatmap</h1>
-          <Badge variant="outline" className="ml-2">
-            <Lock className="h-3 w-3 mr-1" />
-            Pro Feature
-          </Badge>
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b">
+        <div className="flex items-center gap-3">
+          <Flame className="h-6 w-6 text-warning" />
+          <div>
+            <h1 className="text-lg font-display font-bold flex items-center gap-2">
+              Liquidity Heatmap
+              <Badge variant="outline" className="text-[10px] bg-warning/10 text-warning border-warning/30">
+                Bookmap Style
+              </Badge>
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              Real-time order flow visualization for all assets
+            </p>
+          </div>
         </div>
-        <p className="text-muted-foreground">
-          Visualize where large orders are sitting in the order book
-        </p>
+
+        <div className="flex items-center gap-3">
+          {/* Coin Selector */}
+          <Select value={selectedCoin} onValueChange={setSelectedCoin}>
+            <SelectTrigger className="w-40" data-testid="select-heatmap-coin">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {tickers.slice(0, 20).map((ticker) => (
+                <SelectItem key={ticker.coin} value={ticker.coin}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">{ticker.coin}</span>
+                    <span className="text-muted-foreground text-xs">/USDC</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Current Price Display */}
+          {price > 0 && (
+            <div className="text-right">
+              <p className="font-mono font-semibold">${formatPrice(price)}</p>
+              <p className={cn(
+                "text-xs font-mono",
+                change >= 0 ? "text-bullish" : "text-bearish"
+              )}>
+                {change >= 0 ? "+" : ""}{change.toFixed(2)}%
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <LiquidityHeatmap currentPrice={98432} locked={true} />
+      {/* Main Content */}
+      <div className="flex-1 flex min-h-0">
+        {/* Heatmap Area */}
+        <div className="flex-1 min-h-0">
+          <LiquidityHeatmap 
+            coin={selectedCoin} 
+            locked={!isElite}
+            className="h-full"
+          />
         </div>
 
-        <div className="space-y-4">
+        {/* Info Sidebar */}
+        <div className="w-72 border-l p-4 space-y-4 overflow-y-auto hidden lg:block">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-display">What is a Liquidity Heatmap?</CardTitle>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-display">How to Read</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                A liquidity heatmap shows you where large buy and sell orders are placed 
-                in the order book. This helps you identify:
-              </p>
-              <ul className="space-y-2 text-sm">
-                <li className="flex items-start gap-2">
-                  <TrendingUp className="h-4 w-4 text-bullish mt-0.5" />
-                  <span><strong>Support levels</strong> - Large buy orders that may prevent price from falling</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <TrendingDown className="h-4 w-4 text-bearish mt-0.5" />
-                  <span><strong>Resistance levels</strong> - Large sell orders that may prevent price from rising</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Info className="h-4 w-4 text-primary mt-0.5" />
-                  <span><strong>Institutional activity</strong> - Spot where big players are positioned</span>
-                </li>
-              </ul>
+            <CardContent className="space-y-3 text-xs">
+              <div className="flex items-start gap-2">
+                <div className="h-4 w-4 rounded-sm bg-bullish/60 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">Green = Buy Orders</p>
+                  <p className="text-muted-foreground">Brighter = more volume waiting</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <div className="h-4 w-4 rounded-sm bg-bearish/60 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">Red = Sell Orders</p>
+                  <p className="text-muted-foreground">Brighter = more resistance</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <div className="h-4 w-4 rounded-full bg-warning/80 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">Current Price Line</p>
+                  <p className="text-muted-foreground">Shows where price is now</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-display">Trading Tips</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-start gap-2 text-xs">
+                <TrendingUp className="h-4 w-4 text-bullish mt-0.5" />
+                <p className="text-muted-foreground">
+                  <strong className="text-foreground">Support:</strong> Large green walls often prevent price from falling
+                </p>
+              </div>
+              <div className="flex items-start gap-2 text-xs">
+                <TrendingDown className="h-4 w-4 text-bearish mt-0.5" />
+                <p className="text-muted-foreground">
+                  <strong className="text-foreground">Resistance:</strong> Large red walls often cap upward moves
+                </p>
+              </div>
+              <div className="flex items-start gap-2 text-xs">
+                <Info className="h-4 w-4 text-primary mt-0.5" />
+                <p className="text-muted-foreground">
+                  <strong className="text-foreground">Whale Activity:</strong> Sudden large orders marked with circles may indicate institutional moves
+                </p>
+              </div>
             </CardContent>
           </Card>
 
           <Card className="bg-primary/5 border-primary/20">
-            <CardContent className="p-6">
-              <h3 className="font-semibold mb-2">Unlock Liquidity Insights</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Get access to real-time liquidity data and gain an edge in your trading.
+            <CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-2">Strategy Tip</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                When 21 SMA crosses above 200 SMA and you see a large green wall below current price, 
+                this creates a strong support zone for entry. Set your stop loss just below the wall.
               </p>
-              <Link href="/pricing">
-                <Button className="w-full" data-testid="button-upgrade-heatmap-page">
-                  Upgrade to Pro
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-display">Pro Features Include</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-3 text-sm">
-                <li className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Real-time order book visualization
-                </li>
-                <li className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Historical liquidity analysis
-                </li>
-                <li className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Large order alerts
-                </li>
-                <li className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Support/resistance auto-detection
-                </li>
-                <li className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Multiple symbol tracking
-                </li>
-              </ul>
             </CardContent>
           </Card>
         </div>
