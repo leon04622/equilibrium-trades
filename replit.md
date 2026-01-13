@@ -55,6 +55,9 @@ server/
 ├── routes.ts                 # API endpoints
 ├── storage.ts                # In-memory storage implementation
 ├── pattern-detection.ts      # AI pattern analysis using OpenAI
+├── hyperliquid.ts            # Hyperliquid API client for market data
+├── heatmap-storage.ts        # Ring buffer for order book snapshots
+├── heatmap-ws.ts             # WebSocket server for real-time heatmap
 └── replit_integrations/
     └── chat/                 # OpenAI chat integration
 
@@ -81,6 +84,16 @@ shared/
 ### Subscriptions
 - `GET /api/subscriptions` - Get all subscription tiers
 - `GET /api/subscriptions/:id` - Get single tier
+
+### Hyperliquid API
+- `GET /api/hyperliquid/coins` - Get all available coins
+- `GET /api/hyperliquid/tickers` - Get all tickers with live prices
+- `GET /api/hyperliquid/orderbook/:coin` - Get order book for a coin
+- `GET /api/hyperliquid/trades/:coin` - Get recent trades
+- `GET /api/hyperliquid/candles/:coin` - Get candle data
+
+### WebSocket
+- `ws://host/ws/heatmap` - Real-time order book heatmap data
 
 ## Trading Strategy (21/200 SMA Crossover)
 1. Watch for 21 SMA to cross 200 SMA on 1-minute chart
@@ -124,3 +137,13 @@ npm run db:push    # Push database schema (if using DB)
 - TradingView chart widget integration
 - 18+ trading patterns with educational content
 - Subscription tiers with pricing page
+- **January 2026**: Hyperliquid integration for real-time market data
+  - Live prices for 20+ crypto assets
+  - Order book visualization with depth display
+  - Recent trades with buy/sell coloring
+  - **Bookmap-style Liquidity Heatmap** (Elite feature):
+    - Canvas-based real-time visualization
+    - Order book depth over time as heatmap
+    - Large order (whale) detection
+    - Institutional level identification
+    - WebSocket streaming for real-time updates
