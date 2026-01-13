@@ -22,9 +22,10 @@ const iconMap: Record<string, LucideIcon> = {
 interface LivePatternCardProps {
   livePattern: LivePattern;
   onLearnMore?: () => void;
+  compact?: boolean;
 }
 
-export function LivePatternCard({ livePattern, onLearnMore }: LivePatternCardProps) {
+export function LivePatternCard({ livePattern, onLearnMore, compact = false }: LivePatternCardProps) {
   const { pattern, confidence, status, symbol, timeframe, entryPrice, stopLoss, takeProfit, detectedAt } = livePattern;
   const Icon = iconMap[pattern.iconName] || TrendingUp;
 
@@ -40,6 +41,51 @@ export function LivePatternCard({ livePattern, onLearnMore }: LivePatternCardPro
     bearish: "text-bearish",
     neutral: "text-warning",
   };
+
+  if (compact) {
+    return (
+      <div 
+        className={cn(
+          "p-2 rounded-md border transition-all hover-elevate cursor-pointer",
+          status === "forming" && "border-warning/30 bg-warning/5",
+          status === "confirmed" && "border-primary/30 bg-primary/5"
+        )}
+        onClick={onLearnMore}
+        data-testid={`live-pattern-${livePattern.id}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-md",
+              pattern.direction === "bullish" ? "bg-bullish/15" :
+              pattern.direction === "bearish" ? "bg-bearish/15" : "bg-warning/15"
+            )}>
+              <Icon className={cn("h-4 w-4", directionColors[pattern.direction])} />
+            </div>
+            <div>
+              <p className="font-medium text-xs">{pattern.name}</p>
+              <p className="text-[10px] text-muted-foreground">{timeframe}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className={cn(
+              "text-xs font-mono font-semibold",
+              confidence >= 80 ? "text-bullish" :
+              confidence >= 60 ? "text-warning" : "text-muted-foreground"
+            )}>
+              {confidence}%
+            </p>
+            <Badge 
+              variant="outline" 
+              className={cn("capitalize text-[8px] h-4", statusColors[status])}
+            >
+              {status}
+            </Badge>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card 

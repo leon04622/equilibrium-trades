@@ -3,6 +3,13 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat";
 import { analyzePatterns, getMarketCondition } from "./pattern-detection";
+import { 
+  getAvailableCoins, 
+  getAllTickers, 
+  getOrderBook, 
+  getRecentTrades,
+  getCandles 
+} from "./hyperliquid";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -170,6 +177,72 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating pattern status:", error);
       res.status(500).json({ error: "Failed to update pattern status" });
+    }
+  });
+
+  // ============ HYPERLIQUID API ROUTES ============
+
+  // Get available coins from Hyperliquid
+  app.get("/api/hyperliquid/coins", async (req: Request, res: Response) => {
+    try {
+      const meta = await getAvailableCoins();
+      res.json(meta.universe);
+    } catch (error) {
+      console.error("Error fetching Hyperliquid coins:", error);
+      res.status(500).json({ error: "Failed to fetch coins" });
+    }
+  });
+
+  // Get all tickers with prices
+  app.get("/api/hyperliquid/tickers", async (req: Request, res: Response) => {
+    try {
+      const tickers = await getAllTickers();
+      res.json(tickers);
+    } catch (error) {
+      console.error("Error fetching Hyperliquid tickers:", error);
+      res.status(500).json({ error: "Failed to fetch tickers" });
+    }
+  });
+
+  // Get order book for a coin
+  app.get("/api/hyperliquid/orderbook/:coin", async (req: Request, res: Response) => {
+    try {
+      const orderBook = await getOrderBook(req.params.coin);
+      if (!orderBook) {
+        return res.json({ coin: req.params.coin, levels: [[], []] });
+      }
+      res.json(orderBook);
+    } catch (error) {
+      console.error("Error fetching order book:", error);
+      res.status(502).json({ error: "Upstream API unavailable" });
+    }
+  });
+
+  // Get recent trades for a coin
+  app.get("/api/hyperliquid/trades/:coin", async (req: Request, res: Response) => {
+    try {
+      const trades = await getRecentTrades(req.params.coin);
+      res.json(trades);
+    } catch (error) {
+      console.error("Error fetching trades:", error);
+      res.status(500).json({ error: "Failed to fetch trades" });
+    }
+  });
+
+  // Get candle data for a coin
+  app.get("/api/hyperliquid/candles/:coin", async (req: Request, res: Response) => {
+    try {
+      const { interval, startTime, endTime } = req.query;
+      const candles = await getCandles(
+        req.params.coin,
+        (interval as string) || "1m",
+        startTime ? parseInt(startTime as string) : undefined,
+        endTime ? parseInt(endTime as string) : undefined
+      );
+      res.json(candles);
+    } catch (error) {
+      console.error("Error fetching candles:", error);
+      res.status(500).json({ error: "Failed to fetch candles" });
     }
   });
 
