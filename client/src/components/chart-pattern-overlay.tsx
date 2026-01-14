@@ -1,5 +1,4 @@
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { TrendingUp, TrendingDown, AlertCircle, Target, ShieldCheck } from "lucide-react";
 import type { LivePattern } from "@shared/schema";
@@ -22,14 +21,14 @@ export function ChartPatternOverlay({ patterns, currentPrice }: ChartPatternOver
 
   return (
     <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
-      {/* Pattern indicators in top-left */}
-      <div className="absolute top-4 left-4 space-y-2">
+      {/* Pattern indicators and trade levels in bottom-right corner */}
+      <div className="absolute bottom-12 right-4 space-y-2 pointer-events-auto">
         {patterns.slice(0, 2).map((pattern) => (
-          <Card
+          <div
             key={pattern.id}
-            className="pointer-events-auto bg-background/90 backdrop-blur-sm"
+            className="bg-background/90 backdrop-blur-sm border rounded-md p-2 shadow-sm"
           >
-            <div className="p-2 flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <Badge
                 variant="outline"
                 className={cn(
@@ -54,47 +53,27 @@ export function ChartPatternOverlay({ patterns, currentPrice }: ChartPatternOver
                 {pattern.confidence}%
               </span>
             </div>
-          </Card>
+            
+            {/* Trade levels inline */}
+            <div className="flex items-center gap-2 mt-1 text-[9px]">
+              {pattern.entryPrice && (
+                <span className="text-primary">E: {formatPrice(pattern.entryPrice)}</span>
+              )}
+              {pattern.takeProfit && (
+                <span className="text-bullish flex items-center gap-0.5">
+                  <Target className="h-2.5 w-2.5" />
+                  {formatPrice(pattern.takeProfit)}
+                </span>
+              )}
+              {pattern.stopLoss && (
+                <span className="text-bearish flex items-center gap-0.5">
+                  <ShieldCheck className="h-2.5 w-2.5" />
+                  {formatPrice(pattern.stopLoss)}
+                </span>
+              )}
+            </div>
+          </div>
         ))}
-      </div>
-
-      {/* Trade levels info in top-right */}
-      {patterns.length > 0 && patterns[0] && (
-        <div className="absolute top-4 right-4 space-y-1">
-          {patterns[0].takeProfit && (
-            <div className="flex items-center gap-1 bg-bullish/20 px-2 py-1 rounded text-[10px] text-bullish pointer-events-auto">
-              <Target className="h-3 w-3" />
-              <span>TP: {formatPrice(patterns[0].takeProfit)}</span>
-            </div>
-          )}
-          {patterns[0].entryPrice && (
-            <div className="flex items-center gap-1 bg-primary/20 px-2 py-1 rounded text-[10px] text-primary pointer-events-auto">
-              <span>Entry: {formatPrice(patterns[0].entryPrice)}</span>
-            </div>
-          )}
-          {patterns[0].stopLoss && (
-            <div className="flex items-center gap-1 bg-bearish/20 px-2 py-1 rounded text-[10px] text-bearish pointer-events-auto">
-              <ShieldCheck className="h-3 w-3" />
-              <span>SL: {formatPrice(patterns[0].stopLoss)}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Legend at bottom */}
-      <div className="absolute bottom-4 left-4 flex items-center gap-4 text-[10px] text-muted-foreground pointer-events-auto bg-background/80 px-2 py-1 rounded">
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-bullish" />
-          <span>Take Profit</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-bearish" />
-          <span>Stop Loss</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-0.5 bg-primary" />
-          <span>Entry</span>
-        </div>
       </div>
     </div>
   );
