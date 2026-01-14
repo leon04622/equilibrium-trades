@@ -4,16 +4,177 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown, RefreshCcw, Wallet } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown, RefreshCcw, Wallet, ShieldCheck, Target, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
+import { placeTriggerOrder } from "@/lib/hyperliquid-client";
+import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
+interface SLTPPopoverProps {
+  position: {
+    id: string;
+    coin: string;
+    side: "long" | "short";
+    size: number;
+    entryPrice: number;
+    markPrice: number;
+  };
+  onClose: () => void;
+}
+
+function SLTPPopover({ position, onClose }: SLTPPopoverProps) {
+  const [stopLoss, setStopLoss] = useState("");
+  const [takeProfit, setTakeProfit] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { signer } = useWallet();
+  const { toast } = useToast();
+
+  const isLong = position.side === "long";
+  const suggestedSL = isLong ? position.entryPrice * 0.97 : position.entryPrice * 1.03;
+  const suggestedTP = isLong ? position.entryPrice * 1.05 : position.entryPrice * 0.95;
+
+  const formatPrice = (p: number) => {
+    if (p >= 1000) return p.toFixed(2);
+    if (p >= 1) return p.toFixed(2);
+    return p.toFixed(4);
+  };
+
+  const handleSetSLTP = async (type: "sl" | "tp") => {
+    const priceStr = type === "sl" ? stopLoss : takeProfit;
+    const price = parseFloat(priceStr);
+    
+    if (!price || price <= 0) {
+      toast({
+        title: "Invalid Price",
+        description: `Please enter a valid ${type === "sl" ? "stop loss" : "take profit"} price.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!signer) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to set SL/TP.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const result = await placeTriggerOrder(signer, {
+        coin: position.coin,
+        isBuy: !isLong,
+        size: position.size,
+        triggerPrice: price,
+        isStopLoss: type === "sl",
+        reduceOnly: true,
+      });
+
+      if (result.success) {
+        toast({
+          title: `${type === "sl" ? "Stop Loss" : "Take Profit"} Set`,
+          description: `${type === "sl" ? "SL" : "TP"} order placed at $${formatPrice(price)}`,
+        });
+        if (type === "sl") setStopLoss("");
+        else setTakeProfit("");
+      } else {
+        let errorMsg = result.error || "Failed to place order";
+        if (errorMsg.includes("does not exist")) {
+          errorMsg = "Please ensure you have funds on Hyperliquid";
+        }
+        toast({
+          title: "Order Failed",
+          description: errorMsg,
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to set order",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 p-1">
+      <div className="text-sm font-medium">Set SL/TP for {position.coin}</div>
+      <div className="text-xs text-muted-foreground">
+        Entry: ${formatPrice(position.entryPrice)} | Mark: ${formatPrice(position.markPrice)}
+      </div>
+      
+      <div className="space-y-2">
+        <Label className="text-xs">Stop Loss</Label>
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            placeholder={formatPrice(suggestedSL)}
+            value={stopLoss}
+            onChange={(e) => setStopLoss(e.target.value)}
+            className="h-8 text-xs font-mono"
+          />
+          <Button 
+            size="sm" 
+            variant="destructive"
+            className="h-8 text-xs"
+            onClick={() => handleSetSLTP("sl")}
+            disabled={isSubmitting || !stopLoss}
+          >
+            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 mr-1" />}
+            Set SL
+          </Button>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Suggested: ${formatPrice(suggestedSL)} ({isLong ? "-3%" : "+3%"})
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-xs">Take Profit</Label>
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            placeholder={formatPrice(suggestedTP)}
+            value={takeProfit}
+            onChange={(e) => setTakeProfit(e.target.value)}
+            className="h-8 text-xs font-mono"
+          />
+          <Button 
+            size="sm" 
+            variant="default"
+            className="h-8 text-xs bg-green-600 hover:bg-green-700"
+            onClick={() => handleSetSLTP("tp")}
+            disabled={isSubmitting || !takeProfit}
+          >
+            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Target className="h-3 w-3 mr-1" />}
+            Set TP
+          </Button>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Suggested: ${formatPrice(suggestedTP)} ({isLong ? "+5%" : "-5%"})
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PositionsPanel() {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [activePopover, setActivePopover] = useState<string | null>(null);
   const { connected, positions, orders, tradeHistory, closePosition, cancelOrder, updatePrices, accountValue, marginUsed, balance, isLoadingAccount, refreshAccount } = useTrading();
   const { connect: walletConnect } = useWallet();
+  const { toast } = useToast();
 
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
@@ -202,6 +363,27 @@ export function PositionsPanel() {
                             </span>
                           </div>
                         </div>
+                        
+                        <Popover open={activePopover === pos.id} onOpenChange={(open) => setActivePopover(open ? pos.id : null)}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              data-testid={`button-sltp-${pos.id}`}
+                            >
+                              <Target className="h-3 w-3 mr-1" />
+                              SL/TP
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72" align="end">
+                            <SLTPPopover 
+                              position={pos} 
+                              onClose={() => setActivePopover(null)} 
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        
                         <Button
                           variant="ghost"
                           size="sm"

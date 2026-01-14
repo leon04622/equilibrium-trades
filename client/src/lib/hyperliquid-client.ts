@@ -413,6 +413,95 @@ export async function cancelAllOrders(
   }
 }
 
+export interface TriggerOrderRequest {
+  coin: string;
+  isBuy: boolean;
+  size: number;
+  triggerPrice: number;
+  orderPrice?: number;
+  isStopLoss: boolean;
+  reduceOnly?: boolean;
+}
+
+export async function placeTriggerOrder(
+  signer: JsonRpcSigner,
+  order: TriggerOrderRequest
+): Promise<OrderResponse> {
+  try {
+    const assetIndex = await getAssetIndex(order.coin);
+    if (assetIndex === null) {
+      return { success: false, error: `Unknown asset: ${order.coin}` };
+    }
+
+    const nonce = Date.now();
+    
+    const tpsl = order.isStopLoss ? "sl" : "tp";
+    const limitPrice = order.orderPrice || order.triggerPrice;
+    
+    const orderWire = {
+      a: assetIndex,
+      b: order.isBuy,
+      p: floatToWire(limitPrice),
+      s: floatToWire(order.size),
+      r: order.reduceOnly !== false,
+      t: {
+        trigger: {
+          isMarket: !order.orderPrice,
+          triggerPx: floatToWire(order.triggerPrice),
+          tpsl,
+        },
+      },
+    };
+
+    const action = {
+      type: "order",
+      orders: [orderWire],
+      grouping: "na",
+    };
+
+    const signature = await signL1Action(signer, action, nonce, null);
+
+    const payload = {
+      action,
+      nonce,
+      signature,
+      vaultAddress: null,
+    };
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+
+    if (result.status === "ok") {
+      const statuses = result.response?.data?.statuses || [];
+      const resting = statuses.find((s: any) => s.resting);
+      const error = statuses.find((s: any) => s.error);
+      
+      if (error) {
+        return { success: false, error: error.error };
+      }
+      
+      return {
+        success: true,
+        orderId: resting?.resting?.oid?.toString() || "unknown",
+        status: "open",
+      };
+    }
+
+    return { 
+      success: false, 
+      error: result.response?.data || result.error || JSON.stringify(result) 
+    };
+  } catch (error: any) {
+    console.error("Place trigger order error:", error);
+    return { success: false, error: error.message || "Failed to place trigger order" };
+  }
+}
+
 export async function setLeverage(
   signer: JsonRpcSigner,
   coin: string,
