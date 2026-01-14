@@ -44,11 +44,11 @@ interface PatternChartProps {
 
 interface CandleData {
   t: number;
-  o: number;
-  h: number;
-  l: number;
-  c: number;
-  v: number;
+  o: number | string;
+  h: number | string;
+  l: number | string;
+  c: number | string;
+  v: number | string;
 }
 
 type CandlestickSeriesType = ISeriesApi<"Candlestick">;
@@ -71,12 +71,12 @@ function PatternChartComponent({
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
   const { data: candles } = useQuery<CandleData[]>({
-    queryKey: ["/api/hyperliquid/candles", coin, interval],
+    queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}`],
     refetchInterval: 10000,
   });
 
   const { data: signals } = useQuery<PatternSignal[]>({
-    queryKey: ["/api/signals/crossover", interval],
+    queryKey: [`/api/signals/crossover?timeframes=${interval}`],
     refetchInterval: 30000,
   });
 
@@ -95,7 +95,9 @@ function PatternChartComponent({
     for (let i = period - 1; i < data.length; i++) {
       let sum = 0;
       for (let j = 0; j < period; j++) {
-        sum += data[i - j].c;
+        const rawValue = data[i - j].c;
+        const closePrice = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
+        sum = sum + closePrice;
       }
       result.push({
         time: (data[i].t / 1000) as Time,
@@ -212,10 +214,10 @@ function PatternChartComponent({
 
     const candleData = sortedCandles.map(c => ({
       time: (c.t / 1000) as Time,
-      open: c.o,
-      high: c.h,
-      low: c.l,
-      close: c.c,
+      open: typeof c.o === 'string' ? parseFloat(c.o) : c.o,
+      high: typeof c.h === 'string' ? parseFloat(c.h) : c.h,
+      low: typeof c.l === 'string' ? parseFloat(c.l) : c.l,
+      close: typeof c.c === 'string' ? parseFloat(c.c) : c.c,
     }));
 
     candleSeriesRef.current.setData(candleData);
