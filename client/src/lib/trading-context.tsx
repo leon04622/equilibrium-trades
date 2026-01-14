@@ -1,6 +1,15 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 import { useWallet } from "./wallet-context";
-import { getAccountState, getPositions, getOpenOrders, type Position as HLPosition, type OpenOrder, type AccountState } from "./hyperliquid-client";
+import { 
+  getAccountState, 
+  getPositions, 
+  getOpenOrders, 
+  closePosition as hlClosePosition,
+  placeOrder as hlPlaceOrder,
+  type Position as HLPosition, 
+  type OpenOrder, 
+  type AccountState 
+} from "./hyperliquid-client";
 
 export interface Position {
   id: string;
@@ -70,10 +79,11 @@ interface TradingContextType {
   currentPrices: Record<string, number>;
   isPriceReady: (coin: string) => boolean;
   isLoadingAccount: boolean;
+  isClosingPosition: boolean;
   connect: (address?: string) => void;
   disconnect: () => void;
-  placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => OrderResult;
-  closePosition: (positionId: string) => void;
+  placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => Promise<OrderResult>;
+  closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
   cancelOrder: (orderId: string) => void;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
@@ -183,7 +193,7 @@ function saveToStorage<T>(key: string, value: T): void {
 }
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const { address: walletAddress, isConnected: walletConnected } = useWallet();
+  const { address: walletAddress, isConnected: walletConnected, signer } = useWallet();
   
   const [balance, setBalance] = useState(0);
   const [accountValue, setAccountValue] = useState(0);
@@ -194,6 +204,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
+  const [isClosingPosition, setIsClosingPosition] = useState(false);
 
   const connected = walletConnected;
   const address = walletAddress || "";
@@ -305,7 +316,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return { position: newPosition, margin };
   }, []);
 
-  const placeOrder = useCallback((orderData: Omit<Order, "id" | "status" | "createdAt">): OrderResult => {
+  const placeOrder = useCallback(async (orderData: Omit<Order, "id" | "status" | "createdAt">): Promise<OrderResult> => {
     const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const now = new Date();
     
@@ -384,31 +395,57 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [balance, currentPrices]);
 
-  const closePosition = useCallback((positionId: string) => {
-    setPositions(prev => {
-      const position = prev.find(p => p.id === positionId);
-      if (position) {
-        const realizedPnl = position.unrealizedPnl;
-        const returnAmount = position.margin + realizedPnl;
-        const fee = Math.abs(returnAmount) * 0.001;
-        
-        setBalance(b => b + returnAmount - fee);
-
-        const tradeRecord: TradeRecord = {
-          id: `trade-${Date.now()}`,
-          coin: position.coin,
-          side: position.side === "long" ? "sell" : "buy",
-          size: position.size,
-          price: position.markPrice,
-          pnl: realizedPnl,
-          fee: fee,
-          timestamp: new Date(),
-        };
-        setTradeHistory(th => [tradeRecord, ...th]);
+  const closePosition = useCallback(async (positionId: string): Promise<{ success: boolean; error?: string }> => {
+    const position = positions.find(p => p.id === positionId);
+    if (!position) {
+      return { success: false, error: "Position not found" };
+    }
+    
+    if (!signer) {
+      return { success: false, error: "Wallet not connected" };
+    }
+    
+    setIsClosingPosition(true);
+    try {
+      // Close position on Hyperliquid by placing opposite market order with reduceOnly
+      const result = await hlClosePosition(
+        signer,
+        position.coin,
+        position.size,
+        position.side === "long"
+      );
+      
+      if (!result.success) {
+        return { success: false, error: result.error || "Failed to close position" };
       }
-      return prev.filter(p => p.id !== positionId);
-    });
-  }, []);
+      
+      // Record the trade
+      const realizedPnl = position.unrealizedPnl;
+      const fee = position.size * position.markPrice * 0.001;
+      
+      const tradeRecord: TradeRecord = {
+        id: `trade-${Date.now()}`,
+        coin: position.coin,
+        side: position.side === "long" ? "sell" : "buy",
+        size: position.size,
+        price: result.avgPrice || position.markPrice,
+        pnl: realizedPnl,
+        fee: fee,
+        timestamp: new Date(),
+      };
+      setTradeHistory(th => [tradeRecord, ...th]);
+      
+      // Refresh positions from Hyperliquid to get updated state
+      await refreshAccount();
+      
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error closing position:", error);
+      return { success: false, error: error.message || "Failed to close position" };
+    } finally {
+      setIsClosingPosition(false);
+    }
+  }, [positions, signer, refreshAccount]);
 
   const cancelOrder = useCallback((orderId: string) => {
     setOrders(prev => {
@@ -519,6 +556,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       currentPrices,
       isPriceReady,
       isLoadingAccount,
+      isClosingPosition,
       connect,
       disconnect,
       placeOrder,

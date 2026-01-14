@@ -502,6 +502,23 @@ export async function placeTriggerOrder(
   }
 }
 
+export async function closePosition(
+  signer: JsonRpcSigner,
+  coin: string,
+  size: number,
+  isLong: boolean
+): Promise<OrderResponse> {
+  // To close a position, place opposite market order with reduceOnly
+  return placeOrder(signer, {
+    coin,
+    isBuy: !isLong, // Opposite direction to close
+    size,
+    orderType: "market",
+    reduceOnly: true,
+    slippage: 0.03, // 3% slippage for market close
+  });
+}
+
 export async function setLeverage(
   signer: JsonRpcSigner,
   coin: string,
