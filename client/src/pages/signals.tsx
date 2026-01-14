@@ -27,10 +27,26 @@ export default function Signals() {
 
   const getTickerPrice = (coin: string): number => {
     const ticker = tickers.find((t: any) => t.coin === coin);
-    if (ticker) {
-      return parseFloat(ticker.markPx);
+    if (ticker && ticker.markPx) {
+      const price = parseFloat(ticker.markPx);
+      // Handle scientific notation and sanitize to reasonable precision
+      if (isNaN(price) || !isFinite(price)) return 0;
+      // Round based on price magnitude
+      if (price >= 1000) return Math.round(price * 100) / 100;
+      if (price >= 1) return Math.round(price * 100) / 100;
+      if (price >= 0.01) return Math.round(price * 10000) / 10000;
+      return Math.round(price * 100000000) / 100000000;
     }
     return 0;
+  };
+
+  const sanitizePrice = (price: number, basePrice: number): number => {
+    if (!price || !isFinite(price)) return 0;
+    // Round SL/TP to same precision as base price
+    if (basePrice >= 1000) return Math.round(price * 100) / 100;
+    if (basePrice >= 1) return Math.round(price * 100) / 100;
+    if (basePrice >= 0.01) return Math.round(price * 10000) / 10000;
+    return Math.round(price * 100000000) / 100000000;
   };
 
   const livePatterns: LivePattern[] = useMemo(() => {
@@ -50,8 +66,8 @@ export default function Signals() {
         timeframe: "1m",
         confidence: 85,
         entryPrice: btcPrice,
-        stopLoss: btcPrice * 0.995,
-        takeProfit: btcPrice * 1.015,
+        stopLoss: sanitizePrice(btcPrice * 0.995, btcPrice),
+        takeProfit: sanitizePrice(btcPrice * 1.015, btcPrice),
         status: "confirmed" as const,
         detectedAt: new Date(Date.now() - 2 * 60 * 1000),
       },
@@ -62,8 +78,8 @@ export default function Signals() {
         timeframe: "5m",
         confidence: 72,
         entryPrice: ethPrice,
-        stopLoss: ethPrice * 0.985,
-        takeProfit: ethPrice * 1.025,
+        stopLoss: sanitizePrice(ethPrice * 0.985, ethPrice),
+        takeProfit: sanitizePrice(ethPrice * 1.025, ethPrice),
         status: "forming" as const,
         detectedAt: new Date(Date.now() - 8 * 60 * 1000),
       },
@@ -74,8 +90,8 @@ export default function Signals() {
         timeframe: "1m",
         confidence: 78,
         entryPrice: solPrice,
-        stopLoss: solPrice * 0.98,
-        takeProfit: solPrice * 1.03,
+        stopLoss: sanitizePrice(solPrice * 0.98, solPrice),
+        takeProfit: sanitizePrice(solPrice * 1.03, solPrice),
         status: "forming" as const,
         detectedAt: new Date(Date.now() - 5 * 60 * 1000),
       },
@@ -86,8 +102,8 @@ export default function Signals() {
         timeframe: "1m",
         confidence: 68,
         entryPrice: dogePrice,
-        stopLoss: dogePrice * 1.02,
-        takeProfit: dogePrice * 0.95,
+        stopLoss: sanitizePrice(dogePrice * 1.02, dogePrice),
+        takeProfit: sanitizePrice(dogePrice * 0.95, dogePrice),
         status: "forming" as const,
         detectedAt: new Date(Date.now() - 12 * 60 * 1000),
       },
@@ -98,13 +114,14 @@ export default function Signals() {
         timeframe: "15m",
         confidence: 65,
         entryPrice: bnbPrice,
-        stopLoss: bnbPrice * 0.97,
-        takeProfit: bnbPrice * 1.04,
+        stopLoss: sanitizePrice(bnbPrice * 0.97, bnbPrice),
+        takeProfit: sanitizePrice(bnbPrice * 1.04, bnbPrice),
         status: "forming" as const,
         detectedAt: new Date(Date.now() - 25 * 60 * 1000),
       },
     ];
-    return patterns.filter(p => p.pattern && (p.entryPrice || 0) > 0);
+    // Show all valid patterns; price 0 means data not yet loaded
+    return patterns.filter(p => p.pattern && (p.entryPrice ?? 0) > 0);
   }, [tickers]);
 
   const confirmedSignals = livePatterns.filter(p => p.status === "confirmed");

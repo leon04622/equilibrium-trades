@@ -188,10 +188,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const placeOrder = useCallback((orderData: Omit<Order, "id" | "status" | "createdAt">): OrderResult => {
     const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const now = new Date();
-    const fillPrice = orderData.price || currentPrices[orderData.coin] || 0;
+    
+    // For market orders, ALWAYS use authoritative price from context
+    // For limit orders, use the user-specified price but validate context has data
+    const livePrice = currentPrices[orderData.coin];
+    
+    if (!livePrice || livePrice <= 0) {
+      return { success: false, error: `Price for ${orderData.coin} not available. Please wait for market data.` };
+    }
+    
+    // Market orders use live price, limit orders use specified price
+    const fillPrice = orderData.type === "market" ? livePrice : (orderData.price || livePrice);
     
     if (fillPrice <= 0) {
-      return { success: false, error: "Price not available. Please wait for market data." };
+      return { success: false, error: "Invalid price. Please try again." };
     }
     
     const margin = (orderData.quantity * fillPrice) / orderData.leverage;

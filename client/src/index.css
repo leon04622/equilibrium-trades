@@ -298,3 +298,15 @@
     inset: -1px;
   }
 }
+
+/* Hide TradingView overlay elements */
+.tradingview-widget-container iframe + div,
+.tradingview-widget-copyright,
+[class*="tv-floating-toolbar"],
+[class*="floating_toolbar"],
+[class*="chart-controls-bar"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
