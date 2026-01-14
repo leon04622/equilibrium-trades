@@ -226,10 +226,11 @@ async function signL1Action(
   const hashData = actionHash(action, vaultAddress, nonce);
   const connectionId = keccak256(hashData);
 
+  // Hyperliquid uses Arbitrum One chainId for signing
   const domain: TypedDataDomain = {
     name: "Exchange",
     version: "1",
-    chainId: 1337,
+    chainId: 42161, // Arbitrum One mainnet
     verifyingContract: "0x0000000000000000000000000000000000000000",
   };
 
