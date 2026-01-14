@@ -339,12 +339,28 @@ function PatternChartComponent({
               {activeSignal.patternType || patternName}
             </span>
             <Badge 
-              variant={activeSignal.status === "confirmed" ? "default" : "secondary"}
-              className="text-xs"
+              variant={activeSignal.status === "breakout" ? "default" : activeSignal.status === "forming" ? "secondary" : "outline"}
+              className={`text-xs ${activeSignal.status === "breakout" ? "bg-green-600" : activeSignal.status === "forming" ? "bg-yellow-600" : ""}`}
             >
-              {activeSignal.status}
+              {activeSignal.status === "breakout" ? "ENTRY NOW" : activeSignal.status === "forming" ? "WAIT" : activeSignal.status}
             </Badge>
           </div>
+          
+          {activeSignal.status === "forming" && (
+            <div className="bg-yellow-500/20 border border-yellow-500/50 rounded px-2 py-1 mb-2">
+              <p className="text-xs text-yellow-500 font-medium">
+                Pattern forming - DO NOT ENTER yet. Wait for breakout!
+              </p>
+            </div>
+          )}
+          
+          {activeSignal.status === "breakout" && (
+            <div className="bg-green-500/20 border border-green-500/50 rounded px-2 py-1 mb-2">
+              <p className="text-xs text-green-500 font-medium">
+                Breakout confirmed - Entry signal active!
+              </p>
+            </div>
+          )}
           
           <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
             {activeSignal.description}
@@ -366,7 +382,7 @@ function PatternChartComponent({
           <div className="mt-3 pt-3 border-t space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1 text-muted-foreground">
-                <Target className="h-3 w-3" /> Entry
+                <Target className="h-3 w-3" /> {activeSignal.status === "forming" ? "Entry (on breakout)" : "Entry"}
               </span>
               <span className="font-mono text-amber-500">${activeSignal.entryPrice.toFixed(2)}</span>
             </div>
@@ -387,7 +403,7 @@ function PatternChartComponent({
           <div className="mt-3 pt-2 border-t">
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Confidence</span>
-              <Badge variant={activeSignal.confidence >= 80 ? "default" : "secondary"}>
+              <Badge variant={activeSignal.confidence >= 70 ? "default" : "secondary"}>
                 {activeSignal.confidence}%
               </Badge>
             </div>
