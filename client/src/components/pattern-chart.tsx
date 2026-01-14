@@ -379,26 +379,28 @@ function PatternChartComponent({
             </div>
           </div>
 
-          <div className="mt-3 pt-3 border-t space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <Target className="h-3 w-3" /> {activeSignal.status === "forming" ? "Entry (on breakout)" : "Entry"}
-              </span>
-              <span className="font-mono text-amber-500">${activeSignal.entryPrice.toFixed(2)}</span>
+          {activeSignal.entryPrice && activeSignal.suggestedSL && activeSignal.suggestedTP && (
+            <div className="mt-3 pt-3 border-t space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Target className="h-3 w-3" /> {activeSignal.status === "forming" ? "Entry (on breakout)" : "Entry"}
+                </span>
+                <span className="font-mono text-amber-500">${activeSignal.entryPrice.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <AlertCircle className="h-3 w-3" /> Stop Loss
+                </span>
+                <span className="font-mono text-red-500">${activeSignal.suggestedSL.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Target className="h-3 w-3" /> Take Profit
+                </span>
+                <span className="font-mono text-green-500">${activeSignal.suggestedTP.toFixed(2)}</span>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <AlertCircle className="h-3 w-3" /> Stop Loss
-              </span>
-              <span className="font-mono text-red-500">${activeSignal.suggestedSL.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <Target className="h-3 w-3" /> Take Profit
-              </span>
-              <span className="font-mono text-green-500">${activeSignal.suggestedTP.toFixed(2)}</span>
-            </div>
-          </div>
+          )}
 
           <div className="mt-3 pt-2 border-t">
             <div className="flex items-center justify-between mb-1">
@@ -453,8 +455,8 @@ function PatternChartComponent({
           {smaStatus && (
             <div className={`text-xs border-t pt-2 ${isBullish ? "text-green-500" : "text-red-500"}`}>
               {isBullish 
-                ? `21 > 200 on ${interval} - Looking for bull flags...`
-                : `21 < 200 on ${interval} - Looking for bear flags...`}
+                ? `21 > 200 on ${interval} - Looking for bullish patterns...`
+                : `21 < 200 on ${interval} - Looking for bearish patterns...`}
             </div>
           )}
           {!smaStatus && (

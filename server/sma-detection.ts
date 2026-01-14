@@ -317,9 +317,15 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
     const avgLow = (lastTwoLows[0].price + lastTwoLows[1].price) / 2;
     
     if ((priceDiff / avgLow) * 100 < 1) { // Lows within 1%
-      const neckline = Math.max(...highs.filter(h => h.idx > lastTwoLows[0].idx && h.idx < lastTwoLows[1].idx).map(h => h.price)) || avgLow * 1.02;
+      // Find highs between the two lows for neckline
+      const highsBetween = highs.filter(h => h.idx > lastTwoLows[0].idx && h.idx < lastTwoLows[1].idx);
+      if (highsBetween.length === 0) return null; // No valid neckline
+      
+      const neckline = Math.max(...highsBetween.map(h => h.price));
       const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
       const patternHeight = neckline - avgLow;
+      
+      if (patternHeight <= 0) return null; // Invalid pattern
       
       let status: DetectedPattern["status"] = "forming";
       const breakoutPercent = ((currentPrice - neckline) / neckline) * 100;
@@ -346,9 +352,15 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
     const avgHigh = (lastTwoHighs[0].price + lastTwoHighs[1].price) / 2;
     
     if ((priceDiff / avgHigh) * 100 < 1) {
-      const neckline = Math.min(...lows.filter(l => l.idx > lastTwoHighs[0].idx && l.idx < lastTwoHighs[1].idx).map(l => l.price)) || avgHigh * 0.98;
+      // Find lows between the two highs for neckline
+      const lowsBetween = lows.filter(l => l.idx > lastTwoHighs[0].idx && l.idx < lastTwoHighs[1].idx);
+      if (lowsBetween.length === 0) return null; // No valid neckline
+      
+      const neckline = Math.min(...lowsBetween.map(l => l.price));
       const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
       const patternHeight = avgHigh - neckline;
+      
+      if (patternHeight <= 0) return null; // Invalid pattern
       
       let status: DetectedPattern["status"] = "forming";
       const breakoutPercent = ((neckline - currentPrice) / neckline) * 100;
