@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown, RefreshCcw, Wallet, ShieldCheck, Target, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown, RefreshCcw, Wallet, Pencil, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { placeTriggerOrder } from "@/lib/hyperliquid-client";
@@ -108,21 +108,48 @@ function SLTPPopover({ position, onClose }: SLTPPopoverProps) {
   };
 
   return (
-    <div className="space-y-3 p-1">
-      <div className="text-sm font-medium">Set SL/TP for {position.coin}</div>
+    <div className="space-y-3 p-1 min-w-[280px]">
+      <div className="text-sm font-medium text-foreground">TP/SL for {position.coin}</div>
       <div className="text-xs text-muted-foreground">
         Entry: ${formatPrice(position.entryPrice)} | Mark: ${formatPrice(position.markPrice)}
       </div>
       
       <div className="space-y-2">
-        <Label className="text-xs">Stop Loss</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Take Profit</Label>
+          <span className="text-[10px] text-muted-foreground">Suggested: ${formatPrice(suggestedTP)}</span>
+        </div>
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            placeholder={formatPrice(suggestedTP)}
+            value={takeProfit}
+            onChange={(e) => setTakeProfit(e.target.value)}
+            className="h-8 text-xs font-mono bg-background"
+          />
+          <Button 
+            size="sm" 
+            className="h-8 text-xs bg-green-600 hover:bg-green-700"
+            onClick={() => handleSetSLTP("tp")}
+            disabled={isSubmitting || !takeProfit}
+          >
+            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Set"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Stop Loss</Label>
+          <span className="text-[10px] text-muted-foreground">Suggested: ${formatPrice(suggestedSL)}</span>
+        </div>
         <div className="flex gap-2">
           <Input
             type="number"
             placeholder={formatPrice(suggestedSL)}
             value={stopLoss}
             onChange={(e) => setStopLoss(e.target.value)}
-            className="h-8 text-xs font-mono"
+            className="h-8 text-xs font-mono bg-background"
           />
           <Button 
             size="sm" 
@@ -131,38 +158,8 @@ function SLTPPopover({ position, onClose }: SLTPPopoverProps) {
             onClick={() => handleSetSLTP("sl")}
             disabled={isSubmitting || !stopLoss}
           >
-            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 mr-1" />}
-            Set SL
+            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Set"}
           </Button>
-        </div>
-        <div className="text-[10px] text-muted-foreground">
-          Suggested: ${formatPrice(suggestedSL)} ({isLong ? "-3%" : "+3%"})
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs">Take Profit</Label>
-        <div className="flex gap-2">
-          <Input
-            type="number"
-            placeholder={formatPrice(suggestedTP)}
-            value={takeProfit}
-            onChange={(e) => setTakeProfit(e.target.value)}
-            className="h-8 text-xs font-mono"
-          />
-          <Button 
-            size="sm" 
-            variant="default"
-            className="h-8 text-xs bg-green-600 hover:bg-green-700"
-            onClick={() => handleSetSLTP("tp")}
-            disabled={isSubmitting || !takeProfit}
-          >
-            {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Target className="h-3 w-3 mr-1" />}
-            Set TP
-          </Button>
-        </div>
-        <div className="text-[10px] text-muted-foreground">
-          Suggested: ${formatPrice(suggestedTP)} ({isLong ? "+5%" : "-5%"})
         </div>
       </div>
     </div>
@@ -173,7 +170,7 @@ export function PositionsPanel() {
   const [isExpanded, setIsExpanded] = useState(true);
   const [activePopover, setActivePopover] = useState<string | null>(null);
   const { connected, positions, orders, tradeHistory, closePosition, cancelOrder, updatePrices, accountValue, marginUsed, balance, isLoadingAccount, refreshAccount } = useTrading();
-  const { connect: walletConnect } = useWallet();
+  const { connect: walletConnect, signer } = useWallet();
   const { toast } = useToast();
 
   const { data: tickers = [] } = useQuery<any[]>({
@@ -209,28 +206,28 @@ export function PositionsPanel() {
 
   if (!connected) {
     return (
-      <div className="border-t bg-background">
+      <div className="border-t bg-[#0d1117]">
         <div 
-          className="flex items-center justify-between px-4 py-2 cursor-pointer hover-elevate"
+          className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-[#161b22]"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium">Positions</span>
-            <Badge variant="secondary" className="text-xs">Not Connected</Badge>
+            <span className="text-sm font-medium text-gray-300">Positions</span>
+            <Badge variant="secondary" className="text-xs bg-[#21262d] text-gray-400">Not Connected</Badge>
           </div>
-          <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400">
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
           </Button>
         </div>
         
         {isExpanded && (
           <div className="px-4 pb-4">
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-gray-500">
               <p className="text-sm">Connect your wallet to view positions</p>
               <Button 
                 variant="default" 
                 size="sm" 
-                className="mt-3" 
+                className="mt-3 bg-[#238636] hover:bg-[#2ea043]" 
                 onClick={() => walletConnect()}
                 data-testid="button-connect-wallet"
               >
@@ -245,242 +242,335 @@ export function PositionsPanel() {
   }
 
   return (
-    <div className="border-t bg-background">
+    <div className="border-t bg-[#0d1117] text-gray-300">
       <Tabs defaultValue="positions" className="w-full">
-        <div className="flex items-center justify-between px-2 border-b gap-2">
-          <TabsList className="bg-transparent h-10 p-0 gap-0">
+        <div className="flex items-center justify-between px-2 border-b border-[#21262d] gap-2">
+          <TabsList className="bg-transparent h-9 p-0 gap-0">
+            <TabsTrigger 
+              value="balances"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#58a6ff] data-[state=active]:bg-transparent data-[state=active]:text-white px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300"
+              data-testid="tab-balances"
+            >
+              Balances
+            </TabsTrigger>
             <TabsTrigger 
               value="positions" 
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#58a6ff] data-[state=active]:bg-transparent data-[state=active]:text-white px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300"
               data-testid="tab-positions"
             >
-              Positions
-              <Badge variant="secondary" className="ml-2 text-xs h-5">{positions.length}</Badge>
+              Positions ({positions.length})
             </TabsTrigger>
             <TabsTrigger 
               value="orders"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#58a6ff] data-[state=active]:bg-transparent data-[state=active]:text-white px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300"
               data-testid="tab-orders"
             >
               Open Orders
-              <Badge variant="secondary" className="ml-2 text-xs h-5">{openOrders.length}</Badge>
             </TabsTrigger>
             <TabsTrigger 
               value="history"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#58a6ff] data-[state=active]:bg-transparent data-[state=active]:text-white px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300"
               data-testid="tab-history"
             >
               Trade History
-              <Badge variant="secondary" className="ml-2 text-xs h-5">{tradeHistory.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="funding"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#58a6ff] data-[state=active]:bg-transparent data-[state=active]:text-white px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300"
+              data-testid="tab-funding"
+            >
+              Funding History
             </TabsTrigger>
           </TabsList>
           
-          <div className="flex items-center gap-4">
-            {isLoadingAccount ? (
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-16" />
-              </div>
-            ) : (
-              <div className="hidden sm:flex items-center gap-4 text-xs">
-                <div className="text-right">
-                  <span className="text-muted-foreground">Account Value</span>
-                  <p className="font-mono font-semibold text-foreground">${accountValue.toFixed(2)}</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-muted-foreground">Available</span>
-                  <p className="font-mono font-semibold text-bullish">${balance.toFixed(2)}</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-muted-foreground">Margin Used</span>
-                  <p className="font-mono font-semibold text-foreground">${marginUsed.toFixed(2)}</p>
-                </div>
-              </div>
-            )}
+          <div className="flex items-center gap-2">
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-6 w-6" 
+              className="h-6 w-6 text-gray-400 hover:text-white" 
               onClick={() => refreshAccount()}
               disabled={isLoadingAccount}
               data-testid="button-refresh-account"
             >
               <RefreshCcw className={cn("h-4 w-4", isLoadingAccount && "animate-spin")} />
             </Button>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsExpanded(!isExpanded)}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-white" onClick={() => setIsExpanded(!isExpanded)}>
               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </Button>
           </div>
         </div>
 
         {isExpanded && (
-          <ScrollArea className="h-40">
+          <div className="min-h-[80px]">
+            <TabsContent value="balances" className="m-0 p-4">
+              <div className="flex items-center gap-8 text-xs">
+                <div>
+                  <span className="text-gray-500">Account Value</span>
+                  <p className="font-mono text-white">${accountValue.toFixed(2)}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Available</span>
+                  <p className="font-mono text-green-400">${balance.toFixed(2)}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Margin Used</span>
+                  <p className="font-mono text-white">${marginUsed.toFixed(2)}</p>
+                </div>
+              </div>
+            </TabsContent>
+
             <TabsContent value="positions" className="m-0">
               {positions.length === 0 ? (
-                <div className="text-center text-sm text-muted-foreground py-4">
+                <div className="text-center text-sm text-gray-500 py-6">
                   No open positions
                 </div>
               ) : (
-                <div className="divide-y">
-                  {positions.map(pos => (
-                    <div key={pos.id} className="flex items-center justify-between px-4 py-2 hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <Badge 
-                            variant={pos.side === "long" ? "default" : "destructive"}
-                            className={cn(
-                              "text-xs",
-                              pos.side === "long" ? "bg-green-500/20 text-green-500 border-green-500/30" : "bg-red-500/20 text-red-500 border-red-500/30"
-                            )}
-                          >
-                            {pos.side.toUpperCase()} {pos.leverage}x
-                          </Badge>
-                          <span className="font-semibold">{pos.coin}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Size: {pos.size}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-4">
-                        <div className="text-right text-xs">
-                          <div className="text-muted-foreground">Entry</div>
-                          <div className="font-mono">${formatPrice(pos.entryPrice)}</div>
-                        </div>
-                        <div className="text-right text-xs">
-                          <div className="text-muted-foreground">Mark</div>
-                          <div className="font-mono">${formatPrice(pos.markPrice)}</div>
-                        </div>
-                        <div className="text-right text-xs min-w-[80px]">
-                          <div className="text-muted-foreground">PnL</div>
-                          <div className={cn(
-                            "font-mono font-medium",
-                            pos.unrealizedPnl >= 0 ? "text-green-500" : "text-red-500"
-                          )}>
-                            {formatPnl(pos.unrealizedPnl)}
-                            <span className="text-[10px] ml-1">
-                              ({pos.unrealizedPnlPercent >= 0 ? "+" : ""}{pos.unrealizedPnlPercent.toFixed(2)}%)
-                            </span>
-                          </div>
-                        </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-[#21262d]">
+                        <th className="text-left py-2 px-3 font-normal">Coin</th>
+                        <th className="text-right py-2 px-3 font-normal">Size</th>
+                        <th className="text-right py-2 px-3 font-normal">Position Value</th>
+                        <th className="text-right py-2 px-3 font-normal">Entry Price</th>
+                        <th className="text-right py-2 px-3 font-normal">Mark Price</th>
+                        <th className="text-right py-2 px-3 font-normal">PNL (ROE %)</th>
+                        <th className="text-right py-2 px-3 font-normal">Liq. Price</th>
+                        <th className="text-right py-2 px-3 font-normal">Margin</th>
+                        <th className="text-right py-2 px-3 font-normal">Funding</th>
+                        <th className="text-center py-2 px-3 font-normal">Close All</th>
+                        <th className="text-center py-2 px-3 font-normal">TP/SL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {positions.map(pos => {
+                        const positionValue = pos.size * pos.markPrice;
+                        const margin = positionValue / pos.leverage;
+                        const liqPrice = pos.side === "long" 
+                          ? pos.entryPrice * (1 - 1/pos.leverage * 0.9)
+                          : pos.entryPrice * (1 + 1/pos.leverage * 0.9);
+                        const roe = margin > 0 ? (pos.unrealizedPnl / margin) * 100 : 0;
                         
-                        <Popover open={activePopover === pos.id} onOpenChange={(open) => setActivePopover(open ? pos.id : null)}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              data-testid={`button-sltp-${pos.id}`}
-                            >
-                              <Target className="h-3 w-3 mr-1" />
-                              SL/TP
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-72" align="end">
-                            <SLTPPopover 
-                              position={pos} 
-                              onClose={() => setActivePopover(null)} 
-                            />
-                          </PopoverContent>
-                        </Popover>
-                        
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs hover:bg-red-500/20 hover:text-red-500"
-                          onClick={() => closePosition(pos.id)}
-                          data-testid={`button-close-position-${pos.id}`}
-                        >
-                          <X className="h-3 w-3 mr-1" />
-                          Close
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                        return (
+                          <tr key={pos.id} className="border-b border-[#21262d] hover:bg-[#161b22]">
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-2">
+                                <span className={cn(
+                                  "text-xs font-medium",
+                                  pos.side === "long" ? "text-green-400" : "text-red-400"
+                                )}>
+                                  {pos.coin}
+                                </span>
+                                <Badge 
+                                  variant="secondary" 
+                                  className={cn(
+                                    "text-[10px] px-1 py-0",
+                                    pos.side === "long" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                  )}
+                                >
+                                  {pos.leverage}x
+                                </Badge>
+                              </div>
+                            </td>
+                            <td className={cn(
+                              "text-right py-2 px-3 font-mono",
+                              pos.side === "long" ? "text-green-400" : "text-red-400"
+                            )}>
+                              {pos.side === "long" ? "" : "-"}{pos.size} {pos.coin}
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-300">
+                              {positionValue.toFixed(2)} USDC
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-300">
+                              {formatPrice(pos.entryPrice)}
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-300">
+                              {formatPrice(pos.markPrice)}
+                            </td>
+                            <td className={cn(
+                              "text-right py-2 px-3 font-mono",
+                              pos.unrealizedPnl >= 0 ? "text-green-400" : "text-red-400"
+                            )}>
+                              <div className="flex items-center justify-end gap-1">
+                                {formatPnl(pos.unrealizedPnl)}
+                                <span className="text-[10px]">
+                                  ({roe >= 0 ? "+" : ""}{roe.toFixed(1)}%)
+                                </span>
+                                <RefreshCcw className="h-3 w-3 text-gray-500 cursor-pointer hover:text-gray-300" onClick={() => refreshAccount()} />
+                              </div>
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-300">
+                              {formatPrice(liqPrice)}
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-300">
+                              <div className="flex items-center justify-end gap-1">
+                                ${margin.toFixed(2)}
+                                <span className="text-[10px] text-gray-500">(isolated)</span>
+                                <Pencil className="h-3 w-3 text-gray-500 cursor-pointer hover:text-gray-300" />
+                              </div>
+                            </td>
+                            <td className="text-right py-2 px-3 font-mono text-gray-400">
+                              -$0.00
+                            </td>
+                            <td className="text-center py-2 px-3">
+                              <div className="flex items-center justify-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] text-gray-400 hover:text-white hover:bg-[#21262d]"
+                                  onClick={() => {}}
+                                >
+                                  Limit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] text-gray-400 hover:text-white hover:bg-[#21262d]"
+                                  onClick={() => closePosition(pos.id)}
+                                  data-testid={`button-close-market-${pos.id}`}
+                                >
+                                  Market
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] text-gray-400 hover:text-white hover:bg-[#21262d]"
+                                  onClick={() => {}}
+                                >
+                                  Reverse
+                                </Button>
+                              </div>
+                            </td>
+                            <td className="text-center py-2 px-3">
+                              <Popover open={activePopover === pos.id} onOpenChange={(open) => setActivePopover(open ? pos.id : null)}>
+                                <PopoverTrigger asChild>
+                                  <div className="flex items-center justify-center gap-1 cursor-pointer text-gray-400 hover:text-white">
+                                    <span className="text-[10px]">-/-</span>
+                                    <Pencil className="h-3 w-3" />
+                                  </div>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto bg-[#161b22] border-[#30363d]" align="end">
+                                  <SLTPPopover 
+                                    position={pos} 
+                                    onClose={() => setActivePopover(null)} 
+                                  />
+                                </PopoverContent>
+                              </Popover>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </TabsContent>
             
             <TabsContent value="orders" className="m-0">
               {openOrders.length === 0 ? (
-                <div className="text-center text-sm text-muted-foreground py-4">
+                <div className="text-center text-sm text-gray-500 py-6">
                   No open orders
                 </div>
               ) : (
-                <div className="divide-y">
-                  {openOrders.map(order => (
-                    <div key={order.id} className="flex items-center justify-between px-4 py-2 hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <Badge variant={order.side === "buy" ? "default" : "destructive"} className="text-xs">
-                          {order.side.toUpperCase()}
-                        </Badge>
-                        <span className="font-semibold">{order.coin}</span>
-                        <span className="text-xs text-muted-foreground">{order.type}</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right text-xs">
-                          <div className="text-muted-foreground">Qty</div>
-                          <div className="font-mono">{order.quantity}</div>
-                        </div>
-                        {order.price && (
-                          <div className="text-right text-xs">
-                            <div className="text-muted-foreground">Price</div>
-                            <div className="font-mono">${formatPrice(order.price)}</div>
-                          </div>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs hover:bg-red-500/20 hover:text-red-500"
-                          onClick={() => cancelOrder(order.id)}
-                          data-testid={`button-cancel-order-${order.id}`}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-[#21262d]">
+                        <th className="text-left py-2 px-3 font-normal">Coin</th>
+                        <th className="text-left py-2 px-3 font-normal">Type</th>
+                        <th className="text-right py-2 px-3 font-normal">Side</th>
+                        <th className="text-right py-2 px-3 font-normal">Size</th>
+                        <th className="text-right py-2 px-3 font-normal">Price</th>
+                        <th className="text-center py-2 px-3 font-normal">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openOrders.map(order => (
+                        <tr key={order.id} className="border-b border-[#21262d] hover:bg-[#161b22]">
+                          <td className="py-2 px-3 font-medium text-gray-300">{order.coin}</td>
+                          <td className="py-2 px-3 text-gray-400">{order.type}</td>
+                          <td className={cn(
+                            "text-right py-2 px-3",
+                            order.side === "buy" ? "text-green-400" : "text-red-400"
+                          )}>
+                            {order.side.toUpperCase()}
+                          </td>
+                          <td className="text-right py-2 px-3 font-mono text-gray-300">{order.quantity}</td>
+                          <td className="text-right py-2 px-3 font-mono text-gray-300">
+                            {order.price ? `$${formatPrice(order.price)}` : "Market"}
+                          </td>
+                          <td className="text-center py-2 px-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                              onClick={() => cancelOrder(order.id)}
+                              data-testid={`button-cancel-order-${order.id}`}
+                            >
+                              Cancel
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </TabsContent>
             
             <TabsContent value="history" className="m-0">
               {tradeHistory.length === 0 ? (
-                <div className="text-center text-sm text-muted-foreground py-4">
+                <div className="text-center text-sm text-gray-500 py-6">
                   No trade history
                 </div>
               ) : (
-                <div className="divide-y">
-                  {tradeHistory.slice(0, 20).map(trade => (
-                    <div key={trade.id} className="flex items-center justify-between px-4 py-2 hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        {trade.side === "buy" ? (
-                          <TrendingUp className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <TrendingDown className="h-4 w-4 text-red-500" />
-                        )}
-                        <span className="font-semibold">{trade.coin}</span>
-                        <span className="text-xs text-muted-foreground">{trade.size} @ ${formatPrice(trade.price)}</span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        {trade.pnl !== undefined && (
-                          <span className={cn(
-                            "text-sm font-mono font-medium",
-                            trade.pnl >= 0 ? "text-green-500" : "text-red-500"
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-[#21262d]">
+                        <th className="text-left py-2 px-3 font-normal">Coin</th>
+                        <th className="text-right py-2 px-3 font-normal">Side</th>
+                        <th className="text-right py-2 px-3 font-normal">Size</th>
+                        <th className="text-right py-2 px-3 font-normal">Price</th>
+                        <th className="text-right py-2 px-3 font-normal">PnL</th>
+                        <th className="text-right py-2 px-3 font-normal">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tradeHistory.slice(0, 20).map(trade => (
+                        <tr key={trade.id} className="border-b border-[#21262d] hover:bg-[#161b22]">
+                          <td className="py-2 px-3 font-medium text-gray-300">{trade.coin}</td>
+                          <td className={cn(
+                            "text-right py-2 px-3",
+                            trade.side === "buy" ? "text-green-400" : "text-red-400"
                           )}>
-                            {formatPnl(trade.pnl)}
-                          </span>
-                        )}
-                        <span className="text-xs text-muted-foreground">
-                          {trade.timestamp.toLocaleTimeString()}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                            {trade.side.toUpperCase()}
+                          </td>
+                          <td className="text-right py-2 px-3 font-mono text-gray-300">{trade.size}</td>
+                          <td className="text-right py-2 px-3 font-mono text-gray-300">${formatPrice(trade.price)}</td>
+                          <td className={cn(
+                            "text-right py-2 px-3 font-mono",
+                            trade.pnl !== undefined && trade.pnl >= 0 ? "text-green-400" : "text-red-400"
+                          )}>
+                            {trade.pnl !== undefined ? formatPnl(trade.pnl) : "-"}
+                          </td>
+                          <td className="text-right py-2 px-3 text-gray-400">
+                            {trade.timestamp.toLocaleTimeString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </TabsContent>
-          </ScrollArea>
+            
+            <TabsContent value="funding" className="m-0 p-4">
+              <div className="text-center text-sm text-gray-500">
+                No funding history
+              </div>
+            </TabsContent>
+          </div>
         )}
       </Tabs>
     </div>
