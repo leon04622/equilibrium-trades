@@ -48,6 +48,20 @@ export interface CrossoverSignal {
   patternType?: string;
 }
 
+// Timeframe-specific thresholds
+function getThresholds(timeframe: string) {
+  // Lower timeframes need smaller percentage thresholds
+  const thresholds: Record<string, { minPolePercent: number; minBreakoutPercent: number; flagLookback: number; poleLookback: number }> = {
+    "1m":  { minPolePercent: 0.15, minBreakoutPercent: 0.05, flagLookback: 10, poleLookback: 30 },
+    "5m":  { minPolePercent: 0.25, minBreakoutPercent: 0.08, flagLookback: 12, poleLookback: 35 },
+    "15m": { minPolePercent: 0.4,  minBreakoutPercent: 0.10, flagLookback: 12, poleLookback: 40 },
+    "1h":  { minPolePercent: 0.6,  minBreakoutPercent: 0.15, flagLookback: 15, poleLookback: 50 },
+    "4h":  { minPolePercent: 1.0,  minBreakoutPercent: 0.20, flagLookback: 15, poleLookback: 50 },
+    "1d":  { minPolePercent: 2.0,  minBreakoutPercent: 0.30, flagLookback: 15, poleLookback: 50 },
+  };
+  return thresholds[timeframe] || thresholds["1h"];
+}
+
 // Calculate Simple Moving Average
 function calculateSMA(prices: number[], period: number): number | null {
   if (prices.length < period) return null;
@@ -75,65 +89,89 @@ export function calculateSMAFromCandles(candles: HyperliquidCandle[]): SMAValues
 }
 
 // Detect the "pole" - a strong impulse move
-function detectPole(candles: HyperliquidCandle[], isBullish: boolean): { start: number; end: number; height: number } | null {
-  if (candles.length < 30) return null;
+function detectPole(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): { start: number; end: number; height: number; startIdx: number; endIdx: number } | null {
+  const thresholds = getThresholds(timeframe);
+  const lookback = Math.min(thresholds.poleLookback, candles.length - 20);
   
-  // Look at the last 30-50 candles for a strong move
-  const recentCandles = candles.slice(-50);
-  const closePrices = recentCandles.map(c => parseFloat(c.c));
-  const highPrices = recentCandles.map(c => parseFloat(c.h));
-  const lowPrices = recentCandles.map(c => parseFloat(c.l));
+  if (candles.length < lookback + 20) return null;
   
-  // Find the swing low/high that starts the pole
-  let poleStart = 0;
-  let poleEnd = 0;
+  // Look at candles before the most recent consolidation area
+  const startIdx = candles.length - lookback - 15;
+  const endIdx = candles.length - 15; // Leave last 15 for flag detection
+  const searchCandles = candles.slice(startIdx, endIdx);
+  
+  const closePrices = searchCandles.map(c => parseFloat(c.c));
+  const highPrices = searchCandles.map(c => parseFloat(c.h));
+  const lowPrices = searchCandles.map(c => parseFloat(c.l));
   
   if (isBullish) {
-    // For bull flag, find the lowest point followed by strong up move
-    const minIndex = lowPrices.indexOf(Math.min(...lowPrices.slice(0, 30)));
-    const maxAfterMin = Math.max(...highPrices.slice(minIndex));
-    const maxIndex = minIndex + highPrices.slice(minIndex).indexOf(maxAfterMin);
+    // For bull flag: find a strong upward impulse
+    // Look for lowest point followed by highest point
+    let bestPole = null;
+    let bestHeight = 0;
     
-    const poleHeight = maxAfterMin - lowPrices[minIndex];
-    const avgPrice = closePrices.reduce((a, b) => a + b, 0) / closePrices.length;
-    const heightPercent = (poleHeight / avgPrice) * 100;
-    
-    // Pole should be at least 1% move
-    if (heightPercent >= 1 && maxIndex > minIndex) {
-      return {
-        start: lowPrices[minIndex],
-        end: maxAfterMin,
-        height: poleHeight,
-      };
+    for (let i = 0; i < closePrices.length - 5; i++) {
+      const localLow = lowPrices[i];
+      const subsequentHighs = highPrices.slice(i + 1);
+      const maxHigh = Math.max(...subsequentHighs);
+      const maxHighIdx = i + 1 + subsequentHighs.indexOf(maxHigh);
+      
+      const poleHeight = maxHigh - localLow;
+      const heightPercent = (poleHeight / localLow) * 100;
+      
+      if (heightPercent >= thresholds.minPolePercent && poleHeight > bestHeight) {
+        bestPole = {
+          start: localLow,
+          end: maxHigh,
+          height: poleHeight,
+          startIdx: startIdx + i,
+          endIdx: startIdx + maxHighIdx,
+        };
+        bestHeight = poleHeight;
+      }
     }
+    
+    return bestPole;
   } else {
-    // For bear flag, find the highest point followed by strong down move
-    const maxIndex = highPrices.indexOf(Math.max(...highPrices.slice(0, 30)));
-    const minAfterMax = Math.min(...lowPrices.slice(maxIndex));
-    const minIndex = maxIndex + lowPrices.slice(maxIndex).indexOf(minAfterMax);
+    // For bear flag: find a strong downward impulse
+    let bestPole = null;
+    let bestHeight = 0;
     
-    const poleHeight = highPrices[maxIndex] - minAfterMax;
-    const avgPrice = closePrices.reduce((a, b) => a + b, 0) / closePrices.length;
-    const heightPercent = (poleHeight / avgPrice) * 100;
-    
-    if (heightPercent >= 1 && minIndex > maxIndex) {
-      return {
-        start: highPrices[maxIndex],
-        end: minAfterMax,
-        height: poleHeight,
-      };
+    for (let i = 0; i < closePrices.length - 5; i++) {
+      const localHigh = highPrices[i];
+      const subsequentLows = lowPrices.slice(i + 1);
+      const minLow = Math.min(...subsequentLows);
+      const minLowIdx = i + 1 + subsequentLows.indexOf(minLow);
+      
+      const poleHeight = localHigh - minLow;
+      const heightPercent = (poleHeight / localHigh) * 100;
+      
+      if (heightPercent >= thresholds.minPolePercent && poleHeight > bestHeight) {
+        bestPole = {
+          start: localHigh,
+          end: minLow,
+          height: poleHeight,
+          startIdx: startIdx + i,
+          endIdx: startIdx + minLowIdx,
+        };
+        bestHeight = poleHeight;
+      }
     }
+    
+    return bestPole;
   }
-  
-  return null;
 }
 
 // Detect the "flag" - consolidation after the pole
-function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: number; height: number }, isBullish: boolean): FlagPattern | null {
-  if (candles.length < 10) return null;
+function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: number; height: number; startIdx: number; endIdx: number }, isBullish: boolean, timeframe: string): FlagPattern | null {
+  const thresholds = getThresholds(timeframe);
   
-  // Look at the most recent 5-15 candles for consolidation
-  const flagCandles = candles.slice(-15);
+  // Flag should be in the most recent candles after the pole
+  const flagStartIdx = Math.max(pole.endIdx, candles.length - thresholds.flagLookback);
+  const flagCandles = candles.slice(flagStartIdx);
+  
+  if (flagCandles.length < 3) return null;
+  
   const closePrices = flagCandles.map(c => parseFloat(c.c));
   const highPrices = flagCandles.map(c => parseFloat(c.h));
   const lowPrices = flagCandles.map(c => parseFloat(c.l));
@@ -143,80 +181,72 @@ function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: nu
   const flagRange = flagHigh - flagLow;
   const currentPrice = closePrices[closePrices.length - 1];
   
-  // Flag should be smaller than the pole (consolidation)
+  // Flag should be a consolidation (smaller range than the pole)
   const flagToPoleRatio = flagRange / pole.height;
   
-  // Flag should be 20-60% of pole height typically
-  if (flagToPoleRatio > 0.7) {
-    return null; // Flag is too large, not a consolidation
+  // Flag consolidation should be 10-70% of pole height
+  if (flagToPoleRatio > 0.75 || flagToPoleRatio < 0.05) {
+    return null;
   }
   
-  // Check if flag is forming in the right direction
   if (isBullish) {
-    // Bull flag: consolidation should be below or near pole end (pullback)
-    // Flag should show lower highs or sideways movement
-    const isConsolidating = flagHigh <= pole.end * 1.01;
-    const breakoutLevel = flagHigh;
+    // Bull flag: price should be consolidating below or near the pole high
+    // Flag should show sideways or slight downward movement (pullback)
+    const isValidFlag = flagHigh <= pole.end * 1.005 && flagLow >= pole.end * 0.95;
     
-    // Determine status
+    if (!isValidFlag) return null;
+    
+    const breakoutLevel = flagHigh;
     let status: FlagPattern["status"] = "forming";
     
     // Check if breakout is happening
-    if (currentPrice > flagHigh) {
-      const breakoutPercent = ((currentPrice - flagHigh) / flagHigh) * 100;
-      if (breakoutPercent > 0.2) {
-        status = "breakout_confirmed";
-      } else {
-        status = "breakout_pending";
-      }
+    const breakoutPercent = ((currentPrice - flagHigh) / flagHigh) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    } else if (currentPrice > flagHigh) {
+      status = "breakout_pending";
     }
     
-    if (isConsolidating) {
-      return {
-        type: "bull_flag",
-        status,
-        poleStart: pole.start,
-        poleEnd: pole.end,
-        poleHeight: pole.height,
-        flagHigh,
-        flagLow,
-        breakoutLevel,
-        currentPrice,
-      };
-    }
+    return {
+      type: "bull_flag",
+      status,
+      poleStart: pole.start,
+      poleEnd: pole.end,
+      poleHeight: pole.height,
+      flagHigh,
+      flagLow,
+      breakoutLevel,
+      currentPrice,
+    };
   } else {
-    // Bear flag: consolidation should be above or near pole end (pullback up)
-    const isConsolidating = flagLow >= pole.end * 0.99;
-    const breakoutLevel = flagLow;
+    // Bear flag: price should be consolidating above or near the pole low
+    const isValidFlag = flagLow >= pole.end * 0.995 && flagHigh <= pole.end * 1.05;
     
+    if (!isValidFlag) return null;
+    
+    const breakoutLevel = flagLow;
     let status: FlagPattern["status"] = "forming";
     
     // Check if breakout is happening (break below)
-    if (currentPrice < flagLow) {
-      const breakoutPercent = ((flagLow - currentPrice) / flagLow) * 100;
-      if (breakoutPercent > 0.2) {
-        status = "breakout_confirmed";
-      } else {
-        status = "breakout_pending";
-      }
+    const breakoutPercent = ((flagLow - currentPrice) / flagLow) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    } else if (currentPrice < flagLow) {
+      status = "breakout_pending";
     }
     
-    if (isConsolidating) {
-      return {
-        type: "bear_flag",
-        status,
-        poleStart: pole.start,
-        poleEnd: pole.end,
-        poleHeight: pole.height,
-        flagHigh,
-        flagLow,
-        breakoutLevel,
-        currentPrice,
-      };
-    }
+    return {
+      type: "bear_flag",
+      status,
+      poleStart: pole.start,
+      poleEnd: pole.end,
+      poleHeight: pole.height,
+      flagHigh,
+      flagLow,
+      breakoutLevel,
+      currentPrice,
+    };
   }
-  
-  return null;
 }
 
 // Detect crossovers by comparing current and previous SMA positions
@@ -229,12 +259,10 @@ export function detectCrossover(
   const currentDiff = currentSMA.sma21 - currentSMA.sma200;
   const previousDiff = previousSMA.sma21 - previousSMA.sma200;
   
-  // Bullish crossover: 21 SMA was below 200 SMA, now above
   if (previousDiff < 0 && currentDiff >= 0) {
     return "bullish_crossover";
   }
   
-  // Bearish crossover: 21 SMA was above 200 SMA, now below
   if (previousDiff > 0 && currentDiff <= 0) {
     return "bearish_crossover";
   }
@@ -264,7 +292,7 @@ export async function analyzeCoinForSignals(
     };
     
     const minutes = candleMinutes[timeframe] || 1;
-    const requiredCandles = 300; // Need more candles for pattern detection
+    const requiredCandles = 350; // Need plenty of candles for pattern detection
     const durationMs = requiredCandles * minutes * 60 * 1000;
     
     const endTime = Date.now();
@@ -289,10 +317,10 @@ export async function analyzeCoinForSignals(
     const crossover = detectCrossover(currentSMA, previousSMA);
     
     // Detect pole (impulse move)
-    const pole = detectPole(candles, isBullish);
+    const pole = detectPole(candles, isBullish, timeframe);
     
     // Detect flag pattern (consolidation + breakout status)
-    const flag = pole ? detectFlag(candles, pole, isBullish) : null;
+    const flag = pole ? detectFlag(candles, pole, isBullish, timeframe) : null;
     
     // Build signal based on what we found
     let signalType: CrossoverSignal["type"];
@@ -330,35 +358,35 @@ export async function analyzeCoinForSignals(
       confidence = 80;
       
       if (isBullish) {
-        description = `BULL FLAG BREAKOUT on ${timeframe}! Flag formed and price broke above ${flag.flagHigh.toFixed(2)}. Entry confirmed with stop below flag low.`;
-        suggestedSL = flag.flagLow * 0.995;
-        suggestedTP = flag.breakoutLevel + (flag.poleHeight * 0.8); // Target is pole height projection
+        description = `BULL FLAG BREAKOUT on ${timeframe}! Flag formed and price broke above ${flag.flagHigh.toFixed(2)}. ENTER NOW with stop below flag low.`;
+        suggestedSL = flag.flagLow * 0.998;
+        suggestedTP = flag.breakoutLevel + (flag.poleHeight * 0.75);
         entryPrice = currentSMA.price;
-        patternType = "Bull Flag Breakout";
+        patternType = "Bull Flag Breakout - ENTRY NOW";
       } else {
-        description = `BEAR FLAG BREAKOUT on ${timeframe}! Flag formed and price broke below ${flag.flagLow.toFixed(2)}. Entry confirmed with stop above flag high.`;
-        suggestedSL = flag.flagHigh * 1.005;
-        suggestedTP = flag.breakoutLevel - (flag.poleHeight * 0.8);
+        description = `BEAR FLAG BREAKOUT on ${timeframe}! Flag formed and price broke below ${flag.flagLow.toFixed(2)}. ENTER NOW with stop above flag high.`;
+        suggestedSL = flag.flagHigh * 1.002;
+        suggestedTP = flag.breakoutLevel - (flag.poleHeight * 0.75);
         entryPrice = currentSMA.price;
-        patternType = "Bear Flag Breakout";
+        patternType = "Bear Flag Breakout - ENTRY NOW";
       }
     }
     // Priority 3: Flag pattern forming but NOT broken out - DO NOT ENTER YET
     else if (flag && (flag.status === "forming" || flag.status === "breakout_pending")) {
       signalType = isBullish ? "bullish_setup" : "bearish_setup";
       status = "forming";
-      confidence = 50; // Lower confidence because we're waiting
+      confidence = 55;
       
       if (isBullish) {
-        description = `Bull flag FORMING on ${timeframe}. Consolidating between ${flag.flagLow.toFixed(2)}-${flag.flagHigh.toFixed(2)}. WAIT for breakout above ${flag.flagHigh.toFixed(2)} before entry!`;
-        suggestedSL = flag.flagLow * 0.995;
-        suggestedTP = flag.flagHigh + (flag.poleHeight * 0.8);
-        entryPrice = flag.breakoutLevel; // Entry would be at breakout level
+        description = `Bull flag FORMING on ${timeframe}. Consolidating between $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout above $${flag.flagHigh.toFixed(2)} before entry!`;
+        suggestedSL = flag.flagLow * 0.998;
+        suggestedTP = flag.flagHigh + (flag.poleHeight * 0.75);
+        entryPrice = flag.breakoutLevel;
         patternType = "Bull Flag Forming - WAIT";
       } else {
-        description = `Bear flag FORMING on ${timeframe}. Consolidating between ${flag.flagLow.toFixed(2)}-${flag.flagHigh.toFixed(2)}. WAIT for breakout below ${flag.flagLow.toFixed(2)} before entry!`;
-        suggestedSL = flag.flagHigh * 1.005;
-        suggestedTP = flag.flagLow - (flag.poleHeight * 0.8);
+        description = `Bear flag FORMING on ${timeframe}. Consolidating between $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout below $${flag.flagLow.toFixed(2)} before entry!`;
+        suggestedSL = flag.flagHigh * 1.002;
+        suggestedTP = flag.flagLow - (flag.poleHeight * 0.75);
         entryPrice = flag.breakoutLevel;
         patternType = "Bear Flag Forming - WAIT";
       }
@@ -405,7 +433,7 @@ export async function scanForSignals(
         if (signal) {
           signals.push(signal);
         }
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
         console.error(`Error scanning ${coin} ${timeframe}:`, error);
       }
@@ -414,10 +442,8 @@ export async function scanForSignals(
   
   // Sort: breakouts first, then by confidence
   signals.sort((a, b) => {
-    // Breakout signals first
     if (a.status === "breakout" && b.status !== "breakout") return -1;
     if (b.status === "breakout" && a.status !== "breakout") return 1;
-    // Then by confidence
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
     return b.detectedAt.getTime() - a.detectedAt.getTime();
   });
