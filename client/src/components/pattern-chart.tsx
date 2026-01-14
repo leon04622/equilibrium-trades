@@ -1,16 +1,13 @@
-import { useEffect, useRef, useState, memo } from "react";
+import { useEffect, useRef, useState, memo, useCallback } from "react";
 import { 
   createChart, 
   ColorType,
   CrosshairMode,
   CandlestickSeries,
   LineSeries,
-  createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
-  type SeriesMarker,
   type Time,
-  type ISeriesMarkersPluginApi,
 } from "lightweight-charts";
 import { useTheme } from "@/lib/theme";
 import { useQuery } from "@tanstack/react-query";
@@ -34,6 +31,13 @@ interface PatternSignal {
   detectedAt: string;
   description: string;
   patternType?: string;
+}
+
+interface SMAStatus {
+  coin: string;
+  sma21: number;
+  sma200: number;
+  isBullish: boolean;
 }
 
 interface PatternChartProps {
@@ -64,9 +68,11 @@ function PatternChartComponent({
   const candleSeriesRef = useRef<CandlestickSeriesType | null>(null);
   const sma21SeriesRef = useRef<LineSeriesType | null>(null);
   const sma200SeriesRef = useRef<LineSeriesType | null>(null);
-  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const priceLineRefs = useRef<any[]>([]);
+  const isInitialLoadRef = useRef(true);
   const { theme } = useTheme();
   const [activeSignal, setActiveSignal] = useState<PatternSignal | null>(null);
+  const [is5mBullish, setIs5mBullish] = useState<boolean>(false);
 
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
@@ -75,29 +81,42 @@ function PatternChartComponent({
     refetchInterval: 10000,
   });
 
+  const { data: sma5mStatus } = useQuery<SMAStatus>({
+    queryKey: [`/api/signals/sma-status/${coin}?timeframe=5m`],
+    refetchInterval: 30000,
+  });
+
   const { data: signals } = useQuery<PatternSignal[]>({
     queryKey: [`/api/signals/crossover?timeframes=${interval}`],
     refetchInterval: 30000,
   });
 
+  useEffect(() => {
+    if (sma5mStatus) {
+      setIs5mBullish(sma5mStatus.isBullish);
+    }
+  }, [sma5mStatus]);
+
   const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
 
   useEffect(() => {
-    if (currentSignal) {
+    if (currentSignal && is5mBullish) {
       setActiveSignal(currentSignal);
     } else {
       setActiveSignal(null);
     }
-  }, [currentSignal]);
+  }, [currentSignal, is5mBullish]);
+
+  const parsePrice = useCallback((val: number | string): number => {
+    return typeof val === 'string' ? parseFloat(val) : val;
+  }, []);
 
   function calculateSMA(data: CandleData[], period: number): { time: Time; value: number }[] {
     const result: { time: Time; value: number }[] = [];
     for (let i = period - 1; i < data.length; i++) {
       let sum = 0;
       for (let j = 0; j < period; j++) {
-        const rawValue = data[i - j].c;
-        const closePrice = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
-        sum = sum + closePrice;
+        sum = sum + parsePrice(data[i - j].c);
       }
       result.push({
         time: (data[i].t / 1000) as Time,
@@ -105,33 +124,6 @@ function PatternChartComponent({
       });
     }
     return result;
-  }
-
-  function findCrossoverPoints(
-    sma21Data: { time: Time; value: number }[], 
-    sma200Data: { time: Time; value: number }[]
-  ): { time: Time; price: number; type: "bullish" | "bearish" }[] {
-    const crossovers: { time: Time; price: number; type: "bullish" | "bearish" }[] = [];
-    
-    const sma200Map = new Map(sma200Data.map(d => [d.time, d.value]));
-    
-    for (let i = 1; i < sma21Data.length; i++) {
-      const curr21 = sma21Data[i].value;
-      const prev21 = sma21Data[i - 1].value;
-      const curr200 = sma200Map.get(sma21Data[i].time);
-      const prev200 = sma200Map.get(sma21Data[i - 1].time);
-      
-      if (curr21 === undefined || prev21 === undefined || curr200 === undefined || prev200 === undefined) continue;
-      
-      if (prev21 <= prev200 && curr21 > curr200) {
-        crossovers.push({ time: sma21Data[i].time, price: curr21, type: "bullish" });
-      }
-      if (prev21 >= prev200 && curr21 < curr200) {
-        crossovers.push({ time: sma21Data[i].time, price: curr21, type: "bearish" });
-      }
-    }
-    
-    return crossovers;
   }
 
   useEffect(() => {
@@ -153,10 +145,24 @@ function PatternChartComponent({
       },
       rightPriceScale: {
         borderColor: isDark ? "#30363d" : "#d0d7de",
+        autoScale: true,
       },
       timeScale: {
         borderColor: isDark ? "#30363d" : "#d0d7de",
         timeVisible: true,
+        rightOffset: 5,
+        barSpacing: 8,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: true,
       },
     });
 
@@ -186,7 +192,7 @@ function PatternChartComponent({
     });
     sma200SeriesRef.current = sma200Series;
 
-    markersPluginRef.current = createSeriesMarkers(candleSeries, []);
+    isInitialLoadRef.current = true;
 
     const handleResize = () => {
       if (containerRef.current) {
@@ -202,7 +208,6 @@ function PatternChartComponent({
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      markersPluginRef.current = null;
       chart.remove();
     };
   }, [theme]);
@@ -214,10 +219,10 @@ function PatternChartComponent({
 
     const candleData = sortedCandles.map(c => ({
       time: (c.t / 1000) as Time,
-      open: typeof c.o === 'string' ? parseFloat(c.o) : c.o,
-      high: typeof c.h === 'string' ? parseFloat(c.h) : c.h,
-      low: typeof c.l === 'string' ? parseFloat(c.l) : c.l,
-      close: typeof c.c === 'string' ? parseFloat(c.c) : c.c,
+      open: parsePrice(c.o),
+      high: parsePrice(c.h),
+      low: parsePrice(c.l),
+      close: parsePrice(c.c),
     }));
 
     candleSeriesRef.current.setData(candleData);
@@ -230,70 +235,64 @@ function PatternChartComponent({
     if (sortedCandles.length >= 200) {
       const sma200Data = calculateSMA(sortedCandles, 200);
       sma200SeriesRef.current.setData(sma200Data);
-
-      const sma21Data = calculateSMA(sortedCandles, 21);
-      const crossovers = findCrossoverPoints(sma21Data, sma200Data);
-      
-      if (markersPluginRef.current) {
-        if (crossovers.length > 0) {
-          const markers: SeriesMarker<Time>[] = crossovers.map(c => ({
-            time: c.time,
-            position: c.type === "bullish" ? "belowBar" as const : "aboveBar" as const,
-            color: c.type === "bullish" ? "#22c55e" : "#ef4444",
-            shape: "circle" as const,
-            text: c.type === "bullish" ? "21 crossed above 200" : "21 crossed below 200",
-            size: 2,
-          }));
-          markersPluginRef.current.setMarkers(markers);
-        } else {
-          markersPluginRef.current.setMarkers([]);
-        }
-      }
     }
 
-    if (chartRef.current) {
+    if (chartRef.current && isInitialLoadRef.current) {
       chartRef.current.timeScale().fitContent();
+      isInitialLoadRef.current = false;
     }
-  }, [candles]);
+  }, [candles, parsePrice]);
 
   useEffect(() => {
-    if (!candleSeriesRef.current || !activeSignal) return;
+    if (!candleSeriesRef.current) return;
 
     const series = candleSeriesRef.current;
+    
+    priceLineRefs.current.forEach(line => {
+      try {
+        series.removePriceLine(line);
+      } catch (e) {}
+    });
+    priceLineRefs.current = [];
 
-    if (activeSignal.suggestedSL) {
-      series.createPriceLine({
-        price: activeSignal.suggestedSL,
-        color: "#ef4444",
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "SL",
-      });
-    }
-
-    if (activeSignal.suggestedTP) {
-      series.createPriceLine({
-        price: activeSignal.suggestedTP,
-        color: "#22c55e",
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "TP",
-      });
-    }
+    if (!activeSignal) return;
 
     if (activeSignal.entryPrice) {
-      series.createPriceLine({
+      const entryLine = series.createPriceLine({
         price: activeSignal.entryPrice,
         color: "#f59e0b",
-        lineWidth: 1,
-        lineStyle: 2,
+        lineWidth: 2,
+        lineStyle: 0,
         axisLabelVisible: true,
         title: "Entry",
       });
+      priceLineRefs.current.push(entryLine);
     }
-  }, [activeSignal?.id]);
+
+    if (activeSignal.suggestedSL) {
+      const slLine = series.createPriceLine({
+        price: activeSignal.suggestedSL,
+        color: "#ef4444",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: "SL",
+      });
+      priceLineRefs.current.push(slLine);
+    }
+
+    if (activeSignal.suggestedTP) {
+      const tpLine = series.createPriceLine({
+        price: activeSignal.suggestedTP,
+        color: "#22c55e",
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: "TP",
+      });
+      priceLineRefs.current.push(tpLine);
+    }
+  }, [activeSignal]);
 
   const isBullish = activeSignal?.type.includes("bullish");
 
@@ -305,7 +304,7 @@ function PatternChartComponent({
         data-testid="pattern-chart"
       />
       
-      {activeSignal && (
+      {activeSignal && is5mBullish && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg max-w-xs z-10">
           <div className="flex items-center gap-2 mb-2">
             {isBullish ? (
@@ -314,7 +313,7 @@ function PatternChartComponent({
               <TrendingDown className="h-5 w-5 text-red-500" />
             )}
             <span className="font-semibold text-sm">
-              {activeSignal.patternType || activeSignal.type.replace("_", " ").toUpperCase()}
+              {activeSignal.patternType || "Potential Bull Flag"}
             </span>
             <Badge 
               variant={activeSignal.status === "confirmed" ? "default" : "secondary"}
@@ -374,17 +373,27 @@ function PatternChartComponent({
       )}
 
       {!activeSignal && (
-        <div className="absolute top-4 left-4 p-3 bg-background/80 backdrop-blur-sm rounded-lg border text-sm text-muted-foreground">
+        <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-3 h-0.5 bg-orange-500" />
-            <span>21 SMA</span>
+            <span className="text-sm">21 SMA</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-3">
             <div className="w-3 h-0.5 bg-blue-500" />
-            <span>200 SMA</span>
+            <span className="text-sm">200 SMA</span>
           </div>
-          <p className="mt-2 text-xs">Waiting for pattern...</p>
-        </div>
+          
+          {!is5mBullish && (
+            <div className="text-xs text-amber-500 border-t pt-2">
+              Waiting for 21 SMA to cross above 200 SMA on 5m...
+            </div>
+          )}
+          {is5mBullish && (
+            <div className="text-xs text-green-500 border-t pt-2">
+              5m bullish - watching for pattern...
+            </div>
+          )}
+        </Card>
       )}
     </div>
   );
