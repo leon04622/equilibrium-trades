@@ -99,14 +99,18 @@ function PatternChartComponent({
   }
 
   useEffect(() => {
-    if (!candles || candles.length < 200) {
+    if (!candles || candles.length < 21) {
       setSmaStatus(null);
       return;
     }
 
     const sortedCandles = [...candles].sort((a, b) => a.t - b.t);
     const sma21Data = calculateSMA(sortedCandles, 21);
-    const sma200Data = calculateSMA(sortedCandles, 200);
+    
+    const availableFor200 = Math.min(sortedCandles.length, 200);
+    const sma200Data = sortedCandles.length >= availableFor200 
+      ? calculateSMA(sortedCandles, availableFor200)
+      : [];
 
     if (sma21Data.length > 0 && sma200Data.length > 0) {
       const latestSma21 = sma21Data[sma21Data.length - 1].value;
@@ -115,6 +119,13 @@ function PatternChartComponent({
         sma21: latestSma21,
         sma200: latestSma200,
         isBullish: latestSma21 > latestSma200,
+      });
+    } else if (sma21Data.length > 0) {
+      const latestSma21 = sma21Data[sma21Data.length - 1].value;
+      setSmaStatus({
+        sma21: latestSma21,
+        sma200: 0,
+        isBullish: true,
       });
     }
   }, [candles, parsePrice]);
@@ -243,6 +254,9 @@ function PatternChartComponent({
     if (sortedCandles.length >= 200) {
       const sma200Data = calculateSMA(sortedCandles, 200);
       sma200SeriesRef.current.setData(sma200Data);
+    } else if (sortedCandles.length >= 50) {
+      const sma200Data = calculateSMA(sortedCandles, sortedCandles.length);
+      sma200SeriesRef.current.setData(sma200Data);
     }
 
     if (chartRef.current && isInitialLoadRef.current) {
@@ -302,8 +316,8 @@ function PatternChartComponent({
     }
   }, [activeSignal]);
 
-  const isBullish = smaStatus?.isBullish ?? false;
-  const patternName = isBullish ? "Bull Flag" : "Bear Flag";
+  const isBullish = smaStatus?.isBullish ?? true;
+  const patternName = isBullish ? "Potential Bull Flag" : "Potential Bear Flag";
 
   return (
     <div className={`relative ${className}`}>
@@ -381,56 +395,39 @@ function PatternChartComponent({
         </Card>
       )}
 
-      {!activeSignal && smaStatus && (
-        <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
-          <div className="flex items-center gap-2 mb-2">
-            {isBullish ? (
-              <TrendingUp className="h-4 w-4 text-green-500" />
-            ) : (
-              <TrendingDown className="h-4 w-4 text-red-500" />
-            )}
-            <span className="text-sm font-medium">
-              {isBullish ? "Bullish Bias" : "Bearish Bias"}
-            </span>
-            <Badge variant={isBullish ? "default" : "destructive"} className="text-xs">
-              {interval}
-            </Badge>
-          </div>
-          
-          <div className="space-y-1 text-xs mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-0.5 bg-orange-500" />
-              <span className="text-muted-foreground">21 SMA:</span>
-              <span className="font-mono">${smaStatus.sma21.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-0.5 bg-blue-500" />
-              <span className="text-muted-foreground">200 SMA:</span>
-              <span className="font-mono">${smaStatus.sma200.toFixed(2)}</span>
-            </div>
-          </div>
-          
-          <div className={`text-xs border-t pt-2 ${isBullish ? "text-green-500" : "text-red-500"}`}>
-            {isBullish 
-              ? "21 > 200 - Looking for bull flags..." 
-              : "21 < 200 - Looking for bear flags..."}
-          </div>
-        </Card>
-      )}
-
-      {!activeSignal && !smaStatus && (
+      {!activeSignal && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-3 h-0.5 bg-orange-500" />
             <span className="text-sm">21 SMA</span>
+            {smaStatus && (
+              <span className="font-mono text-xs text-muted-foreground">
+                ${smaStatus.sma21.toFixed(2)}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-3 h-0.5 bg-blue-500" />
             <span className="text-sm">200 SMA</span>
+            {smaStatus && smaStatus.sma200 > 0 && (
+              <span className="font-mono text-xs text-muted-foreground">
+                ${smaStatus.sma200.toFixed(2)}
+              </span>
+            )}
           </div>
-          <div className="text-xs text-muted-foreground border-t pt-2">
-            Loading SMA data...
-          </div>
+          
+          {smaStatus && (
+            <div className={`text-xs border-t pt-2 ${isBullish ? "text-green-500" : "text-red-500"}`}>
+              {isBullish 
+                ? `21 > 200 on ${interval} - Looking for bull flags...`
+                : `21 < 200 on ${interval} - Looking for bear flags...`}
+            </div>
+          )}
+          {!smaStatus && (
+            <div className="text-xs text-muted-foreground border-t pt-2">
+              Waiting for pattern...
+            </div>
+          )}
         </Card>
       )}
     </div>
