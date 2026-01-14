@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TradingViewChart } from "@/components/trading-view-chart";
+import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, BookOpen, ArrowLeftRight } from "lucide-react";
+import { Settings, BookOpen, ArrowLeftRight, Brain } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [timeframe, setTimeframe] = useState("5");
   const [showOrderBook, setShowOrderBook] = useState(false);
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
+  const [showAIChart, setShowAIChart] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
 
@@ -168,7 +170,18 @@ export default function Trading({ visible = true }: TradingProps) {
               ))}
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <Switch 
+                  checked={showAIChart} 
+                  onCheckedChange={setShowAIChart}
+                  id="ai-chart-toggle"
+                />
+                <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                  <Brain className="h-3 w-3" />
+                  AI Patterns
+                </label>
+              </div>
               <div className="flex items-center gap-1.5">
                 <Switch 
                   checked={showOrderBook} 
@@ -187,7 +200,17 @@ export default function Trading({ visible = true }: TradingProps) {
           <div className="flex-1 flex min-h-0">
             {/* Chart */}
             <div className="flex-1 min-w-0">
-              <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+              {showAIChart ? (
+                <PatternChart 
+                  symbol={coin} 
+                  interval={
+                    { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
+                  } 
+                  className="h-full" 
+                />
+              ) : (
+                <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+              )}
             </div>
             
             {/* Optional Order Book Panel */}
