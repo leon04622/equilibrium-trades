@@ -33,13 +33,6 @@ interface PatternSignal {
   patternType?: string;
 }
 
-interface SMAStatus {
-  coin: string;
-  sma21: number;
-  sma200: number;
-  isBullish: boolean;
-}
-
 interface PatternChartProps {
   symbol: string;
   interval?: string;
@@ -72,7 +65,7 @@ function PatternChartComponent({
   const isInitialLoadRef = useRef(true);
   const { theme } = useTheme();
   const [activeSignal, setActiveSignal] = useState<PatternSignal | null>(null);
-  const [is5mBullish, setIs5mBullish] = useState<boolean>(false);
+  const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
 
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
@@ -81,31 +74,10 @@ function PatternChartComponent({
     refetchInterval: 10000,
   });
 
-  const { data: sma5mStatus } = useQuery<SMAStatus>({
-    queryKey: [`/api/signals/sma-status/${coin}?timeframe=5m`],
-    refetchInterval: 30000,
-  });
-
   const { data: signals } = useQuery<PatternSignal[]>({
     queryKey: [`/api/signals/crossover?timeframes=${interval}`],
     refetchInterval: 30000,
   });
-
-  useEffect(() => {
-    if (sma5mStatus) {
-      setIs5mBullish(sma5mStatus.isBullish);
-    }
-  }, [sma5mStatus]);
-
-  const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
-
-  useEffect(() => {
-    if (currentSignal && is5mBullish) {
-      setActiveSignal(currentSignal);
-    } else {
-      setActiveSignal(null);
-    }
-  }, [currentSignal, is5mBullish]);
 
   const parsePrice = useCallback((val: number | string): number => {
     return typeof val === 'string' ? parseFloat(val) : val;
@@ -125,6 +97,42 @@ function PatternChartComponent({
     }
     return result;
   }
+
+  useEffect(() => {
+    if (!candles || candles.length < 200) {
+      setSmaStatus(null);
+      return;
+    }
+
+    const sortedCandles = [...candles].sort((a, b) => a.t - b.t);
+    const sma21Data = calculateSMA(sortedCandles, 21);
+    const sma200Data = calculateSMA(sortedCandles, 200);
+
+    if (sma21Data.length > 0 && sma200Data.length > 0) {
+      const latestSma21 = sma21Data[sma21Data.length - 1].value;
+      const latestSma200 = sma200Data[sma200Data.length - 1].value;
+      setSmaStatus({
+        sma21: latestSma21,
+        sma200: latestSma200,
+        isBullish: latestSma21 > latestSma200,
+      });
+    }
+  }, [candles, parsePrice]);
+
+  const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
+
+  useEffect(() => {
+    if (currentSignal && smaStatus) {
+      const signalIsBullish = currentSignal.type.includes("bullish");
+      if ((smaStatus.isBullish && signalIsBullish) || (!smaStatus.isBullish && !signalIsBullish)) {
+        setActiveSignal(currentSignal);
+      } else {
+        setActiveSignal(null);
+      }
+    } else {
+      setActiveSignal(null);
+    }
+  }, [currentSignal, smaStatus]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -294,7 +302,8 @@ function PatternChartComponent({
     }
   }, [activeSignal]);
 
-  const isBullish = activeSignal?.type.includes("bullish");
+  const isBullish = smaStatus?.isBullish ?? false;
+  const patternName = isBullish ? "Bull Flag" : "Bear Flag";
 
   return (
     <div className={`relative ${className}`}>
@@ -304,7 +313,7 @@ function PatternChartComponent({
         data-testid="pattern-chart"
       />
       
-      {activeSignal && is5mBullish && (
+      {activeSignal && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg max-w-xs z-10">
           <div className="flex items-center gap-2 mb-2">
             {isBullish ? (
@@ -313,7 +322,7 @@ function PatternChartComponent({
               <TrendingDown className="h-5 w-5 text-red-500" />
             )}
             <span className="font-semibold text-sm">
-              {activeSignal.patternType || "Potential Bull Flag"}
+              {activeSignal.patternType || patternName}
             </span>
             <Badge 
               variant={activeSignal.status === "confirmed" ? "default" : "secondary"}
@@ -372,7 +381,44 @@ function PatternChartComponent({
         </Card>
       )}
 
-      {!activeSignal && (
+      {!activeSignal && smaStatus && (
+        <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
+          <div className="flex items-center gap-2 mb-2">
+            {isBullish ? (
+              <TrendingUp className="h-4 w-4 text-green-500" />
+            ) : (
+              <TrendingDown className="h-4 w-4 text-red-500" />
+            )}
+            <span className="text-sm font-medium">
+              {isBullish ? "Bullish Bias" : "Bearish Bias"}
+            </span>
+            <Badge variant={isBullish ? "default" : "destructive"} className="text-xs">
+              {interval}
+            </Badge>
+          </div>
+          
+          <div className="space-y-1 text-xs mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-0.5 bg-orange-500" />
+              <span className="text-muted-foreground">21 SMA:</span>
+              <span className="font-mono">${smaStatus.sma21.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-0.5 bg-blue-500" />
+              <span className="text-muted-foreground">200 SMA:</span>
+              <span className="font-mono">${smaStatus.sma200.toFixed(2)}</span>
+            </div>
+          </div>
+          
+          <div className={`text-xs border-t pt-2 ${isBullish ? "text-green-500" : "text-red-500"}`}>
+            {isBullish 
+              ? "21 > 200 - Looking for bull flags..." 
+              : "21 < 200 - Looking for bear flags..."}
+          </div>
+        </Card>
+      )}
+
+      {!activeSignal && !smaStatus && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-3 h-0.5 bg-orange-500" />
@@ -382,17 +428,9 @@ function PatternChartComponent({
             <div className="w-3 h-0.5 bg-blue-500" />
             <span className="text-sm">200 SMA</span>
           </div>
-          
-          {!is5mBullish && (
-            <div className="text-xs text-amber-500 border-t pt-2">
-              Waiting for 21 SMA to cross above 200 SMA on 5m...
-            </div>
-          )}
-          {is5mBullish && (
-            <div className="text-xs text-green-500 border-t pt-2">
-              5m bullish - watching for pattern...
-            </div>
-          )}
+          <div className="text-xs text-muted-foreground border-t pt-2">
+            Loading SMA data...
+          </div>
         </Card>
       )}
     </div>
