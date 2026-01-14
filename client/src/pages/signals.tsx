@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
-import { Zap, Filter, TrendingUp, TrendingDown, Clock, Sparkles, RefreshCw } from "lucide-react";
+import { Zap, Filter, TrendingUp, TrendingDown, Clock, Sparkles, RefreshCw, AlertTriangle, BookOpen } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LivePatternCard } from "@/components/live-pattern-card";
 import { PatternModal } from "@/components/pattern-modal";
 import { tradingPatterns } from "@/lib/patterns";
@@ -29,9 +30,7 @@ export default function Signals() {
     const ticker = tickers.find((t: any) => t.coin === coin);
     if (ticker && ticker.markPx) {
       const price = parseFloat(ticker.markPx);
-      // Handle scientific notation and sanitize to reasonable precision
       if (isNaN(price) || !isFinite(price)) return 0;
-      // Round based on price magnitude
       if (price >= 1000) return Math.round(price * 100) / 100;
       if (price >= 1) return Math.round(price * 100) / 100;
       if (price >= 0.01) return Math.round(price * 10000) / 10000;
@@ -42,14 +41,13 @@ export default function Signals() {
 
   const sanitizePrice = (price: number, basePrice: number): number => {
     if (!price || !isFinite(price)) return 0;
-    // Round SL/TP to same precision as base price
     if (basePrice >= 1000) return Math.round(price * 100) / 100;
     if (basePrice >= 1) return Math.round(price * 100) / 100;
     if (basePrice >= 0.01) return Math.round(price * 10000) / 10000;
     return Math.round(price * 100000000) / 100000000;
   };
 
-  const livePatterns: LivePattern[] = useMemo(() => {
+  const educationalPatterns: LivePattern[] = useMemo(() => {
     if (tickers.length === 0) return [];
 
     const btcPrice = getTickerPrice("BTC");
@@ -60,7 +58,7 @@ export default function Signals() {
 
     const patterns: LivePattern[] = [
       {
-        id: "1",
+        id: "edu-1",
         pattern: tradingPatterns.find(p => p.id === "bull-flag")!,
         symbol: "BTC/USDT",
         timeframe: "1m",
@@ -68,11 +66,11 @@ export default function Signals() {
         entryPrice: btcPrice,
         stopLoss: sanitizePrice(btcPrice * 0.995, btcPrice),
         takeProfit: sanitizePrice(btcPrice * 1.015, btcPrice),
-        status: "confirmed" as const,
+        status: "forming" as const,
         detectedAt: new Date(Date.now() - 2 * 60 * 1000),
       },
       {
-        id: "2",
+        id: "edu-2",
         pattern: tradingPatterns.find(p => p.id === "ascending-triangle")!,
         symbol: "ETH/USDT",
         timeframe: "5m",
@@ -84,7 +82,7 @@ export default function Signals() {
         detectedAt: new Date(Date.now() - 8 * 60 * 1000),
       },
       {
-        id: "3",
+        id: "edu-3",
         pattern: tradingPatterns.find(p => p.id === "pennant")!,
         symbol: "SOL/USDT",
         timeframe: "1m",
@@ -96,7 +94,7 @@ export default function Signals() {
         detectedAt: new Date(Date.now() - 5 * 60 * 1000),
       },
       {
-        id: "4",
+        id: "edu-4",
         pattern: tradingPatterns.find(p => p.id === "bear-flag")!,
         symbol: "DOGE/USDT",
         timeframe: "1m",
@@ -108,7 +106,7 @@ export default function Signals() {
         detectedAt: new Date(Date.now() - 12 * 60 * 1000),
       },
       {
-        id: "5",
+        id: "edu-5",
         pattern: tradingPatterns.find(p => p.id === "double-bottom")!,
         symbol: "BNB/USDT",
         timeframe: "15m",
@@ -120,14 +118,11 @@ export default function Signals() {
         detectedAt: new Date(Date.now() - 25 * 60 * 1000),
       },
     ];
-    // Show all valid patterns; price 0 means data not yet loaded
     return patterns.filter(p => p.pattern && (p.entryPrice ?? 0) > 0);
   }, [tickers]);
 
-  const confirmedSignals = livePatterns.filter(p => p.status === "confirmed");
-  const formingSignals = livePatterns.filter(p => p.status === "forming");
-  const bullishSignals = livePatterns.filter(p => p.pattern.direction === "bullish");
-  const bearishSignals = livePatterns.filter(p => p.pattern.direction === "bearish");
+  const bullishPatterns = educationalPatterns.filter(p => p.pattern.direction === "bullish");
+  const bearishPatterns = educationalPatterns.filter(p => p.pattern.direction === "bearish");
 
   const formatPrice = (price: number) => {
     if (price >= 1000) return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -139,11 +134,11 @@ export default function Signals() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <Zap className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-display font-bold">AI Signals</h1>
-          <Badge className="ml-2 bg-primary/15 text-primary border-primary/30">
-            <Sparkles className="h-3 w-3 mr-1" />
-            Live
+          <BookOpen className="h-8 w-8 text-primary" />
+          <h1 className="text-3xl font-display font-bold">Pattern Examples</h1>
+          <Badge className="ml-2 bg-amber-500/15 text-amber-600 border-amber-500/30">
+            <BookOpen className="h-3 w-3 mr-1" />
+            Educational
           </Badge>
           <Button 
             variant="outline" 
@@ -153,24 +148,35 @@ export default function Signals() {
             data-testid="button-refresh-signals"
           >
             <RefreshCw className={cn("h-4 w-4 mr-1", isLoading && "animate-spin")} />
-            Refresh
+            Refresh Prices
           </Button>
         </div>
         <p className="text-muted-foreground">
-          Real-time pattern detection powered by AI with live Hyperliquid prices
+          Learn to identify trading patterns with real-time price examples
         </p>
       </div>
+
+      {/* Important Disclaimer */}
+      <Alert className="border-amber-500/50 bg-amber-500/10">
+        <AlertTriangle className="h-4 w-4 text-amber-500" />
+        <AlertTitle className="text-amber-600">Educational Examples Only</AlertTitle>
+        <AlertDescription className="text-muted-foreground">
+          These patterns are <strong>examples for learning purposes</strong> using live market prices. 
+          They are NOT real-time pattern detections and should NOT be used as trading signals. 
+          Always verify patterns on the actual chart before making any trading decisions.
+        </AlertDescription>
+      </Alert>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
-                <Zap className="h-5 w-5 text-primary" />
+                <BookOpen className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{livePatterns.length}</p>
-                <p className="text-xs text-muted-foreground">Total Signals</p>
+                <p className="text-2xl font-bold">{educationalPatterns.length}</p>
+                <p className="text-xs text-muted-foreground">Example Patterns</p>
               </div>
             </div>
           </CardContent>
@@ -182,8 +188,8 @@ export default function Signals() {
                 <TrendingUp className="h-5 w-5 text-success" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{bullishSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Bullish</p>
+                <p className="text-2xl font-bold">{bullishPatterns.length}</p>
+                <p className="text-xs text-muted-foreground">Bullish Examples</p>
               </div>
             </div>
           </CardContent>
@@ -195,21 +201,21 @@ export default function Signals() {
                 <TrendingDown className="h-5 w-5 text-destructive" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{bearishSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Bearish</p>
+                <p className="text-2xl font-bold">{bearishPatterns.length}</p>
+                <p className="text-xs text-muted-foreground">Bearish Examples</p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-warning/5 border-warning/20">
+        <Card className="bg-amber-500/5 border-amber-500/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/15">
-                <Clock className="h-5 w-5 text-warning" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/15">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{formingSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Forming</p>
+                <p className="text-2xl font-bold">Demo</p>
+                <p className="text-xs text-muted-foreground">Not Live Signals</p>
               </div>
             </div>
           </CardContent>
@@ -219,7 +225,7 @@ export default function Signals() {
       {tickers.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="font-display text-sm">Live Market Prices</CardTitle>
+            <CardTitle className="font-display text-sm">Live Market Prices (from Hyperliquid)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-4">
@@ -253,7 +259,7 @@ export default function Signals() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="font-display">How AI Pattern Detection Works</CardTitle>
+          <CardTitle className="font-display">How to Use These Examples</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -262,9 +268,9 @@ export default function Signals() {
                 1
               </div>
               <div>
-                <p className="font-medium text-sm">Real-time Scanning</p>
+                <p className="font-medium text-sm">Study the Pattern</p>
                 <p className="text-xs text-muted-foreground">
-                  AI continuously analyzes price action across multiple timeframes
+                  Click "Learn More" to understand the pattern structure and characteristics
                 </p>
               </div>
             </div>
@@ -273,9 +279,9 @@ export default function Signals() {
                 2
               </div>
               <div>
-                <p className="font-medium text-sm">Pattern Recognition</p>
+                <p className="font-medium text-sm">Check the Real Chart</p>
                 <p className="text-xs text-muted-foreground">
-                  Identifies forming patterns and calculates confidence scores
+                  Go to Trading and look for the pattern on the actual TradingView chart
                 </p>
               </div>
             </div>
@@ -284,9 +290,9 @@ export default function Signals() {
                 3
               </div>
               <div>
-                <p className="font-medium text-sm">Trade Setup</p>
+                <p className="font-medium text-sm">Practice Identification</p>
                 <p className="text-xs text-muted-foreground">
-                  Provides entry, stop loss, and take profit recommendations
+                  Use the entry, SL, and TP examples as learning reference only
                 </p>
               </div>
             </div>
@@ -296,70 +302,73 @@ export default function Signals() {
 
       <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="all">All ({livePatterns.length})</TabsTrigger>
-          <TabsTrigger value="confirmed">Confirmed ({confirmedSignals.length})</TabsTrigger>
-          <TabsTrigger value="forming">Forming ({formingSignals.length})</TabsTrigger>
+          <TabsTrigger value="all">All Examples ({educationalPatterns.length})</TabsTrigger>
+          <TabsTrigger value="bullish">Bullish ({bullishPatterns.length})</TabsTrigger>
+          <TabsTrigger value="bearish">Bearish ({bearishPatterns.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="space-y-4">
           {isLoading ? (
             <div className="text-center py-12">
               <RefreshCw className="h-8 w-8 mx-auto text-muted-foreground mb-4 animate-spin" />
-              <p className="text-muted-foreground">Loading live signals...</p>
+              <p className="text-muted-foreground">Loading price data...</p>
             </div>
-          ) : livePatterns.length === 0 ? (
+          ) : educationalPatterns.length === 0 ? (
             <div className="text-center py-12">
-              <Zap className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No signals available</p>
-              <p className="text-muted-foreground">Waiting for market data...</p>
+              <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-lg font-medium">Loading examples...</p>
+              <p className="text-muted-foreground">Waiting for market data</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {livePatterns.map((livePattern) => (
+              {educationalPatterns.map((livePattern) => (
                 <LivePatternCard
                   key={livePattern.id}
                   livePattern={livePattern}
                   onLearnMore={() => handleLearnMore(livePattern.pattern)}
+                  isEducational={true}
                 />
               ))}
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="confirmed" className="space-y-4">
-          {confirmedSignals.length === 0 ? (
+        <TabsContent value="bullish" className="space-y-4">
+          {bullishPatterns.length === 0 ? (
             <div className="text-center py-12">
-              <Zap className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No confirmed signals</p>
-              <p className="text-muted-foreground">Check back soon for confirmed patterns</p>
+              <TrendingUp className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-lg font-medium">No bullish examples</p>
+              <p className="text-muted-foreground">Check back for more patterns</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {confirmedSignals.map((livePattern) => (
+              {bullishPatterns.map((livePattern) => (
                 <LivePatternCard
                   key={livePattern.id}
                   livePattern={livePattern}
                   onLearnMore={() => handleLearnMore(livePattern.pattern)}
+                  isEducational={true}
                 />
               ))}
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="forming" className="space-y-4">
-          {formingSignals.length === 0 ? (
+        <TabsContent value="bearish" className="space-y-4">
+          {bearishPatterns.length === 0 ? (
             <div className="text-center py-12">
-              <Clock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No forming patterns</p>
-              <p className="text-muted-foreground">AI is scanning for new patterns</p>
+              <TrendingDown className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-lg font-medium">No bearish examples</p>
+              <p className="text-muted-foreground">Check back for more patterns</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {formingSignals.map((livePattern) => (
+              {bearishPatterns.map((livePattern) => (
                 <LivePatternCard
                   key={livePattern.id}
                   livePattern={livePattern}
                   onLearnMore={() => handleLearnMore(livePattern.pattern)}
+                  isEducational={true}
                 />
               ))}
             </div>

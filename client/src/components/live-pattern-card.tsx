@@ -23,9 +23,10 @@ interface LivePatternCardProps {
   livePattern: LivePattern;
   onLearnMore?: () => void;
   compact?: boolean;
+  isEducational?: boolean;
 }
 
-export function LivePatternCard({ livePattern, onLearnMore, compact = false }: LivePatternCardProps) {
+export function LivePatternCard({ livePattern, onLearnMore, compact = false, isEducational = false }: LivePatternCardProps) {
   const { pattern, confidence, status, symbol, timeframe, entryPrice, stopLoss, takeProfit, detectedAt } = livePattern;
   const Icon = iconMap[pattern.iconName] || TrendingUp;
 
@@ -91,11 +92,19 @@ export function LivePatternCard({ livePattern, onLearnMore, compact = false }: L
     <Card 
       className={cn(
         "overflow-hidden transition-all",
-        status === "forming" && "border-warning/30",
-        status === "confirmed" && "border-primary/30 shadow-lg shadow-primary/10"
+        isEducational && "border-amber-500/30",
+        !isEducational && status === "forming" && "border-warning/30",
+        !isEducational && status === "confirmed" && "border-primary/30 shadow-lg shadow-primary/10"
       )}
       data-testid={`live-pattern-${livePattern.id}`}
     >
+      {isEducational && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-3 py-1.5 text-center">
+          <span className="text-[10px] font-medium text-amber-600 uppercase tracking-wide">
+            Educational Example - Not a Real Signal
+          </span>
+        </div>
+      )}
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-3">
@@ -117,9 +126,9 @@ export function LivePatternCard({ livePattern, onLearnMore, compact = false }: L
           </div>
           <Badge 
             variant="outline" 
-            className={cn("capitalize text-[10px]", statusColors[status])}
+            className={cn("capitalize text-[10px]", isEducational ? "bg-amber-500/15 text-amber-600 border-amber-500/30" : statusColors[status])}
           >
-            {status}
+            {isEducational ? "Example" : status}
           </Badge>
         </div>
 
