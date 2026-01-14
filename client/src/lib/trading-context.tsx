@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import { useWallet } from "./wallet-context";
+import { getAccountState, getPositions, getOpenOrders, type Position as HLPosition, type OpenOrder, type AccountState } from "./hyperliquid-client";
 
 export interface Position {
   id: string;
@@ -59,12 +61,15 @@ interface TradingContextType {
   connected: boolean;
   address: string;
   balance: number;
+  accountValue: number;
+  marginUsed: number;
   positions: Position[];
   orders: Order[];
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
   currentPrices: Record<string, number>;
   isPriceReady: (coin: string) => boolean;
+  isLoadingAccount: boolean;
   connect: (address?: string) => void;
   disconnect: () => void;
   placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => OrderResult;
@@ -72,6 +77,7 @@ interface TradingContextType {
   cancelOrder: (orderId: string) => void;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
+  refreshAccount: () => Promise<void>;
 }
 
 const defaultIndicators: Indicator[] = [
@@ -177,45 +183,98 @@ function saveToStorage<T>(key: string, value: T): void {
 }
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const [connected, setConnected] = useState(() => loadFromStorage(STORAGE_KEYS.connected, false));
-  const [address, setAddress] = useState(() => loadFromStorage(STORAGE_KEYS.address, ""));
-  const [balance, setBalance] = useState(() => loadFromStorage(STORAGE_KEYS.balance, 10000));
-  const [positions, setPositions] = useState<Position[]>(() => loadFromStorage(STORAGE_KEYS.positions, []));
+  const { address: walletAddress, isConnected: walletConnected } = useWallet();
+  
+  const [balance, setBalance] = useState(0);
+  const [accountValue, setAccountValue] = useState(0);
+  const [marginUsed, setMarginUsed] = useState(0);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadFromStorage(STORAGE_KEYS.orders, []));
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
+  const [isLoadingAccount, setIsLoadingAccount] = useState(false);
+
+  const connected = walletConnected;
+  const address = walletAddress || "";
 
   // Persist state changes to localStorage
-  useEffect(() => { saveToStorage(STORAGE_KEYS.connected, connected); }, [connected]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.address, address); }, [address]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.balance, balance); }, [balance]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.positions, positions); }, [positions]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.orders, orders); }, [orders]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.tradeHistory, tradeHistory); }, [tradeHistory]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.indicators, indicators); }, [indicators]);
 
-  const connect = useCallback((addr?: string) => {
-    // If already connected with same address, don't reset anything
-    if (connected && address === addr) return;
+  // Fetch account data from Hyperliquid when wallet connects
+  const refreshAccount = useCallback(async () => {
+    if (!walletAddress) return;
     
-    const walletAddress = addr || `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`;
-    setAddress(walletAddress);
-    setConnected(true);
-    
-    // Only set initial balance for truly new connections (not reconnects from storage)
-    // Check if we already have persisted balance data
-    const storedBalance = loadFromStorage(STORAGE_KEYS.balance, null);
-    if (storedBalance === null || storedBalance === 10000) {
-      // Fresh connection - set random starting balance
-      setBalance(10000 + Math.random() * 5000);
+    setIsLoadingAccount(true);
+    try {
+      const [accountState, hlPositions, hlOrders] = await Promise.all([
+        getAccountState(walletAddress),
+        getPositions(walletAddress),
+        getOpenOrders(walletAddress),
+      ]);
+
+      if (accountState) {
+        const accValue = parseFloat(accountState.marginSummary.accountValue || "0");
+        const margUsed = parseFloat(accountState.marginSummary.totalMarginUsed || "0");
+        setAccountValue(accValue);
+        setMarginUsed(margUsed);
+        setBalance(accValue - margUsed);
+      }
+
+      // Convert Hyperliquid positions to our format
+      const convertedPositions: Position[] = hlPositions.map((pos, idx) => ({
+        id: `hl-${pos.coin}-${idx}`,
+        coin: pos.coin,
+        side: pos.side,
+        size: pos.size,
+        entryPrice: pos.entryPrice,
+        markPrice: currentPrices[pos.coin] || pos.entryPrice,
+        leverage: pos.leverage,
+        margin: pos.marginUsed,
+        unrealizedPnl: pos.unrealizedPnl,
+        unrealizedPnlPercent: pos.marginUsed > 0 ? (pos.unrealizedPnl / pos.marginUsed) * 100 : 0,
+        liquidationPrice: pos.liquidationPrice || 0,
+        openedAt: new Date(),
+      }));
+      setPositions(convertedPositions);
+
+    } catch (error) {
+      console.error("Error fetching Hyperliquid account:", error);
+    } finally {
+      setIsLoadingAccount(false);
     }
-    // Otherwise keep the existing persisted balance
-  }, [connected, address]);
+  }, [walletAddress, currentPrices]);
+
+  // Refresh account when wallet connects
+  useEffect(() => {
+    if (walletConnected && walletAddress) {
+      refreshAccount();
+    } else {
+      setPositions([]);
+      setBalance(0);
+      setAccountValue(0);
+      setMarginUsed(0);
+    }
+  }, [walletConnected, walletAddress]);
+
+  // Periodically refresh positions (every 10 seconds)
+  useEffect(() => {
+    if (!walletConnected || !walletAddress) return;
+    
+    const interval = setInterval(refreshAccount, 10000);
+    return () => clearInterval(interval);
+  }, [walletConnected, walletAddress, refreshAccount]);
+
+  // Connection is now handled by wallet context
+  const connect = useCallback(() => {
+    // Wallet connection is handled by WalletContext
+    // This is kept for backward compatibility
+  }, []);
 
   const disconnect = useCallback(() => {
-    setConnected(false);
-    setAddress("");
+    // Wallet disconnection is handled by WalletContext
     setPositions([]);
     setOrders([]);
   }, []);
@@ -451,12 +510,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       connected,
       address,
       balance,
+      accountValue,
+      marginUsed,
       positions,
       orders,
       tradeHistory,
       indicators,
       currentPrices,
       isPriceReady,
+      isLoadingAccount,
       connect,
       disconnect,
       placeOrder,
@@ -464,6 +526,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       cancelOrder,
       setIndicators,
       updatePrices,
+      refreshAccount,
     }}>
       {children}
     </TradingContext.Provider>

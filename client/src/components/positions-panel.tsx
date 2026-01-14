@@ -3,14 +3,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ChevronDown, ChevronUp, X, TrendingUp, TrendingDown, RefreshCcw, Wallet } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
+import { useWallet } from "@/lib/wallet-context";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 export function PositionsPanel() {
   const [isExpanded, setIsExpanded] = useState(true);
-  const { connected, positions, orders, tradeHistory, closePosition, cancelOrder, connect, updatePrices } = useTrading();
+  const { connected, positions, orders, tradeHistory, closePosition, cancelOrder, updatePrices, accountValue, marginUsed, balance, isLoadingAccount, refreshAccount } = useTrading();
+  const { connect: walletConnect } = useWallet();
 
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
@@ -62,14 +65,15 @@ export function PositionsPanel() {
         {isExpanded && (
           <div className="px-4 pb-4">
             <div className="text-center py-8 text-muted-foreground">
-              <p className="text-sm">Connect your wallet to start trading</p>
+              <p className="text-sm">Connect your wallet to view positions</p>
               <Button 
                 variant="default" 
                 size="sm" 
                 className="mt-3" 
-                onClick={() => connect()}
+                onClick={() => walletConnect()}
                 data-testid="button-connect-wallet"
               >
+                <Wallet className="h-4 w-4 mr-2" />
                 Connect Wallet
               </Button>
             </div>
@@ -82,7 +86,7 @@ export function PositionsPanel() {
   return (
     <div className="border-t bg-background">
       <Tabs defaultValue="positions" className="w-full">
-        <div className="flex items-center justify-between px-2 border-b">
+        <div className="flex items-center justify-between px-2 border-b gap-2">
           <TabsList className="bg-transparent h-10 p-0 gap-0">
             <TabsTrigger 
               value="positions" 
@@ -110,9 +114,42 @@ export function PositionsPanel() {
             </TabsTrigger>
           </TabsList>
           
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsExpanded(!isExpanded)}>
-            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </Button>
+          <div className="flex items-center gap-4">
+            {isLoadingAccount ? (
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-4 text-xs">
+                <div className="text-right">
+                  <span className="text-muted-foreground">Account Value</span>
+                  <p className="font-mono font-semibold text-foreground">${accountValue.toFixed(2)}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-muted-foreground">Available</span>
+                  <p className="font-mono font-semibold text-bullish">${balance.toFixed(2)}</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-muted-foreground">Margin Used</span>
+                  <p className="font-mono font-semibold text-foreground">${marginUsed.toFixed(2)}</p>
+                </div>
+              </div>
+            )}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6" 
+              onClick={() => refreshAccount()}
+              disabled={isLoadingAccount}
+              data-testid="button-refresh-account"
+            >
+              <RefreshCcw className={cn("h-4 w-4", isLoadingAccount && "animate-spin")} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsExpanded(!isExpanded)}>
+              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
 
         {isExpanded && (
