@@ -135,22 +135,83 @@ const defaultIndicators: Indicator[] = [
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
+// LocalStorage keys
+const STORAGE_KEYS = {
+  connected: "equilibrium_connected",
+  address: "equilibrium_address",
+  balance: "equilibrium_balance",
+  positions: "equilibrium_positions",
+  orders: "equilibrium_orders",
+  tradeHistory: "equilibrium_trade_history",
+  indicators: "equilibrium_indicators",
+};
+
+// Load from localStorage with default fallback
+function loadFromStorage<T>(key: string, defaultValue: T): T {
+  try {
+    const stored = localStorage.getItem(key);
+    if (!stored) return defaultValue;
+    const parsed = JSON.parse(stored);
+    // Handle date conversion for positions, orders, and trades
+    if (Array.isArray(parsed)) {
+      return parsed.map((item: any) => ({
+        ...item,
+        openedAt: item.openedAt ? new Date(item.openedAt) : undefined,
+        createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
+        filledAt: item.filledAt ? new Date(item.filledAt) : undefined,
+        timestamp: item.timestamp ? new Date(item.timestamp) : undefined,
+      })) as T;
+    }
+    return parsed;
+  } catch {
+    return defaultValue;
+  }
+}
+
+function saveToStorage<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const [connected, setConnected] = useState(false);
-  const [address, setAddress] = useState("");
-  const [balance, setBalance] = useState(10000);
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
-  const [indicators, setIndicatorsState] = useState<Indicator[]>(defaultIndicators);
+  const [connected, setConnected] = useState(() => loadFromStorage(STORAGE_KEYS.connected, false));
+  const [address, setAddress] = useState(() => loadFromStorage(STORAGE_KEYS.address, ""));
+  const [balance, setBalance] = useState(() => loadFromStorage(STORAGE_KEYS.balance, 10000));
+  const [positions, setPositions] = useState<Position[]>(() => loadFromStorage(STORAGE_KEYS.positions, []));
+  const [orders, setOrders] = useState<Order[]>(() => loadFromStorage(STORAGE_KEYS.orders, []));
+  const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
+  const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
 
+  // Persist state changes to localStorage
+  useEffect(() => { saveToStorage(STORAGE_KEYS.connected, connected); }, [connected]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.address, address); }, [address]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.balance, balance); }, [balance]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.positions, positions); }, [positions]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.orders, orders); }, [orders]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.tradeHistory, tradeHistory); }, [tradeHistory]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.indicators, indicators); }, [indicators]);
+
   const connect = useCallback((addr?: string) => {
+    // If already connected with same address, don't reset anything
+    if (connected && address === addr) return;
+    
     const walletAddress = addr || `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`;
     setAddress(walletAddress);
     setConnected(true);
-    setBalance(10000 + Math.random() * 5000);
-  }, []);
+    
+    // Only set initial balance for truly new connections (not reconnects from storage)
+    // Check if we already have persisted balance data
+    const storedBalance = loadFromStorage(STORAGE_KEYS.balance, null);
+    if (storedBalance === null || storedBalance === 10000) {
+      // Fresh connection - set random starting balance
+      setBalance(10000 + Math.random() * 5000);
+    }
+    // Otherwise keep the existing persisted balance
+  }, [connected, address]);
 
   const disconnect = useCallback(() => {
     setConnected(false);

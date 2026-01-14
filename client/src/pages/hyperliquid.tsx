@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   TrendingUp, Link2, ExternalLink, Shield, Zap, 
   Wallet, AlertCircle, CheckCircle2, Copy, Info
@@ -10,17 +10,103 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HyperliquidStatus } from "@/components/hyperliquid-status";
 import { useToast } from "@/hooks/use-toast";
+import { useTrading } from "@/lib/trading-context";
+
+const HYPERLIQUID_STORAGE_KEY = "equilibrium_hyperliquid_connection";
+
+interface HyperliquidConnection {
+  method: "wallet" | "api";
+  address: string;
+  apiKey?: string;
+  connectedAt: string;
+}
 
 export default function Hyperliquid() {
-  const [connected, setConnected] = useState(false);
+  const [connectionMethod, setConnectionMethod] = useState<"wallet" | "api">("wallet");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [savedConnection, setSavedConnection] = useState<HyperliquidConnection | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const { toast } = useToast();
+  const { connect: connectTrading, disconnect: disconnectTrading, connected: tradingConnected } = useTrading();
 
-  const handleConnect = async () => {
+  // Load saved connection on mount and sync with TradingContext
+  useEffect(() => {
+    if (initialized) return;
+    try {
+      const stored = localStorage.getItem(HYPERLIQUID_STORAGE_KEY);
+      if (stored) {
+        const connection = JSON.parse(stored) as HyperliquidConnection;
+        setSavedConnection(connection);
+        // Sync TradingContext with saved connection
+        if (connection.address) {
+          connectTrading(connection.address);
+        }
+      }
+      setInitialized(true);
+    } catch {
+      setInitialized(true);
+    }
+  }, [initialized, connectTrading]);
+
+  const connected = !!savedConnection;
+
+  const handleWalletConnect = async () => {
+    setIsConnecting(true);
+    
+    // Check if MetaMask or similar wallet is available
+    if (typeof window !== "undefined" && (window as any).ethereum) {
+      try {
+        const accounts = await (window as any).ethereum.request({ 
+          method: "eth_requestAccounts" 
+        });
+        if (accounts && accounts[0]) {
+          const address = accounts[0];
+          const connection: HyperliquidConnection = {
+            method: "wallet",
+            address,
+            connectedAt: new Date().toISOString(),
+          };
+          localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
+          setSavedConnection(connection);
+          connectTrading(address);
+          toast({
+            title: "Wallet Connected!",
+            description: `Connected to ${address.slice(0, 6)}...${address.slice(-4)}`,
+          });
+        }
+      } catch (err: any) {
+        toast({
+          title: "Connection Failed",
+          description: err.message || "Failed to connect wallet",
+          variant: "destructive",
+        });
+      }
+    } else {
+      // No wallet detected - use simulated connection for demo
+      const demoAddress = `0x${Math.random().toString(16).slice(2, 42)}`;
+      const connection: HyperliquidConnection = {
+        method: "wallet",
+        address: demoAddress,
+        connectedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
+      setSavedConnection(connection);
+      connectTrading(demoAddress);
+      toast({
+        title: "Demo Wallet Connected",
+        description: "No wallet detected. Using demo mode for testing.",
+      });
+    }
+    
+    setIsConnecting(false);
+  };
+
+  const handleApiConnect = async () => {
     if (!apiKey || !apiSecret) {
       toast({
         title: "Missing credentials",
@@ -31,24 +117,44 @@ export default function Hyperliquid() {
     }
 
     setIsConnecting(true);
-    // Simulate connection
+    // Simulate API validation
     await new Promise(resolve => setTimeout(resolve, 1500));
-    setConnected(true);
+    
+    const connection: HyperliquidConnection = {
+      method: "api",
+      address: `api-${apiKey.slice(0, 8)}...`,
+      apiKey: apiKey.slice(0, 8) + "...",
+      connectedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
+    setSavedConnection(connection);
+    connectTrading(connection.address);
+    
     setIsConnecting(false);
     toast({
-      title: "Connected!",
-      description: "Your exchange account is now connected to Equilibrium",
+      title: "API Connected!",
+      description: "Your Hyperliquid API is now connected to Equilibrium",
     });
   };
 
   const handleDisconnect = () => {
-    setConnected(false);
+    localStorage.removeItem(HYPERLIQUID_STORAGE_KEY);
+    setSavedConnection(null);
     setApiKey("");
     setApiSecret("");
+    // Also disconnect from TradingContext
+    disconnectTrading();
     toast({
       title: "Disconnected",
-      description: "Your exchange account has been disconnected from Equilibrium",
+      description: "Your Hyperliquid account has been disconnected",
     });
+  };
+
+  const copyAddress = () => {
+    if (savedConnection?.address) {
+      navigator.clipboard.writeText(savedConnection.address);
+      toast({ title: "Address copied!" });
+    }
   };
 
   return (
@@ -74,71 +180,97 @@ export default function Hyperliquid() {
           {!connected ? (
             <Card>
               <CardHeader>
-                <CardTitle className="font-display">Connect Your Account</CardTitle>
+                <CardTitle className="font-display">Connect to Hyperliquid</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <Alert>
                   <Shield className="h-4 w-4" />
                   <AlertTitle>Secure Connection</AlertTitle>
                   <AlertDescription>
-                    Your API keys are encrypted and never stored on our servers. 
-                    We recommend creating an API-only wallet with limited permissions.
+                    Connect your wallet directly or use API keys for automated trading.
+                    Your credentials are stored locally and never sent to our servers.
                   </AlertDescription>
                 </Alert>
 
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="apiKey">API Key</Label>
-                    <Input
-                      id="apiKey"
-                      type="password"
-                      placeholder="Enter your Hyperliquid API Key"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      data-testid="input-api-key"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="apiSecret">API Secret</Label>
-                    <Input
-                      id="apiSecret"
-                      type="password"
-                      placeholder="Enter your Hyperliquid API Secret"
-                      value={apiSecret}
-                      onChange={(e) => setApiSecret(e.target.value)}
-                      data-testid="input-api-secret"
-                    />
-                  </div>
-                </div>
+                <Tabs value={connectionMethod} onValueChange={(v) => setConnectionMethod(v as "wallet" | "api")}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="wallet" data-testid="tab-wallet">
+                      <Wallet className="h-4 w-4 mr-2" />
+                      Wallet
+                    </TabsTrigger>
+                    <TabsTrigger value="api" data-testid="tab-api">
+                      <Link2 className="h-4 w-4 mr-2" />
+                      API Keys
+                    </TabsTrigger>
+                  </TabsList>
 
-                <div className="flex gap-3">
-                  <Button 
-                    onClick={handleConnect} 
-                    disabled={isConnecting}
-                    className="flex-1"
-                    data-testid="button-connect"
-                  >
-                    {isConnecting ? (
-                      <>Connecting...</>
-                    ) : (
-                      <>
-                        <Link2 className="h-4 w-4 mr-2" />
-                        Connect Account
-                      </>
-                    )}
-                  </Button>
-                  <Button variant="outline" asChild>
-                    <a 
-                      href="https://app.hyperliquid.xyz/API" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      data-testid="link-get-api-keys"
-                    >
-                      Get API Keys
-                      <ExternalLink className="h-4 w-4 ml-2" />
-                    </a>
-                  </Button>
-                </div>
+                  <TabsContent value="wallet" className="space-y-4 mt-4">
+                    <div className="text-center py-6">
+                      <Wallet className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="font-semibold mb-2">Connect Your Wallet</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Connect MetaMask or any Web3 wallet to trade on Hyperliquid
+                      </p>
+                      <Button 
+                        onClick={handleWalletConnect}
+                        disabled={isConnecting}
+                        size="lg"
+                        data-testid="button-connect-wallet"
+                      >
+                        {isConnecting ? "Connecting..." : "Connect Wallet"}
+                      </Button>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="api" className="space-y-4 mt-4">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="apiKey">API Key</Label>
+                        <Input
+                          id="apiKey"
+                          type="password"
+                          placeholder="Enter your Hyperliquid API Key"
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          data-testid="input-api-key"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="apiSecret">API Secret</Label>
+                        <Input
+                          id="apiSecret"
+                          type="password"
+                          placeholder="Enter your Hyperliquid API Secret"
+                          value={apiSecret}
+                          onChange={(e) => setApiSecret(e.target.value)}
+                          data-testid="input-api-secret"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <Button 
+                        onClick={handleApiConnect} 
+                        disabled={isConnecting}
+                        className="flex-1"
+                        data-testid="button-connect-api"
+                      >
+                        {isConnecting ? "Connecting..." : "Connect API"}
+                      </Button>
+                      <Button variant="outline" asChild>
+                        <a 
+                          href="https://app.hyperliquid.xyz/API" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          data-testid="link-get-api-keys"
+                        >
+                          Get API Keys
+                          <ExternalLink className="h-4 w-4 ml-2" />
+                        </a>
+                      </Button>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           ) : (
@@ -155,17 +287,24 @@ export default function Hyperliquid() {
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-xs text-muted-foreground mb-1">Wallet Address</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {savedConnection?.method === "wallet" ? "Wallet Address" : "API Connection"}
+                    </p>
                     <div className="flex items-center gap-2">
-                      <code className="text-sm font-mono">0x1234...abcd</code>
-                      <Button variant="ghost" size="icon" className="h-6 w-6">
+                      <code className="text-sm font-mono">
+                        {savedConnection?.address 
+                          ? `${savedConnection.address.slice(0, 10)}...${savedConnection.address.slice(-6)}`
+                          : "Unknown"
+                        }
+                      </code>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={copyAddress}>
                         <Copy className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
                   <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
-                    <p className="text-xl font-mono font-bold">$10,532.45</p>
+                    <p className="text-xs text-muted-foreground mb-1">Connection Type</p>
+                    <p className="text-xl font-mono font-bold capitalize">{savedConnection?.method || "Unknown"}</p>
                   </div>
                 </div>
 
@@ -272,8 +411,8 @@ export default function Hyperliquid() {
           <HyperliquidStatus
             connected={connected}
             balance={connected ? 10532.45 : 0}
-            address={connected ? "0x1234567890abcdef1234567890abcdef12345678" : ""}
-            onConnect={handleConnect}
+            address={savedConnection?.address || ""}
+            onConnect={handleWalletConnect}
             onDisconnect={handleDisconnect}
           />
 

@@ -91,13 +91,14 @@ function TradingViewChartComponent({
       allow_symbol_change: false,
       calendar: false,
       hide_volume: false,
-      hide_top_toolbar: true,
-      hide_legend: true,
-      hide_side_toolbar: true,
-      withdateranges: false,
-      save_image: false,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      hide_side_toolbar: false,
+      withdateranges: true,
+      save_image: true,
       support_host: "https://www.tradingview.com",
       studies: studies,
+      drawings_access: { type: "all" },
     });
 
     containerRef.current.appendChild(script);
