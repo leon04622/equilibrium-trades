@@ -10,7 +10,8 @@ interface ChartPatternOverlayProps {
 }
 
 export function ChartPatternOverlay({ patterns, currentPrice }: ChartPatternOverlayProps) {
-  if (patterns.length === 0) return null;
+  // Don't render any overlay - patterns shown in separate panel instead
+  return null;
 
   const formatPrice = (p: number) => {
     if (!p || isNaN(p)) return "---";
