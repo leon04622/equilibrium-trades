@@ -299,14 +299,19 @@
   }
 }
 
-/* Hide TradingView overlay elements */
-.tradingview-widget-container iframe + div,
-.tradingview-widget-copyright,
-[class*="tv-floating-toolbar"],
-[class*="floating_toolbar"],
-[class*="chart-controls-bar"] {
+/* Hide TradingView copyright overlay only */
+.tradingview-widget-copyright {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
+}
+
+/* Ensure chart fills container properly */
+.tradingview-widget-container {
+  position: relative;
+}
+
+.tradingview-widget-container iframe {
+  border: none !important;
 }

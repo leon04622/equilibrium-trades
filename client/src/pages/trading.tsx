@@ -38,7 +38,11 @@ const timeframes = [
   { value: "M", label: "M" },
 ];
 
-export default function Trading() {
+interface TradingProps {
+  visible?: boolean;
+}
+
+export default function Trading({ visible = true }: TradingProps) {
   const [coin, setCoin] = useState("BTC");
   const [timeframe, setTimeframe] = useState("5");
   const [selectedPattern, setSelectedPattern] = useState<PatternDefinition | null>(null);
@@ -59,16 +63,18 @@ export default function Trading() {
     });
   };
 
-  // Fetch market condition from API
+  // Fetch market condition from API - only when visible
   const { data: marketCondition, isLoading: isLoadingMarket } = useQuery<MarketCondition>({
     queryKey: ["/api/market", tvSymbol],
-    refetchInterval: 30000,
+    refetchInterval: visible ? 30000 : false,
+    enabled: visible,
   });
 
-  // Fetch ticker data
+  // Fetch ticker data - only when visible
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
-    refetchInterval: 3000,
+    refetchInterval: visible ? 3000 : false,
+    enabled: visible,
   });
 
   const currentTicker = tickers.find((t) => t.coin === coin);
@@ -100,14 +106,15 @@ export default function Trading() {
     above5mSma200: true,
   };
 
-  // Detect patterns when coin/timeframe changes
+  // Detect patterns when coin/timeframe changes - only when visible
   useEffect(() => {
+    if (!visible) return;
     setLivePatterns([]);
     const timer = setTimeout(() => {
       detectPatterns();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [coin, timeframe]);
+  }, [coin, timeframe, visible]);
 
   const detectPatterns = async () => {
     setIsDetecting(true);

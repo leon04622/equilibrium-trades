@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -23,20 +23,31 @@ import Portfolio from "@/pages/portfolio";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function Router() {
+  const [location] = useLocation();
+  
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/trading" component={Trading} />
-      <Route path="/patterns" component={Patterns} />
-      <Route path="/learn" component={Learn} />
-      <Route path="/signals" component={Signals} />
-      <Route path="/heatmap" component={Heatmap} />
-      <Route path="/hyperliquid" component={Hyperliquid} />
-      <Route path="/pricing" component={Pricing} />
-      <Route path="/settings" component={Settings} />
-      <Route path="/portfolio" component={Portfolio} />
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      {/* Keep Trading page always mounted to preserve chart drawings */}
+      <div style={{ display: location === "/trading" ? "block" : "none", height: "100%" }}>
+        <Trading visible={location === "/trading"} />
+      </div>
+      
+      {/* Other routes unmount normally */}
+      {location !== "/trading" && (
+        <Switch>
+          <Route path="/" component={Dashboard} />
+          <Route path="/patterns" component={Patterns} />
+          <Route path="/learn" component={Learn} />
+          <Route path="/signals" component={Signals} />
+          <Route path="/heatmap" component={Heatmap} />
+          <Route path="/hyperliquid" component={Hyperliquid} />
+          <Route path="/pricing" component={Pricing} />
+          <Route path="/settings" component={Settings} />
+          <Route path="/portfolio" component={Portfolio} />
+          <Route component={NotFound} />
+        </Switch>
+      )}
+    </>
   );
 }
 
