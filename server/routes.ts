@@ -10,6 +10,7 @@ import {
   getRecentTrades,
   getCandles 
 } from "./hyperliquid";
+import { getTradingInstance, resetTradingInstance } from "./hyperliquid-trading";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -243,6 +244,172 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching candles:", error);
       res.status(500).json({ error: "Failed to fetch candles" });
+    }
+  });
+
+  // ============ HYPERLIQUID TRADING ROUTES ============
+
+  // Connect to Hyperliquid with private key
+  app.post("/api/hyperliquid/connect", async (req: Request, res: Response) => {
+    try {
+      const { privateKey } = req.body;
+      
+      if (!privateKey) {
+        return res.status(400).json({ error: "Private key is required" });
+      }
+
+      const trading = getTradingInstance();
+      const result = await trading.initialize(privateKey);
+      
+      if (result.success) {
+        res.json({ success: true, address: result.address });
+      } else {
+        res.status(400).json({ success: false, error: result.error });
+      }
+    } catch (error: any) {
+      console.error("Error connecting to Hyperliquid:", error);
+      res.status(500).json({ error: error.message || "Failed to connect" });
+    }
+  });
+
+  // Disconnect from Hyperliquid
+  app.post("/api/hyperliquid/disconnect", async (req: Request, res: Response) => {
+    try {
+      resetTradingInstance();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error disconnecting:", error);
+      res.status(500).json({ error: error.message || "Failed to disconnect" });
+    }
+  });
+
+  // Get connection status
+  app.get("/api/hyperliquid/status", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      res.json({
+        connected: trading.isConnected(),
+        address: trading.getWalletAddress(),
+      });
+    } catch (error: any) {
+      res.json({ connected: false, address: null });
+    }
+  });
+
+  // Get account state (positions, margin, etc.)
+  app.get("/api/hyperliquid/account", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const state = await trading.getAccountState();
+      res.json(state);
+    } catch (error: any) {
+      console.error("Error fetching account state:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch account" });
+    }
+  });
+
+  // Get positions
+  app.get("/api/hyperliquid/positions", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const positions = await trading.getPositions();
+      res.json(positions);
+    } catch (error: any) {
+      console.error("Error fetching positions:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch positions" });
+    }
+  });
+
+  // Get open orders
+  app.get("/api/hyperliquid/orders", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const orders = await trading.getOpenOrders();
+      res.json(orders);
+    } catch (error: any) {
+      console.error("Error fetching orders:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch orders" });
+    }
+  });
+
+  // Place order
+  app.post("/api/hyperliquid/order", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const { coin, isBuy, size, price, orderType, reduceOnly, slippage } = req.body;
+      
+      if (!coin || typeof isBuy !== "boolean" || !size) {
+        return res.status(400).json({ error: "Missing required fields: coin, isBuy, size" });
+      }
+      
+      const result = await trading.placeOrder({
+        coin,
+        isBuy,
+        size: parseFloat(size),
+        price: price ? parseFloat(price) : undefined,
+        orderType: orderType || "limit",
+        reduceOnly: reduceOnly || false,
+        slippage: slippage || 0.02,
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error placing order:", error);
+      res.status(500).json({ success: false, error: error.message || "Failed to place order" });
+    }
+  });
+
+  // Cancel order
+  app.delete("/api/hyperliquid/order/:orderId", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const { coin } = req.query;
+      if (!coin) {
+        return res.status(400).json({ error: "Coin is required as query parameter" });
+      }
+      
+      const result = await trading.cancelOrder(coin as string, req.params.orderId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error canceling order:", error);
+      res.status(500).json({ success: false, error: error.message || "Failed to cancel order" });
+    }
+  });
+
+  // Cancel all orders
+  app.delete("/api/hyperliquid/orders", async (req: Request, res: Response) => {
+    try {
+      const trading = getTradingInstance();
+      if (!trading.isConnected()) {
+        return res.status(401).json({ error: "Not connected to Hyperliquid" });
+      }
+      
+      const { coin } = req.query;
+      const result = await trading.cancelAllOrders(coin as string | undefined);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error canceling orders:", error);
+      res.status(500).json({ success: false, cancelled: 0, error: error.message });
     }
   });
 
