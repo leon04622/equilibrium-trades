@@ -1,13 +1,15 @@
-// SMA Crossover & Flag Pattern Detection System
+// SMA Crossover & Pattern Detection System
 // Based on the 21/200 SMA Crossover Strategy from cryptolifer.com
 // 
+// PATTERNS DETECTED:
+// Continuation: Bull Flag, Bear Flag, Pennant, Ascending/Descending/Symmetrical Triangles
+// Reversal: Double Top/Bottom, Head & Shoulders, Wedges
+//
 // METHODOLOGY:
-// 1. Determine bias: 21 SMA > 200 SMA = bullish, look for bull flags
-//                    21 SMA < 200 SMA = bearish, look for bear flags
-// 2. Identify the POLE: Strong impulse move in the direction of bias
-// 3. Identify the FLAG: Consolidation/pullback forming a channel
-// 4. Wait for BREAKOUT: Price breaks above flag (bull) or below flag (bear)
-// 5. ONLY signal entry after breakout is confirmed
+// 1. Determine bias: 21 SMA > 200 SMA = bullish, 21 SMA < 200 SMA = bearish
+// 2. Identify pattern formation
+// 3. Wait for BREAKOUT confirmation
+// 4. ONLY signal entry after breakout is confirmed
 
 import { getCandles, HyperliquidCandle } from "./hyperliquid";
 
@@ -18,16 +20,24 @@ export interface SMAValues {
   timestamp: number;
 }
 
-export interface FlagPattern {
-  type: "bull_flag" | "bear_flag";
+export type PatternName = 
+  | "bull_flag" | "bear_flag" 
+  | "bullish_pennant" | "bearish_pennant"
+  | "ascending_triangle" | "descending_triangle" | "symmetrical_triangle"
+  | "double_bottom" | "double_top"
+  | "rising_wedge" | "falling_wedge"
+  | "cup_and_handle";
+
+export interface DetectedPattern {
+  name: PatternName;
+  displayName: string;
   status: "forming" | "breakout_pending" | "breakout_confirmed";
-  poleStart: number;
-  poleEnd: number;
-  poleHeight: number;
-  flagHigh: number;
-  flagLow: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
   breakoutLevel: number;
   currentPrice: number;
+  confidence: number;
 }
 
 export interface CrossoverSignal {
@@ -50,26 +60,23 @@ export interface CrossoverSignal {
 
 // Timeframe-specific thresholds
 function getThresholds(timeframe: string) {
-  // Lower timeframes need smaller percentage thresholds
-  const thresholds: Record<string, { minPolePercent: number; minBreakoutPercent: number; flagLookback: number; poleLookback: number }> = {
-    "1m":  { minPolePercent: 0.15, minBreakoutPercent: 0.05, flagLookback: 10, poleLookback: 30 },
-    "5m":  { minPolePercent: 0.25, minBreakoutPercent: 0.08, flagLookback: 12, poleLookback: 35 },
-    "15m": { minPolePercent: 0.4,  minBreakoutPercent: 0.10, flagLookback: 12, poleLookback: 40 },
-    "1h":  { minPolePercent: 0.6,  minBreakoutPercent: 0.15, flagLookback: 15, poleLookback: 50 },
-    "4h":  { minPolePercent: 1.0,  minBreakoutPercent: 0.20, flagLookback: 15, poleLookback: 50 },
-    "1d":  { minPolePercent: 2.0,  minBreakoutPercent: 0.30, flagLookback: 15, poleLookback: 50 },
+  const thresholds: Record<string, { minMovePercent: number; minBreakoutPercent: number; lookback: number }> = {
+    "1m":  { minMovePercent: 0.15, minBreakoutPercent: 0.05, lookback: 30 },
+    "5m":  { minMovePercent: 0.25, minBreakoutPercent: 0.08, lookback: 35 },
+    "15m": { minMovePercent: 0.4,  minBreakoutPercent: 0.10, lookback: 40 },
+    "1h":  { minMovePercent: 0.6,  minBreakoutPercent: 0.15, lookback: 50 },
+    "4h":  { minMovePercent: 1.0,  minBreakoutPercent: 0.20, lookback: 50 },
+    "1d":  { minMovePercent: 2.0,  minBreakoutPercent: 0.30, lookback: 50 },
   };
   return thresholds[timeframe] || thresholds["1h"];
 }
 
-// Calculate Simple Moving Average
 function calculateSMA(prices: number[], period: number): number | null {
   if (prices.length < period) return null;
   const slice = prices.slice(-period);
   return slice.reduce((sum, p) => sum + p, 0) / period;
 }
 
-// Get SMA values for multiple periods from candle data
 export function calculateSMAFromCandles(candles: HyperliquidCandle[]): SMAValues | null {
   if (candles.length < 200) return null;
   
@@ -88,118 +95,69 @@ export function calculateSMAFromCandles(candles: HyperliquidCandle[]): SMAValues
   };
 }
 
-// Detect the "pole" - a strong impulse move
-function detectPole(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): { start: number; end: number; height: number; startIdx: number; endIdx: number } | null {
-  const thresholds = getThresholds(timeframe);
-  const lookback = Math.min(thresholds.poleLookback, candles.length - 20);
+// Find swing highs and lows
+function findSwingPoints(candles: HyperliquidCandle[], lookback: number = 5): { highs: { price: number; idx: number }[]; lows: { price: number; idx: number }[] } {
+  const highs: { price: number; idx: number }[] = [];
+  const lows: { price: number; idx: number }[] = [];
   
-  if (candles.length < lookback + 20) return null;
-  
-  // Look at candles before the most recent consolidation area
-  const startIdx = candles.length - lookback - 15;
-  const endIdx = candles.length - 15; // Leave last 15 for flag detection
-  const searchCandles = candles.slice(startIdx, endIdx);
-  
-  const closePrices = searchCandles.map(c => parseFloat(c.c));
-  const highPrices = searchCandles.map(c => parseFloat(c.h));
-  const lowPrices = searchCandles.map(c => parseFloat(c.l));
-  
-  if (isBullish) {
-    // For bull flag: find a strong upward impulse
-    // Look for lowest point followed by highest point
-    let bestPole = null;
-    let bestHeight = 0;
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const currentHigh = parseFloat(candles[i].h);
+    const currentLow = parseFloat(candles[i].l);
     
-    for (let i = 0; i < closePrices.length - 5; i++) {
-      const localLow = lowPrices[i];
-      const subsequentHighs = highPrices.slice(i + 1);
-      const maxHigh = Math.max(...subsequentHighs);
-      const maxHighIdx = i + 1 + subsequentHighs.indexOf(maxHigh);
-      
-      const poleHeight = maxHigh - localLow;
-      const heightPercent = (poleHeight / localLow) * 100;
-      
-      if (heightPercent >= thresholds.minPolePercent && poleHeight > bestHeight) {
-        bestPole = {
-          start: localLow,
-          end: maxHigh,
-          height: poleHeight,
-          startIdx: startIdx + i,
-          endIdx: startIdx + maxHighIdx,
-        };
-        bestHeight = poleHeight;
+    let isSwingHigh = true;
+    let isSwingLow = true;
+    
+    for (let j = 1; j <= lookback; j++) {
+      if (parseFloat(candles[i - j].h) >= currentHigh || parseFloat(candles[i + j].h) >= currentHigh) {
+        isSwingHigh = false;
+      }
+      if (parseFloat(candles[i - j].l) <= currentLow || parseFloat(candles[i + j].l) <= currentLow) {
+        isSwingLow = false;
       }
     }
     
-    return bestPole;
-  } else {
-    // For bear flag: find a strong downward impulse
-    let bestPole = null;
-    let bestHeight = 0;
-    
-    for (let i = 0; i < closePrices.length - 5; i++) {
-      const localHigh = highPrices[i];
-      const subsequentLows = lowPrices.slice(i + 1);
-      const minLow = Math.min(...subsequentLows);
-      const minLowIdx = i + 1 + subsequentLows.indexOf(minLow);
-      
-      const poleHeight = localHigh - minLow;
-      const heightPercent = (poleHeight / localHigh) * 100;
-      
-      if (heightPercent >= thresholds.minPolePercent && poleHeight > bestHeight) {
-        bestPole = {
-          start: localHigh,
-          end: minLow,
-          height: poleHeight,
-          startIdx: startIdx + i,
-          endIdx: startIdx + minLowIdx,
-        };
-        bestHeight = poleHeight;
-      }
-    }
-    
-    return bestPole;
+    if (isSwingHigh) highs.push({ price: currentHigh, idx: i });
+    if (isSwingLow) lows.push({ price: currentLow, idx: i });
   }
+  
+  return { highs, lows };
 }
 
-// Detect the "flag" - consolidation after the pole
-function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: number; height: number; startIdx: number; endIdx: number }, isBullish: boolean, timeframe: string): FlagPattern | null {
+// Detect Bull/Bear Flag patterns
+function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
   const thresholds = getThresholds(timeframe);
+  if (candles.length < 50) return null;
   
-  // Flag should be in the most recent candles after the pole
-  const flagStartIdx = Math.max(pole.endIdx, candles.length - thresholds.flagLookback);
-  const flagCandles = candles.slice(flagStartIdx);
+  const recentCandles = candles.slice(-50);
+  const closePrices = recentCandles.map(c => parseFloat(c.c));
+  const highPrices = recentCandles.map(c => parseFloat(c.h));
+  const lowPrices = recentCandles.map(c => parseFloat(c.l));
   
-  if (flagCandles.length < 3) return null;
-  
-  const closePrices = flagCandles.map(c => parseFloat(c.c));
-  const highPrices = flagCandles.map(c => parseFloat(c.h));
-  const lowPrices = flagCandles.map(c => parseFloat(c.l));
-  
-  const flagHigh = Math.max(...highPrices);
-  const flagLow = Math.min(...lowPrices);
-  const flagRange = flagHigh - flagLow;
-  const currentPrice = closePrices[closePrices.length - 1];
-  
-  // Flag should be a consolidation (smaller range than the pole)
-  const flagToPoleRatio = flagRange / pole.height;
-  
-  // Flag consolidation should be 10-70% of pole height
-  if (flagToPoleRatio > 0.75 || flagToPoleRatio < 0.05) {
-    return null;
-  }
+  // Find the pole (impulse move)
+  let poleStart = 0, poleEnd = 0, poleHeight = 0;
   
   if (isBullish) {
-    // Bull flag: price should be consolidating below or near the pole high
-    // Flag should show sideways or slight downward movement (pullback)
-    const isValidFlag = flagHigh <= pole.end * 1.005 && flagLow >= pole.end * 0.95;
+    const minIdx = lowPrices.slice(0, 30).indexOf(Math.min(...lowPrices.slice(0, 30)));
+    const maxAfterMin = Math.max(...highPrices.slice(minIdx, 35));
+    const maxIdx = minIdx + highPrices.slice(minIdx, 35).indexOf(maxAfterMin);
     
-    if (!isValidFlag) return null;
+    poleStart = lowPrices[minIdx];
+    poleEnd = maxAfterMin;
+    poleHeight = poleEnd - poleStart;
     
-    const breakoutLevel = flagHigh;
-    let status: FlagPattern["status"] = "forming";
+    const heightPercent = (poleHeight / poleStart) * 100;
+    if (heightPercent < thresholds.minMovePercent) return null;
     
-    // Check if breakout is happening
+    // Check for flag consolidation in last 15 candles
+    const flagCandles = recentCandles.slice(-15);
+    const flagHigh = Math.max(...flagCandles.map(c => parseFloat(c.h)));
+    const flagLow = Math.min(...flagCandles.map(c => parseFloat(c.l)));
+    const currentPrice = closePrices[closePrices.length - 1];
+    
+    const flagRange = flagHigh - flagLow;
+    if (flagRange / poleHeight > 0.7) return null; // Flag too large
+    
+    let status: DetectedPattern["status"] = "forming";
     const breakoutPercent = ((currentPrice - flagHigh) / flagHigh) * 100;
     if (breakoutPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
@@ -207,27 +165,38 @@ function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: nu
       status = "breakout_pending";
     }
     
+    const slBuffer = flagRange * 0.1;
     return {
-      type: "bull_flag",
+      name: "bull_flag",
+      displayName: "Bull Flag",
       status,
-      poleStart: pole.start,
-      poleEnd: pole.end,
-      poleHeight: pole.height,
-      flagHigh,
-      flagLow,
-      breakoutLevel,
+      entryPrice: status === "breakout_confirmed" ? currentPrice : flagHigh,
+      stopLoss: flagLow - slBuffer,
+      takeProfit: flagHigh + poleHeight,
+      breakoutLevel: flagHigh,
       currentPrice,
+      confidence: status === "breakout_confirmed" ? 80 : 55,
     };
   } else {
-    // Bear flag: price should be consolidating above or near the pole low
-    const isValidFlag = flagLow >= pole.end * 0.995 && flagHigh <= pole.end * 1.05;
+    const maxIdx = highPrices.slice(0, 30).indexOf(Math.max(...highPrices.slice(0, 30)));
+    const minAfterMax = Math.min(...lowPrices.slice(maxIdx, 35));
     
-    if (!isValidFlag) return null;
+    poleStart = highPrices[maxIdx];
+    poleEnd = minAfterMax;
+    poleHeight = poleStart - poleEnd;
     
-    const breakoutLevel = flagLow;
-    let status: FlagPattern["status"] = "forming";
+    const heightPercent = (poleHeight / poleStart) * 100;
+    if (heightPercent < thresholds.minMovePercent) return null;
     
-    // Check if breakout is happening (break below)
+    const flagCandles = recentCandles.slice(-15);
+    const flagHigh = Math.max(...flagCandles.map(c => parseFloat(c.h)));
+    const flagLow = Math.min(...flagCandles.map(c => parseFloat(c.l)));
+    const currentPrice = closePrices[closePrices.length - 1];
+    
+    const flagRange = flagHigh - flagLow;
+    if (flagRange / poleHeight > 0.7) return null;
+    
+    let status: DetectedPattern["status"] = "forming";
     const breakoutPercent = ((flagLow - currentPrice) / flagLow) * 100;
     if (breakoutPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
@@ -235,21 +204,242 @@ function detectFlag(candles: HyperliquidCandle[], pole: { start: number; end: nu
       status = "breakout_pending";
     }
     
+    const slBuffer = flagRange * 0.1;
     return {
-      type: "bear_flag",
+      name: "bear_flag",
+      displayName: "Bear Flag",
       status,
-      poleStart: pole.start,
-      poleEnd: pole.end,
-      poleHeight: pole.height,
-      flagHigh,
-      flagLow,
-      breakoutLevel,
+      entryPrice: status === "breakout_confirmed" ? currentPrice : flagLow,
+      stopLoss: flagHigh + slBuffer,
+      takeProfit: flagLow - poleHeight,
+      breakoutLevel: flagLow,
       currentPrice,
+      confidence: status === "breakout_confirmed" ? 80 : 55,
     };
   }
 }
 
-// Detect crossovers by comparing current and previous SMA positions
+// Detect Triangle patterns (Ascending, Descending, Symmetrical)
+function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  if (candles.length < 40) return null;
+  
+  const thresholds = getThresholds(timeframe);
+  const recentCandles = candles.slice(-40);
+  const { highs, lows } = findSwingPoints(recentCandles, 3);
+  
+  if (highs.length < 2 || lows.length < 2) return null;
+  
+  const recentHighs = highs.slice(-3);
+  const recentLows = lows.slice(-3);
+  
+  if (recentHighs.length < 2 || recentLows.length < 2) return null;
+  
+  // Calculate trendlines
+  const highSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
+  const lowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
+  
+  const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+  const resistance = recentHighs[recentHighs.length - 1].price;
+  const support = recentLows[recentLows.length - 1].price;
+  const range = resistance - support;
+  
+  let patternName: PatternName | null = null;
+  let displayName = "";
+  
+  // Ascending Triangle: flat resistance, rising support
+  if (Math.abs(highSlope) < 0.001 && lowSlope > 0) {
+    patternName = "ascending_triangle";
+    displayName = "Ascending Triangle";
+  }
+  // Descending Triangle: falling resistance, flat support
+  else if (highSlope < 0 && Math.abs(lowSlope) < 0.001) {
+    patternName = "descending_triangle";
+    displayName = "Descending Triangle";
+  }
+  // Symmetrical Triangle: converging lines
+  else if (highSlope < 0 && lowSlope > 0) {
+    patternName = "symmetrical_triangle";
+    displayName = "Symmetrical Triangle";
+  }
+  
+  if (!patternName) return null;
+  
+  let status: DetectedPattern["status"] = "forming";
+  let breakoutLevel: number;
+  let stopLoss: number;
+  let takeProfit: number;
+  
+  if (isBullish && (patternName === "ascending_triangle" || patternName === "symmetrical_triangle")) {
+    breakoutLevel = resistance;
+    const breakoutPercent = ((currentPrice - resistance) / resistance) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    }
+    stopLoss = support - (range * 0.1);
+    takeProfit = resistance + range;
+  } else if (!isBullish && (patternName === "descending_triangle" || patternName === "symmetrical_triangle")) {
+    breakoutLevel = support;
+    const breakoutPercent = ((support - currentPrice) / support) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    }
+    stopLoss = resistance + (range * 0.1);
+    takeProfit = support - range;
+  } else {
+    return null;
+  }
+  
+  return {
+    name: patternName,
+    displayName,
+    status,
+    entryPrice: status === "breakout_confirmed" ? currentPrice : breakoutLevel,
+    stopLoss,
+    takeProfit,
+    breakoutLevel,
+    currentPrice,
+    confidence: status === "breakout_confirmed" ? 75 : 50,
+  };
+}
+
+// Detect Double Top/Bottom patterns
+function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  if (candles.length < 50) return null;
+  
+  const thresholds = getThresholds(timeframe);
+  const recentCandles = candles.slice(-50);
+  const { highs, lows } = findSwingPoints(recentCandles, 4);
+  
+  if (isBullish && lows.length >= 2) {
+    // Double Bottom - bullish reversal
+    const lastTwoLows = lows.slice(-2);
+    const priceDiff = Math.abs(lastTwoLows[0].price - lastTwoLows[1].price);
+    const avgLow = (lastTwoLows[0].price + lastTwoLows[1].price) / 2;
+    
+    if ((priceDiff / avgLow) * 100 < 1) { // Lows within 1%
+      const neckline = Math.max(...highs.filter(h => h.idx > lastTwoLows[0].idx && h.idx < lastTwoLows[1].idx).map(h => h.price)) || avgLow * 1.02;
+      const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+      const patternHeight = neckline - avgLow;
+      
+      let status: DetectedPattern["status"] = "forming";
+      const breakoutPercent = ((currentPrice - neckline) / neckline) * 100;
+      if (breakoutPercent > thresholds.minBreakoutPercent) {
+        status = "breakout_confirmed";
+      }
+      
+      return {
+        name: "double_bottom",
+        displayName: "Double Bottom",
+        status,
+        entryPrice: status === "breakout_confirmed" ? currentPrice : neckline,
+        stopLoss: avgLow - (patternHeight * 0.1),
+        takeProfit: neckline + patternHeight,
+        breakoutLevel: neckline,
+        currentPrice,
+        confidence: status === "breakout_confirmed" ? 75 : 50,
+      };
+    }
+  } else if (!isBullish && highs.length >= 2) {
+    // Double Top - bearish reversal
+    const lastTwoHighs = highs.slice(-2);
+    const priceDiff = Math.abs(lastTwoHighs[0].price - lastTwoHighs[1].price);
+    const avgHigh = (lastTwoHighs[0].price + lastTwoHighs[1].price) / 2;
+    
+    if ((priceDiff / avgHigh) * 100 < 1) {
+      const neckline = Math.min(...lows.filter(l => l.idx > lastTwoHighs[0].idx && l.idx < lastTwoHighs[1].idx).map(l => l.price)) || avgHigh * 0.98;
+      const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+      const patternHeight = avgHigh - neckline;
+      
+      let status: DetectedPattern["status"] = "forming";
+      const breakoutPercent = ((neckline - currentPrice) / neckline) * 100;
+      if (breakoutPercent > thresholds.minBreakoutPercent) {
+        status = "breakout_confirmed";
+      }
+      
+      return {
+        name: "double_top",
+        displayName: "Double Top",
+        status,
+        entryPrice: status === "breakout_confirmed" ? currentPrice : neckline,
+        stopLoss: avgHigh + (patternHeight * 0.1),
+        takeProfit: neckline - patternHeight,
+        breakoutLevel: neckline,
+        currentPrice,
+        confidence: status === "breakout_confirmed" ? 75 : 50,
+      };
+    }
+  }
+  
+  return null;
+}
+
+// Detect Wedge patterns (Rising/Falling)
+function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  if (candles.length < 40) return null;
+  
+  const thresholds = getThresholds(timeframe);
+  const recentCandles = candles.slice(-40);
+  const { highs, lows } = findSwingPoints(recentCandles, 3);
+  
+  if (highs.length < 3 || lows.length < 3) return null;
+  
+  const recentHighs = highs.slice(-3);
+  const recentLows = lows.slice(-3);
+  
+  const highSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
+  const lowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
+  
+  const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+  const resistance = recentHighs[recentHighs.length - 1].price;
+  const support = recentLows[recentLows.length - 1].price;
+  const range = resistance - support;
+  
+  // Rising Wedge (bearish) - both lines rising, converging
+  if (highSlope > 0 && lowSlope > 0 && highSlope < lowSlope && !isBullish) {
+    let status: DetectedPattern["status"] = "forming";
+    const breakoutPercent = ((support - currentPrice) / support) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    }
+    
+    return {
+      name: "rising_wedge",
+      displayName: "Rising Wedge (Bearish)",
+      status,
+      entryPrice: status === "breakout_confirmed" ? currentPrice : support,
+      stopLoss: resistance + (range * 0.1),
+      takeProfit: support - range,
+      breakoutLevel: support,
+      currentPrice,
+      confidence: status === "breakout_confirmed" ? 70 : 45,
+    };
+  }
+  
+  // Falling Wedge (bullish) - both lines falling, converging
+  if (highSlope < 0 && lowSlope < 0 && highSlope > lowSlope && isBullish) {
+    let status: DetectedPattern["status"] = "forming";
+    const breakoutPercent = ((currentPrice - resistance) / resistance) * 100;
+    if (breakoutPercent > thresholds.minBreakoutPercent) {
+      status = "breakout_confirmed";
+    }
+    
+    return {
+      name: "falling_wedge",
+      displayName: "Falling Wedge (Bullish)",
+      status,
+      entryPrice: status === "breakout_confirmed" ? currentPrice : resistance,
+      stopLoss: support - (range * 0.1),
+      takeProfit: resistance + range,
+      breakoutLevel: resistance,
+      currentPrice,
+      confidence: status === "breakout_confirmed" ? 70 : 45,
+    };
+  }
+  
+  return null;
+}
+
+// Detect crossovers
 export function detectCrossover(
   currentSMA: SMAValues,
   previousSMA: SMAValues | null
@@ -259,40 +449,29 @@ export function detectCrossover(
   const currentDiff = currentSMA.sma21 - currentSMA.sma200;
   const previousDiff = previousSMA.sma21 - previousSMA.sma200;
   
-  if (previousDiff < 0 && currentDiff >= 0) {
-    return "bullish_crossover";
-  }
-  
-  if (previousDiff > 0 && currentDiff <= 0) {
-    return "bearish_crossover";
-  }
+  if (previousDiff < 0 && currentDiff >= 0) return "bullish_crossover";
+  if (previousDiff > 0 && currentDiff <= 0) return "bearish_crossover";
   
   return null;
 }
 
-// Analyze a coin for SMA crossover signals with proper flag pattern detection
+// Main analysis function - scans for ALL pattern types
 export async function analyzeCoinForSignals(
   coin: string,
   timeframe: string = "1m"
 ): Promise<CrossoverSignal | null> {
   try {
     const intervalMap: Record<string, string> = {
-      "1m": "1m",
-      "5m": "5m", 
-      "15m": "15m",
-      "1h": "1h",
-      "4h": "4h",
-      "1d": "1d",
+      "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
     };
     
     const interval = intervalMap[timeframe] || "1m";
-    
     const candleMinutes: Record<string, number> = {
       "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
     };
     
     const minutes = candleMinutes[timeframe] || 1;
-    const requiredCandles = 350; // Need plenty of candles for pattern detection
+    const requiredCandles = 350;
     const durationMs = requiredCandles * minutes * 60 * 1000;
     
     const endTime = Date.now();
@@ -300,148 +479,97 @@ export async function analyzeCoinForSignals(
     
     const candles = await getCandles(coin, interval, startTime, endTime);
     
-    if (candles.length < 210) {
-      return null;
-    }
+    if (candles.length < 210) return null;
     
-    // Calculate current SMA values
     const currentSMA = calculateSMAFromCandles(candles);
     if (!currentSMA) return null;
     
-    // Determine market bias from SMAs
     const isBullish = currentSMA.sma21 > currentSMA.sma200;
     
-    // Calculate previous SMA for crossover detection
+    // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);
     const previousSMA = calculateSMAFromCandles(previousCandles);
     const crossover = detectCrossover(currentSMA, previousSMA);
     
-    // Detect pole (impulse move)
-    const pole = detectPole(candles, isBullish, timeframe);
-    
-    // Detect flag pattern (consolidation + breakout status)
-    const flag = pole ? detectFlag(candles, pole, isBullish, timeframe) : null;
-    
-    // Build signal based on what we found
-    let signalType: CrossoverSignal["type"];
-    let status: CrossoverSignal["status"];
-    let confidence: number;
-    let description: string;
-    let patternType: string;
-    let suggestedSL: number;
-    let suggestedTP: number;
-    let entryPrice: number;
-    
-    // Priority 1: Crossover just happened
     if (crossover) {
-      signalType = crossover;
-      status = "confirmed";
-      confidence = 85;
-      entryPrice = currentSMA.price;
-      
-      if (crossover === "bullish_crossover") {
-        description = `21 SMA crossed ABOVE 200 SMA on ${timeframe}. Bullish bias confirmed. Now look for bull flag patterns to form before entry.`;
-        suggestedSL = currentSMA.sma200 * 0.99;
-        suggestedTP = currentSMA.price * 1.03;
-        patternType = "SMA Crossover - Bullish";
-      } else {
-        description = `21 SMA crossed BELOW 200 SMA on ${timeframe}. Bearish bias confirmed. Now look for bear flag patterns to form before entry.`;
-        suggestedSL = currentSMA.sma200 * 1.01;
-        suggestedTP = currentSMA.price * 0.97;
-        patternType = "SMA Crossover - Bearish";
-      }
+      return {
+        id: `${coin}-${timeframe}-${Date.now()}`,
+        coin,
+        type: crossover,
+        status: "confirmed",
+        timeframe,
+        sma21: currentSMA.sma21,
+        sma200: currentSMA.sma200,
+        currentPrice: currentSMA.price,
+        entryPrice: currentSMA.price,
+        suggestedSL: crossover === "bullish_crossover" ? currentSMA.sma200 * 0.99 : currentSMA.sma200 * 1.01,
+        suggestedTP: crossover === "bullish_crossover" ? currentSMA.price * 1.03 : currentSMA.price * 0.97,
+        confidence: 85,
+        detectedAt: new Date(),
+        description: `21 SMA crossed ${crossover === "bullish_crossover" ? "ABOVE" : "BELOW"} 200 SMA on ${timeframe}. ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"} bias confirmed. Look for pattern setups!`,
+        patternType: `SMA Crossover - ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"}`,
+      };
     }
-    // Priority 2: Flag pattern with breakout confirmed - ENTRY SIGNAL
-    else if (flag && flag.status === "breakout_confirmed") {
-      signalType = isBullish ? "bullish_setup" : "bearish_setup";
+    
+    // Scan for all pattern types (prioritize breakouts)
+    const patterns: DetectedPattern[] = [];
+    
+    // Try all pattern detectors
+    const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
+    if (flagPattern) patterns.push(flagPattern);
+    
+    const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
+    if (trianglePattern) patterns.push(trianglePattern);
+    
+    const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
+    if (doublePattern) patterns.push(doublePattern);
+    
+    const wedgePattern = detectWedgePattern(candles, isBullish, timeframe);
+    if (wedgePattern) patterns.push(wedgePattern);
+    
+    if (patterns.length === 0) return null;
+    
+    // Sort: breakouts first, then by confidence
+    patterns.sort((a, b) => {
+      if (a.status === "breakout_confirmed" && b.status !== "breakout_confirmed") return -1;
+      if (b.status === "breakout_confirmed" && a.status !== "breakout_confirmed") return 1;
+      return b.confidence - a.confidence;
+    });
+    
+    const bestPattern = patterns[0];
+    const risk = Math.abs(bestPattern.entryPrice - bestPattern.stopLoss);
+    const reward = Math.abs(bestPattern.takeProfit - bestPattern.entryPrice);
+    const rrRatio = risk > 0 ? (reward / risk).toFixed(1) : "0";
+    
+    let description: string;
+    let status: CrossoverSignal["status"];
+    
+    if (bestPattern.status === "breakout_confirmed") {
       status = "breakout";
-      confidence = 80;
-      
-      if (isBullish) {
-        // Cryptolifer methodology:
-        // SL = just below flag low (the consolidation low)
-        // TP = entry + full pole height (measured move target)
-        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1; // Small buffer below flag low
-        suggestedSL = flag.flagLow - slBuffer;
-        
-        // TP is the pole height projected from breakout (measured move)
-        suggestedTP = flag.breakoutLevel + flag.poleHeight;
-        entryPrice = currentSMA.price;
-        
-        const risk = entryPrice - suggestedSL;
-        const reward = suggestedTP - entryPrice;
-        const rrRatio = (reward / risk).toFixed(1);
-        
-        description = `BULL FLAG BREAKOUT on ${timeframe}! Entry at $${entryPrice.toFixed(2)}. SL below flag low at $${suggestedSL.toFixed(2)}. TP measured move to $${suggestedTP.toFixed(2)}. R:R ${rrRatio}:1`;
-        patternType = "Bull Flag Breakout - ENTRY NOW";
-      } else {
-        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
-        suggestedSL = flag.flagHigh + slBuffer;
-        suggestedTP = flag.breakoutLevel - flag.poleHeight;
-        entryPrice = currentSMA.price;
-        
-        const risk = suggestedSL - entryPrice;
-        const reward = entryPrice - suggestedTP;
-        const rrRatio = (reward / risk).toFixed(1);
-        
-        description = `BEAR FLAG BREAKOUT on ${timeframe}! Entry at $${entryPrice.toFixed(2)}. SL above flag high at $${suggestedSL.toFixed(2)}. TP measured move to $${suggestedTP.toFixed(2)}. R:R ${rrRatio}:1`;
-        patternType = "Bear Flag Breakout - ENTRY NOW";
-      }
-    }
-    // Priority 3: Flag pattern forming but NOT broken out - DO NOT ENTER YET
-    else if (flag && (flag.status === "forming" || flag.status === "breakout_pending")) {
-      signalType = isBullish ? "bullish_setup" : "bearish_setup";
+      description = `${bestPattern.displayName} BREAKOUT on ${timeframe}! Entry $${bestPattern.entryPrice.toFixed(2)}, SL $${bestPattern.stopLoss.toFixed(2)}, TP $${bestPattern.takeProfit.toFixed(2)}. R:R ${rrRatio}:1`;
+    } else {
       status = "forming";
-      confidence = 55;
-      
-      if (isBullish) {
-        // Same methodology but for forming pattern
-        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
-        suggestedSL = flag.flagLow - slBuffer;
-        suggestedTP = flag.flagHigh + flag.poleHeight; // TP from breakout level
-        entryPrice = flag.breakoutLevel; // Entry would be at breakout
-        
-        const risk = entryPrice - suggestedSL;
-        const reward = suggestedTP - entryPrice;
-        const rrRatio = (reward / risk).toFixed(1);
-        
-        description = `Bull flag FORMING on ${timeframe}. Flag range: $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout above $${flag.flagHigh.toFixed(2)}! Potential R:R ${rrRatio}:1`;
-        patternType = "Bull Flag Forming - WAIT";
-      } else {
-        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
-        suggestedSL = flag.flagHigh + slBuffer;
-        suggestedTP = flag.flagLow - flag.poleHeight;
-        entryPrice = flag.breakoutLevel;
-        
-        const risk = suggestedSL - entryPrice;
-        const reward = entryPrice - suggestedTP;
-        const rrRatio = (reward / risk).toFixed(1);
-        
-        description = `Bear flag FORMING on ${timeframe}. Flag range: $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout below $${flag.flagLow.toFixed(2)}! Potential R:R ${rrRatio}:1`;
-        patternType = "Bear Flag Forming - WAIT";
-      }
-    }
-    // No actionable pattern
-    else {
-      return null;
+      description = `${bestPattern.displayName} FORMING on ${timeframe}. Breakout level: $${bestPattern.breakoutLevel.toFixed(2)}. WAIT for confirmation! Potential R:R ${rrRatio}:1`;
     }
     
     return {
       id: `${coin}-${timeframe}-${Date.now()}`,
       coin,
-      type: signalType!,
-      status: status!,
+      type: isBullish ? "bullish_setup" : "bearish_setup",
+      status,
       timeframe,
       sma21: currentSMA.sma21,
       sma200: currentSMA.sma200,
       currentPrice: currentSMA.price,
-      entryPrice: entryPrice!,
-      suggestedSL: suggestedSL!,
-      suggestedTP: suggestedTP!,
-      confidence: confidence!,
+      entryPrice: bestPattern.entryPrice,
+      suggestedSL: bestPattern.stopLoss,
+      suggestedTP: bestPattern.takeProfit,
+      confidence: bestPattern.confidence,
       detectedAt: new Date(),
-      description: description!,
-      patternType: patternType!,
+      description,
+      patternType: bestPattern.status === "breakout_confirmed" 
+        ? `${bestPattern.displayName} - ENTRY NOW` 
+        : `${bestPattern.displayName} - WAIT`,
     };
   } catch (error) {
     console.error(`Error analyzing ${coin} for signals:`, error);
