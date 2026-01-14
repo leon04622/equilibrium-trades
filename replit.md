@@ -17,12 +17,23 @@ Equilibrium is a beginner-friendly trading platform that teaches users a specifi
 - **Routing**: Wouter
 - **UI Components**: Shadcn/ui with custom components
 - **Charts**: TradingView embedded widget
+- **Wallet**: MetaMask/Browser wallet via ethers.js (non-custodial)
+- **Trading**: Client-side order signing with direct Hyperliquid API submission
 
 ### Backend (Express + TypeScript)
 - **Framework**: Express.js
 - **AI**: OpenAI via Replit AI Integrations (gpt-5.1)
 - **Storage**: In-memory storage (MemStorage)
 - **Streaming**: Server-Sent Events for pattern detection
+
+### Non-Custodial Trading Architecture
+This platform uses a **fully non-custodial** architecture:
+- Users connect their own wallet (MetaMask/browser extension)
+- All authentication and order signing happens **client-side** in the user's wallet
+- The app only requests message/order signatures from the wallet
+- Signed payloads are submitted directly to Hyperliquid's public API from the frontend
+- **No private keys** are ever stored, transmitted, or handled by the server
+- Works exactly like Hyperliquid's own UI, GMX, or Uniswap
 
 ## Project Structure
 ```
@@ -48,7 +59,10 @@ client/
 │   │   └── settings.tsx      # User settings
 │   ├── lib/
 │   │   ├── patterns.ts       # Pattern definitions (18+ patterns)
-│   │   └── theme.tsx         # Theme provider
+│   │   ├── theme.tsx         # Theme provider
+│   │   ├── wallet-context.tsx    # Wallet connection (MetaMask)
+│   │   ├── hyperliquid-client.ts # Client-side Hyperliquid SDK
+│   │   └── trading-context.tsx   # Trading state management
 │   └── App.tsx               # Main app with routing
 
 server/
@@ -147,3 +161,9 @@ npm run db:push    # Push database schema (if using DB)
     - Large order (whale) detection
     - Institutional level identification
     - WebSocket streaming for real-time updates
+- **January 2026**: Non-custodial trading architecture
+  - MetaMask wallet connection in header
+  - Client-side order signing with ethers.js
+  - Direct submission to Hyperliquid API from frontend
+  - No private keys on server - fully non-custodial
+  - Works like Hyperliquid UI, GMX, or Uniswap

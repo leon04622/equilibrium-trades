@@ -8,8 +8,10 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ShieldCheck, Target, AlertTriangle, TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { ShieldCheck, Target, AlertTriangle, TrendingUp, TrendingDown, Wallet, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
+import { useWallet } from "@/lib/wallet-context";
+import { placeOrder as placeHyperliquidOrder, setLeverage } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
 
 interface OrderEntryProps {
@@ -26,9 +28,11 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [showSLTP, setShowSLTP] = useState(false);
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
-  const [leverage, setLeverage] = useState([5]);
+  const [leverageValue, setLeverageValue] = useState([5]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { connected, balance, connect, placeOrder } = useTrading();
+  const { balance, placeOrder } = useTrading();
+  const { isConnected, address, signer, connect } = useWallet();
   const { toast } = useToast();
 
   const formatPrice = (p: number) => {
@@ -55,7 +59,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   };
 
   const calculateMargin = () => {
-    return calculateEstimate() / leverage[0];
+    return calculateEstimate() / leverageValue[0];
   };
 
   const calculatePnL = () => {
@@ -70,11 +74,11 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     let slPnL = 0, tpPnL = 0;
     
     if (side === "buy") {
-      if (!isNaN(slPrice) && slPrice > 0) slPnL = (slPrice - entryPrice) * qty * leverage[0];
-      if (!isNaN(tpPrice) && tpPrice > 0) tpPnL = (tpPrice - entryPrice) * qty * leverage[0];
+      if (!isNaN(slPrice) && slPrice > 0) slPnL = (slPrice - entryPrice) * qty * leverageValue[0];
+      if (!isNaN(tpPrice) && tpPrice > 0) tpPnL = (tpPrice - entryPrice) * qty * leverageValue[0];
     } else {
-      if (!isNaN(slPrice) && slPrice > 0) slPnL = (entryPrice - slPrice) * qty * leverage[0];
-      if (!isNaN(tpPrice) && tpPrice > 0) tpPnL = (entryPrice - tpPrice) * qty * leverage[0];
+      if (!isNaN(slPrice) && slPrice > 0) slPnL = (entryPrice - slPrice) * qty * leverageValue[0];
+      if (!isNaN(tpPrice) && tpPrice > 0) tpPnL = (entryPrice - tpPrice) * qty * leverageValue[0];
     }
     
     return { slPnL, tpPnL };
@@ -94,9 +98,17 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     return true;
   };
 
-  const handleSubmit = () => {
-    if (!connected) {
-      connect();
+  const handleSubmit = async () => {
+    if (!isConnected) {
+      try {
+        await connect();
+      } catch (error) {
+        toast({
+          title: "Connection Failed",
+          description: "Failed to connect wallet. Please try again.",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
@@ -110,47 +122,79 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       }
       return;
     }
-    
-    const orderPrice = getPrice();
-    const qty = getQuantity();
-    
-    const result = placeOrder({
-      coin,
-      side,
-      type: orderType,
-      quantity: qty,
-      price: orderPrice,
-      stopLoss: showSLTP && stopLoss ? parseFloat(stopLoss) : undefined,
-      takeProfit: showSLTP && takeProfit ? parseFloat(takeProfit) : undefined,
-      leverage: leverage[0],
-    });
 
-    if (!result.success) {
+    if (!signer) {
       toast({
-        title: "Order Failed",
-        description: result.error || "Unable to place order",
+        title: "Wallet not ready",
+        description: "Please connect your wallet first.",
         variant: "destructive",
       });
       return;
     }
+    
+    const orderPrice = getPrice();
+    const qty = getQuantity();
+    
+    setIsSubmitting(true);
+    
+    try {
+      await setLeverage(signer, coin, leverageValue[0], true);
+      
+      const result = await placeHyperliquidOrder(signer, {
+        coin,
+        isBuy: side === "buy",
+        size: qty,
+        price: orderType === "limit" ? orderPrice : undefined,
+        orderType,
+        reduceOnly: false,
+        slippage: 0.02,
+      });
 
-    toast({
-      title: `${side === "buy" ? "Long" : "Short"} Position Opened`,
-      description: `${qty} ${coin} at $${formatPrice(orderPrice)} with ${leverage[0]}x leverage`,
-    });
+      if (!result.success) {
+        let errorMsg = result.error || "Unable to place order";
+        
+        if (errorMsg.includes("does not exist")) {
+          errorMsg = "Please deposit funds on Hyperliquid first at app.hyperliquid.xyz";
+        } else if (errorMsg.includes("Insufficient")) {
+          errorMsg = "Insufficient margin. Please deposit more funds on Hyperliquid.";
+        }
+        
+        toast({
+          title: "Order Failed",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
+      }
 
-    setQuantity("");
-    setPrice("");
-    setStopLoss("");
-    setTakeProfit("");
+      toast({
+        title: `${side === "buy" ? "Long" : "Short"} Order ${result.status === "filled" ? "Filled" : "Placed"}`,
+        description: `${qty} ${coin} at $${formatPrice(result.avgPrice || orderPrice)} with ${leverageValue[0]}x leverage`,
+      });
 
-    onOrderSubmit?.({
-      side,
-      type: orderType,
-      quantity: qty,
-      price: orderPrice,
-      leverage: leverage[0],
-    });
+      setQuantity("");
+      setPrice("");
+      setStopLoss("");
+      setTakeProfit("");
+
+      onOrderSubmit?.({
+        side,
+        type: orderType,
+        quantity: qty,
+        price: result.avgPrice || orderPrice,
+        leverage: leverageValue[0],
+        orderId: result.orderId,
+      });
+    } catch (error: any) {
+      console.error("Order error:", error);
+      toast({
+        title: "Order Failed",
+        description: error.message || "Transaction failed. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const pnl = calculatePnL();
@@ -161,10 +205,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         <CardTitle className="text-sm flex items-center justify-between">
           <span>Place Order</span>
           <div className="flex items-center gap-2">
-            {connected && (
+            {isConnected && address && (
               <Badge variant="outline" className="font-mono text-xs">
                 <Wallet className="h-3 w-3 mr-1" />
-                ${balance.toFixed(2)}
+                {address.slice(0, 6)}...{address.slice(-4)}
               </Badge>
             )}
             <Badge variant="outline" className="font-mono text-xs">
@@ -174,7 +218,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!connected && (
+        {!isConnected && (
           <div className="p-3 bg-primary/10 rounded-lg text-center">
             <p className="text-xs text-muted-foreground mb-2">Connect wallet to start trading</p>
             <Button size="sm" onClick={() => connect()} data-testid="button-connect-order">
@@ -258,7 +302,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
                   size="sm"
                   className="flex-1 h-6 text-[10px]"
                   onClick={() => {
-                    const maxQty = (balance * leverage[0]) / currentPrice;
+                    const maxQty = (balance * leverageValue[0]) / currentPrice;
                     setQuantity((maxQty * (pct / 100)).toFixed(4));
                   }}
                   data-testid={`quantity-${pct}`}
@@ -270,10 +314,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Leverage: {leverage[0]}x</Label>
+            <Label className="text-xs">Leverage: {leverageValue[0]}x</Label>
             <Slider
-              value={leverage}
-              onValueChange={setLeverage}
+              value={leverageValue}
+              onValueChange={setLeverageValue}
               min={1}
               max={50}
               step={1}
@@ -375,17 +419,22 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         <Button
           className={cn(
             "w-full font-semibold",
-            !connected
+            !isConnected
               ? ""
               : side === "buy"
                 ? "bg-bullish hover:bg-bullish/90"
                 : "bg-bearish hover:bg-bearish/90"
           )}
           onClick={handleSubmit}
-          disabled={connected && !isValidOrder()}
+          disabled={isSubmitting || (isConnected && !isValidOrder())}
           data-testid="button-submit-order"
         >
-          {!connected 
+          {isSubmitting ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Signing...
+            </>
+          ) : !isConnected 
             ? "Connect Wallet to Trade"
             : `${side === "buy" ? "Buy / Long" : "Sell / Short"} ${coin}`
           }
@@ -394,6 +443,19 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         <p className="text-[10px] text-center text-muted-foreground">
           Trading involves risk. Only trade with funds you can afford to lose.
         </p>
+        {isConnected && (
+          <p className="text-[10px] text-center text-muted-foreground">
+            Requires funded Hyperliquid account at{" "}
+            <a 
+              href="https://app.hyperliquid.xyz" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-primary underline"
+            >
+              app.hyperliquid.xyz
+            </a>
+          </p>
+        )}
       </CardContent>
     </Card>
   );
