@@ -10,6 +10,7 @@ import {
   getRecentTrades,
   getCandles 
 } from "./hyperliquid";
+import { scanForSignals, getSMAStatus } from "./sma-detection";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -243,6 +244,50 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching candles:", error);
       res.status(500).json({ error: "Failed to fetch candles" });
+    }
+  });
+
+  // ============ SMA CROSSOVER SIGNALS ============
+
+  // Scan for real-time SMA crossover signals
+  app.get("/api/signals/crossover", async (req: Request, res: Response) => {
+    try {
+      const coinsParam = req.query.coins as string;
+      const timeframesParam = req.query.timeframes as string;
+      
+      const coins = coinsParam 
+        ? coinsParam.split(",") 
+        : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI"];
+      
+      const timeframes = timeframesParam 
+        ? timeframesParam.split(",") 
+        : ["1m", "5m", "15m"];
+      
+      const signals = await scanForSignals(coins, timeframes);
+      res.json(signals);
+    } catch (error) {
+      console.error("Error scanning for crossover signals:", error);
+      res.status(500).json({ error: "Failed to scan for signals" });
+    }
+  });
+
+  // Get SMA status for a specific coin
+  app.get("/api/signals/sma-status/:coin", async (req: Request, res: Response) => {
+    try {
+      const timeframe = (req.query.timeframe as string) || "1m";
+      const status = await getSMAStatus(req.params.coin, timeframe);
+      
+      if (!status) {
+        return res.json({ 
+          coin: req.params.coin, 
+          error: "Not enough data for SMA calculation" 
+        });
+      }
+      
+      res.json({ coin: req.params.coin, timeframe, ...status });
+    } catch (error) {
+      console.error("Error getting SMA status:", error);
+      res.status(500).json({ error: "Failed to get SMA status" });
     }
   });
 
