@@ -1,28 +1,20 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TradingViewChart } from "@/components/trading-view-chart";
-import { SMAIndicator } from "@/components/sma-indicator";
-import { LivePatternCard } from "@/components/live-pattern-card";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
 import { PositionsPanel } from "@/components/positions-panel";
-import { PatternModal } from "@/components/pattern-modal";
 import { OrderEntry } from "@/components/order-entry";
-import { ChartPatternOverlay } from "@/components/chart-pattern-overlay";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AccountEquity } from "@/components/account-equity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCcw, Sparkles, Settings, Info } from "lucide-react";
-import { tradingPatterns } from "@/lib/patterns";
-import { IndicatorPanel } from "@/components/indicator-panel";
-import { TradeHistory } from "@/components/trade-history";
+import { Settings, BookOpen, ArrowLeftRight } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
-import type { LivePattern, MarketCondition, PatternDefinition } from "@shared/schema";
+import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
 const timeframes = [
@@ -32,10 +24,8 @@ const timeframes = [
   { value: "15", label: "15m" },
   { value: "30", label: "30m" },
   { value: "60", label: "1h" },
-  { value: "120", label: "2h" },
   { value: "240", label: "4h" },
-  { value: "D", label: "D" },
-  { value: "M", label: "M" },
+  { value: "D", label: "1D" },
 ];
 
 interface TradingProps {
@@ -45,32 +35,20 @@ interface TradingProps {
 export default function Trading({ visible = true }: TradingProps) {
   const [coin, setCoin] = useState("BTC");
   const [timeframe, setTimeframe] = useState("5");
-  const [selectedPattern, setSelectedPattern] = useState<PatternDefinition | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [livePatterns, setLivePatterns] = useState<LivePattern[]>([]);
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chart" | "orderbook" | "trades">("chart");
+  const [showOrderBook, setShowOrderBook] = useState(false);
+  const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
   const { toast } = useToast();
   const { updatePrices } = useTrading();
 
-  // Build TradingView symbol from coin - use Binance as TradingView source for reliability
   const tvSymbol = `BINANCE:${coin}USDT`;
 
   const handleOrderSubmit = (order: any) => {
     toast({
-      title: `${order.side === "buy" ? "Buy" : "Sell"} Order Submitted`,
-      description: `${order.quantity} ${coin} at ${order.type === "market" ? "market price" : `$${order.price}`}`,
+      title: `${order.side === "buy" ? "Long" : "Short"} Order Submitted`,
+      description: `${order.quantity} ${coin} at $${order.price?.toLocaleString() || "market"}`,
     });
   };
 
-  // Fetch market condition from API - only when visible
-  const { data: marketCondition, isLoading: isLoadingMarket } = useQuery<MarketCondition>({
-    queryKey: ["/api/market", tvSymbol],
-    refetchInterval: visible ? 30000 : false,
-    enabled: visible,
-  });
-
-  // Fetch ticker data - only when visible
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
     refetchInterval: visible ? 3000 : false,
@@ -82,6 +60,9 @@ export default function Trading({ visible = true }: TradingProps) {
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const priceChange = prevPrice > 0 ? price - prevPrice : 0;
   const priceChangePercent = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+  const volume24h = currentTicker ? parseFloat(currentTicker.dayNtlVlm) : 0;
+  const openInterest = currentTicker ? parseFloat(currentTicker.openInterest || "0") : 0;
+  const fundingRate = currentTicker ? parseFloat(currentTicker.funding || "0") : 0;
 
   useEffect(() => {
     if (tickers.length > 0) {
@@ -95,178 +76,90 @@ export default function Trading({ visible = true }: TradingProps) {
     }
   }, [tickers, updatePrices]);
 
-  const displayMarketCondition: MarketCondition = marketCondition || {
-    symbol: `${coin}/USDC`,
-    currentPrice: price,
-    sma21_1m: price * 0.998,
-    sma200_1m: price * 0.995,
-    sma200_5m: price * 0.99,
-    trend: priceChangePercent >= 0 ? "bullish" : "bearish",
-    crossoverActive: true,
-    above5mSma200: true,
-  };
-
-  // Detect patterns when coin/timeframe changes - only when visible
-  useEffect(() => {
-    if (!visible) return;
-    setLivePatterns([]);
-    const timer = setTimeout(() => {
-      detectPatterns();
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [coin, timeframe, visible]);
-
-  const detectPatterns = async () => {
-    setIsDetecting(true);
-    try {
-      const response = await fetch("/api/detect-patterns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: tvSymbol, timeframe }),
-      });
-
-      const reader = response.body?.getReader();
-      if (!reader) return;
-
-      const decoder = new TextDecoder();
-      const newPatterns: LivePattern[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n").filter((line) => line.startsWith("data: "));
-
-        for (const line of lines) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === "pattern") {
-              const patternDef = tradingPatterns.find(
-                (p) =>
-                  p.id === data.data.patternId ||
-                  p.name.toLowerCase().includes(data.data.patternName?.toLowerCase())
-              );
-
-              if (patternDef) {
-                newPatterns.push({
-                  id: Math.random().toString(36).substring(7),
-                  pattern: patternDef,
-                  symbol: `${coin}/USDC`,
-                  timeframe: timeframe + "m",
-                  confidence: data.data.confidence,
-                  entryPrice: data.data.entryPrice,
-                  stopLoss: data.data.stopLoss,
-                  takeProfit: data.data.takeProfit,
-                  status: "forming",
-                  detectedAt: new Date(),
-                });
-              }
-            }
-          } catch (e) {
-            // Skip invalid JSON
-          }
-        }
-      }
-
-      // Only show forming patterns
-      const formingPatterns = newPatterns.filter((p) => p.status === "forming");
-      setLivePatterns(formingPatterns.slice(0, 3));
-    } catch (error) {
-      console.error("Pattern detection error:", error);
-    } finally {
-      setIsDetecting(false);
-    }
-  };
-
-  const handleLearnMore = (pattern: PatternDefinition) => {
-    setSelectedPattern(pattern);
-    setModalOpen(true);
-  };
-
   const formatPrice = (p: number) => {
-    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
     if (p >= 1) return p.toFixed(2);
     return p.toFixed(4);
   };
 
+  const formatVolume = (v: number) => {
+    if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+    if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+    if (v >= 1e3) return `$${(v / 1e3).toFixed(2)}K`;
+    return `$${v.toFixed(0)}`;
+  };
+
   return (
     <div className="h-full flex flex-col bg-background">
-      {/* Header with symbol and price */}
-      <div className="flex items-center justify-between gap-4 px-4 py-2 border-b">
-        <div className="flex items-center gap-4">
-          <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
+      {/* Top Header - Symbol info bar */}
+      <div className="flex items-center gap-4 px-3 py-2 border-b bg-card/50">
+        <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
+        
+        <Separator orientation="vertical" className="h-6" />
+        
+        {/* Price and stats */}
+        <div className="flex items-center gap-6 text-xs overflow-x-auto flex-1">
+          <div>
+            <span className="text-muted-foreground">Mark</span>
+            <p className={cn(
+              "font-mono font-bold text-base",
+              priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
+            )}>
+              {formatPrice(price)}
+            </p>
+          </div>
           
-          {/* Price display */}
-          <div className="hidden sm:flex items-center gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground text-xs">Mark</span>
-              <p className="font-mono font-semibold">{formatPrice(price)}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground text-xs">24h Change</span>
-              <p className={cn(
-                "font-mono font-semibold",
-                priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
-              )}>
-                {priceChange >= 0 ? "+" : ""}{formatPrice(priceChange)} ({priceChangePercent >= 0 ? "+" : ""}{priceChangePercent.toFixed(2)}%)
-              </p>
-            </div>
+          <div>
+            <span className="text-muted-foreground">24h Change</span>
+            <p className={cn(
+              "font-mono font-semibold",
+              priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
+            )}>
+              {priceChange >= 0 ? "+" : ""}{formatPrice(priceChange)} ({priceChangePercent >= 0 ? "+" : ""}{priceChangePercent.toFixed(2)}%)
+            </p>
+          </div>
+          
+          <div className="hidden md:block">
+            <span className="text-muted-foreground">24h Volume</span>
+            <p className="font-mono">{formatVolume(volume24h)}</p>
+          </div>
+          
+          <div className="hidden lg:block">
+            <span className="text-muted-foreground">Open Interest</span>
+            <p className="font-mono">{formatVolume(openInterest)}</p>
+          </div>
+          
+          <div className="hidden lg:block">
+            <span className="text-muted-foreground">Funding</span>
+            <p className={cn(
+              "font-mono",
+              fundingRate >= 0 ? "text-bullish" : "text-bearish"
+            )}>
+              {(fundingRate * 100).toFixed(4)}%
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {displayMarketCondition.crossoverActive && (
-            <Badge variant="outline" className="bg-bullish/15 text-bullish border-bullish/30 text-xs">
-              SMA Cross Active
-            </Badge>
-          )}
           <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-settings">
             <Settings className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      {/* Main content area */}
+      {/* Main trading area */}
       <div className="flex-1 flex min-h-0">
-        {/* Left panel - Chart area */}
+        {/* Left side - Chart */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Tabs for Chart/OrderBook/Trades */}
-          <div className="flex items-center justify-between border-b px-2">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-              <TabsList className="bg-transparent h-10 p-0 gap-0">
-                <TabsTrigger
-                  value="chart"
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4"
-                  data-testid="tab-chart"
-                >
-                  Chart
-                </TabsTrigger>
-                <TabsTrigger
-                  value="orderbook"
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4"
-                  data-testid="tab-orderbook"
-                >
-                  Order Book
-                </TabsTrigger>
-                <TabsTrigger
-                  value="trades"
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4"
-                  data-testid="tab-trades"
-                >
-                  Trades
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-
-            {/* Timeframe selector */}
-            <div className="flex items-center gap-1 py-1 overflow-x-auto">
+          {/* Chart toolbar */}
+          <div className="flex items-center justify-between px-2 py-1 border-b gap-2">
+            <div className="flex items-center gap-1 overflow-x-auto">
               {timeframes.map((tf) => (
                 <Button
                   key={tf.value}
                   variant={timeframe === tf.value ? "secondary" : "ghost"}
                   size="sm"
-                  className="h-7 px-2 text-xs font-mono"
+                  className="h-7 px-2 text-xs font-mono shrink-0"
                   onClick={() => setTimeframe(tf.value)}
                   data-testid={`timeframe-${tf.value}`}
                 >
@@ -274,28 +167,71 @@ export default function Trading({ visible = true }: TradingProps) {
                 </Button>
               ))}
             </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <Switch 
+                  checked={showOrderBook} 
+                  onCheckedChange={setShowOrderBook}
+                  id="orderbook-toggle"
+                />
+                <label htmlFor="orderbook-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                  <BookOpen className="h-3 w-3" />
+                  Order Book
+                </label>
+              </div>
+            </div>
           </div>
 
-          {/* Chart/OrderBook/Trades content */}
-          <div className="flex-1 min-h-0 relative">
-            {activeTab === "chart" && (
-              <>
-                <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
-                <ChartPatternOverlay 
-                  patterns={livePatterns} 
-                  currentPrice={price} 
-                  chartHeight={400} 
-                />
-              </>
+          {/* Chart and optional order book */}
+          <div className="flex-1 flex min-h-0">
+            {/* Chart */}
+            <div className="flex-1 min-w-0">
+              <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+            </div>
+            
+            {/* Optional Order Book Panel */}
+            {showOrderBook && (
+              <div className="w-56 xl:w-64 border-l flex flex-col bg-card/30">
+                <div className="flex items-center border-b">
+                  <button
+                    className={cn(
+                      "flex-1 py-2 text-xs font-medium transition-colors",
+                      orderBookMode === "book" 
+                        ? "bg-muted text-foreground" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={() => setOrderBookMode("book")}
+                  >
+                    Order Book
+                  </button>
+                  <button
+                    className={cn(
+                      "flex-1 py-2 text-xs font-medium transition-colors",
+                      orderBookMode === "trades" 
+                        ? "bg-muted text-foreground" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={() => setOrderBookMode("trades")}
+                  >
+                    Trades
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {orderBookMode === "book" ? (
+                    <OrderBook coin={coin} />
+                  ) : (
+                    <RecentTrades coin={coin} />
+                  )}
+                </div>
+              </div>
             )}
-            {activeTab === "orderbook" && <OrderBook coin={coin} />}
-            {activeTab === "trades" && <RecentTrades coin={coin} />}
           </div>
         </div>
 
-        {/* Order Entry Panel - visible on md+ screens */}
-        <div className="w-64 xl:w-72 border-l flex-col hidden md:flex">
-          <ScrollArea className="flex-1">
+        {/* Right side - Order Entry Panel */}
+        <div className="w-72 xl:w-80 border-l flex flex-col bg-card/30 hidden md:flex">
+          <div className="flex-1 overflow-y-auto">
             <div className="p-3 space-y-3">
               <OrderEntry 
                 coin={coin} 
@@ -303,97 +239,14 @@ export default function Trading({ visible = true }: TradingProps) {
                 onOrderSubmit={handleOrderSubmit}
               />
               
-              {/* Trade History */}
-              <TradeHistory coin={coin} />
+              <AccountEquity />
             </div>
-          </ScrollArea>
-        </div>
-
-        {/* Right panel - Patterns and SMA - visible on lg+ screens */}
-        <div className="w-72 xl:w-80 border-l flex flex-col hidden lg:flex">
-          <ScrollArea className="flex-1">
-            <div className="p-3 space-y-3">
-              {/* Indicator Panel */}
-              <IndicatorPanel />
-              
-              {/* SMA Indicator */}
-              {isLoadingMarket ? (
-                <Card>
-                  <CardContent className="p-3 space-y-2">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-6 w-full" />
-                    <Skeleton className="h-6 w-full" />
-                  </CardContent>
-                </Card>
-              ) : (
-                <SMAIndicator marketCondition={displayMarketCondition} />
-              )}
-
-              {/* Forming Patterns Only */}
-              <Card>
-                <div className="flex items-center justify-between p-3 border-b">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">Forming Patterns</span>
-                    <Badge variant="secondary" className="text-[10px] h-5">
-                      <Sparkles className="h-3 w-3 mr-1" />
-                      AI
-                    </Badge>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={detectPatterns}
-                    disabled={isDetecting}
-                    data-testid="button-refresh-patterns"
-                  >
-                    <RefreshCcw className={`h-3 w-3 ${isDetecting ? "animate-spin" : ""}`} />
-                  </Button>
-                </div>
-                <CardContent className="p-3 space-y-2">
-                  {isDetecting && livePatterns.length === 0 ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-16 w-full" />
-                      <Skeleton className="h-16 w-full" />
-                    </div>
-                  ) : livePatterns.length === 0 ? (
-                    <div className="text-center py-4 text-muted-foreground">
-                      <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-xs">No patterns forming</p>
-                      <p className="text-[10px] mt-1">Scanning for setups...</p>
-                    </div>
-                  ) : (
-                    livePatterns.map((livePattern) => (
-                      <LivePatternCard
-                        key={livePattern.id}
-                        livePattern={livePattern}
-                        onLearnMore={() => handleLearnMore(livePattern.pattern)}
-                        compact
-                      />
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Quick tip */}
-              <Card className="bg-primary/5 border-primary/20">
-                <CardContent className="p-3">
-                  <p className="text-xs text-muted-foreground">
-                    <span className="font-semibold text-foreground">Strategy Tip:</span> Wait for
-                    21 SMA to cross above 200 SMA on 1m chart, then look for bull flags or
-                    ascending triangles for entry.
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          </ScrollArea>
+          </div>
         </div>
       </div>
 
-      {/* Bottom positions panel */}
+      {/* Bottom - Positions Panel */}
       <PositionsPanel />
-
-      <PatternModal pattern={selectedPattern} open={modalOpen} onOpenChange={setModalOpen} />
     </div>
   );
 }
