@@ -358,16 +358,33 @@ export async function analyzeCoinForSignals(
       confidence = 80;
       
       if (isBullish) {
-        description = `BULL FLAG BREAKOUT on ${timeframe}! Flag formed and price broke above ${flag.flagHigh.toFixed(2)}. ENTER NOW with stop below flag low.`;
-        suggestedSL = flag.flagLow * 0.998;
-        suggestedTP = flag.breakoutLevel + (flag.poleHeight * 0.75);
+        // Cryptolifer methodology:
+        // SL = just below flag low (the consolidation low)
+        // TP = entry + full pole height (measured move target)
+        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1; // Small buffer below flag low
+        suggestedSL = flag.flagLow - slBuffer;
+        
+        // TP is the pole height projected from breakout (measured move)
+        suggestedTP = flag.breakoutLevel + flag.poleHeight;
         entryPrice = currentSMA.price;
+        
+        const risk = entryPrice - suggestedSL;
+        const reward = suggestedTP - entryPrice;
+        const rrRatio = (reward / risk).toFixed(1);
+        
+        description = `BULL FLAG BREAKOUT on ${timeframe}! Entry at $${entryPrice.toFixed(2)}. SL below flag low at $${suggestedSL.toFixed(2)}. TP measured move to $${suggestedTP.toFixed(2)}. R:R ${rrRatio}:1`;
         patternType = "Bull Flag Breakout - ENTRY NOW";
       } else {
-        description = `BEAR FLAG BREAKOUT on ${timeframe}! Flag formed and price broke below ${flag.flagLow.toFixed(2)}. ENTER NOW with stop above flag high.`;
-        suggestedSL = flag.flagHigh * 1.002;
-        suggestedTP = flag.breakoutLevel - (flag.poleHeight * 0.75);
+        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
+        suggestedSL = flag.flagHigh + slBuffer;
+        suggestedTP = flag.breakoutLevel - flag.poleHeight;
         entryPrice = currentSMA.price;
+        
+        const risk = suggestedSL - entryPrice;
+        const reward = entryPrice - suggestedTP;
+        const rrRatio = (reward / risk).toFixed(1);
+        
+        description = `BEAR FLAG BREAKOUT on ${timeframe}! Entry at $${entryPrice.toFixed(2)}. SL above flag high at $${suggestedSL.toFixed(2)}. TP measured move to $${suggestedTP.toFixed(2)}. R:R ${rrRatio}:1`;
         patternType = "Bear Flag Breakout - ENTRY NOW";
       }
     }
@@ -378,16 +395,29 @@ export async function analyzeCoinForSignals(
       confidence = 55;
       
       if (isBullish) {
-        description = `Bull flag FORMING on ${timeframe}. Consolidating between $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout above $${flag.flagHigh.toFixed(2)} before entry!`;
-        suggestedSL = flag.flagLow * 0.998;
-        suggestedTP = flag.flagHigh + (flag.poleHeight * 0.75);
-        entryPrice = flag.breakoutLevel;
+        // Same methodology but for forming pattern
+        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
+        suggestedSL = flag.flagLow - slBuffer;
+        suggestedTP = flag.flagHigh + flag.poleHeight; // TP from breakout level
+        entryPrice = flag.breakoutLevel; // Entry would be at breakout
+        
+        const risk = entryPrice - suggestedSL;
+        const reward = suggestedTP - entryPrice;
+        const rrRatio = (reward / risk).toFixed(1);
+        
+        description = `Bull flag FORMING on ${timeframe}. Flag range: $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout above $${flag.flagHigh.toFixed(2)}! Potential R:R ${rrRatio}:1`;
         patternType = "Bull Flag Forming - WAIT";
       } else {
-        description = `Bear flag FORMING on ${timeframe}. Consolidating between $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout below $${flag.flagLow.toFixed(2)} before entry!`;
-        suggestedSL = flag.flagHigh * 1.002;
-        suggestedTP = flag.flagLow - (flag.poleHeight * 0.75);
+        const slBuffer = (flag.flagHigh - flag.flagLow) * 0.1;
+        suggestedSL = flag.flagHigh + slBuffer;
+        suggestedTP = flag.flagLow - flag.poleHeight;
         entryPrice = flag.breakoutLevel;
+        
+        const risk = suggestedSL - entryPrice;
+        const reward = entryPrice - suggestedTP;
+        const rrRatio = (reward / risk).toFixed(1);
+        
+        description = `Bear flag FORMING on ${timeframe}. Flag range: $${flag.flagLow.toFixed(2)}-$${flag.flagHigh.toFixed(2)}. WAIT for breakout below $${flag.flagLow.toFixed(2)}! Potential R:R ${rrRatio}:1`;
         patternType = "Bear Flag Forming - WAIT";
       }
     }

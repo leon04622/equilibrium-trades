@@ -401,6 +401,24 @@ function PatternChartComponent({
           </div>
 
           <div className="mt-3 pt-2 border-t">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-muted-foreground">Risk:Reward</span>
+              <Badge variant="outline" className="font-mono">
+                {activeSignal.suggestedTP && activeSignal.suggestedSL && activeSignal.entryPrice ? (
+                  (() => {
+                    const isBull = activeSignal.type.includes("bullish");
+                    const risk = isBull 
+                      ? activeSignal.entryPrice - activeSignal.suggestedSL
+                      : activeSignal.suggestedSL - activeSignal.entryPrice;
+                    const reward = isBull
+                      ? activeSignal.suggestedTP - activeSignal.entryPrice
+                      : activeSignal.entryPrice - activeSignal.suggestedTP;
+                    const rr = risk > 0 ? (reward / risk).toFixed(1) : "0";
+                    return `${rr}:1`;
+                  })()
+                ) : "N/A"}
+              </Badge>
+            </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Confidence</span>
               <Badge variant={activeSignal.confidence >= 70 ? "default" : "secondary"}>
