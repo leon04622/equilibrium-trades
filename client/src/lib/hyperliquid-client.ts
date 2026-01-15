@@ -1,8 +1,160 @@
-import { JsonRpcSigner } from "ethers";
-import { signL1Action as nktSignL1Action } from "@nktkas/hyperliquid/signing";
+import { JsonRpcSigner, Wallet } from "ethers";
+import { signL1Action as sdkSignL1Action, PrivateKeySigner } from "@nktkas/hyperliquid/signing";
 
 const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
+const AGENT_STORAGE_KEY = "hyperliquid_agent";
+
+// Agent key management for browser wallet trading
+// This uses Hyperliquid's agent authorization flow:
+// 1. Generate a local keypair (agent)
+// 2. User signs an "approveAgent" action with their browser wallet
+// 3. Agent key can then sign L1 actions with chainId 1337
+interface StoredAgent {
+  privateKey: string;
+  address: string;
+  authorizedBy: string; // User address that authorized this agent
+  expiry?: number;
+}
+
+function getStoredAgent(userAddress: string): StoredAgent | null {
+  try {
+    const stored = localStorage.getItem(`${AGENT_STORAGE_KEY}_${userAddress.toLowerCase()}`);
+    if (!stored) return null;
+    const agent = JSON.parse(stored) as StoredAgent;
+    if (agent.authorizedBy.toLowerCase() !== userAddress.toLowerCase()) return null;
+    return agent;
+  } catch {
+    return null;
+  }
+}
+
+function storeAgent(userAddress: string, agent: StoredAgent): void {
+  localStorage.setItem(`${AGENT_STORAGE_KEY}_${userAddress.toLowerCase()}`, JSON.stringify(agent));
+}
+
+function generateAgentKey(): { privateKey: string; address: string } {
+  const wallet = Wallet.createRandom();
+  return {
+    privateKey: wallet.privateKey,
+    address: wallet.address.toLowerCase(),
+  };
+}
+
+// Authorize a new agent - user signs with browser wallet
+async function authorizeAgent(
+  signer: JsonRpcSigner,
+  agentAddress: string
+): Promise<boolean> {
+  const userAddress = await signer.getAddress();
+  const nonce = Date.now();
+  
+  // ApproveAgent uses a different EIP-712 domain that works with browser wallets
+  const domain = {
+    name: "HyperliquidSignTransaction",
+    version: "1",
+    chainId: 42161, // Use Arbitrum chainId for browser compatibility
+    verifyingContract: "0x0000000000000000000000000000000000000000",
+  };
+
+  const types = {
+    HyperliquidTransaction: [
+      { name: "type", type: "string" },
+      { name: "signatureChainId", type: "string" },
+      { name: "hyperliquidChain", type: "string" },
+      { name: "agentAddress", type: "address" },
+      { name: "agentName", type: "string" },
+      { name: "nonce", type: "uint64" },
+    ],
+  };
+
+  const message = {
+    type: "approveAgent",
+    signatureChainId: "0xa4b1", // Arbitrum One chainId in hex
+    hyperliquidChain: "Mainnet",
+    agentAddress: agentAddress,
+    agentName: "Equilibrium",
+    nonce: nonce,
+  };
+
+  console.log("Requesting agent authorization signature...");
+  console.log("Domain:", domain);
+  console.log("Message:", message);
+  
+  try {
+    const signature = await signer.signTypedData(domain, types, message);
+    console.log("Agent authorization signature:", signature);
+    
+    // Parse signature
+    const r = signature.slice(0, 66);
+    const s = "0x" + signature.slice(66, 130);
+    const v = parseInt(signature.slice(130, 132), 16);
+    
+    // Submit to Hyperliquid
+    const action = {
+      type: "approveAgent",
+      signatureChainId: "0xa4b1",
+      hyperliquidChain: "Mainnet",
+      agentAddress: agentAddress,
+      agentName: "Equilibrium",
+      nonce: nonce,
+    };
+    
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        signature: { r, s, v },
+        nonce,
+      }),
+    });
+    
+    const result = await response.json();
+    console.log("Agent authorization response:", result);
+    
+    if (result.status === "ok") {
+      return true;
+    } else {
+      console.error("Agent authorization failed:", result);
+      return false;
+    }
+  } catch (error) {
+    console.error("Agent authorization error:", error);
+    return false;
+  }
+}
+
+// Get or create an authorized agent for trading
+export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ privateKey: string; address: string } | null> {
+  const userAddress = await signer.getAddress();
+  
+  // Check for existing agent
+  const stored = getStoredAgent(userAddress);
+  if (stored) {
+    console.log("Using existing agent:", stored.address);
+    return { privateKey: stored.privateKey, address: stored.address };
+  }
+  
+  // Generate new agent
+  console.log("Generating new agent key...");
+  const agent = generateAgentKey();
+  console.log("New agent address:", agent.address);
+  
+  // Authorize the agent
+  const authorized = await authorizeAgent(signer, agent.address);
+  if (!authorized) {
+    return null;
+  }
+  
+  // Store the agent
+  storeAgent(userAddress, {
+    ...agent,
+    authorizedBy: userAddress,
+  });
+  
+  return agent;
+}
 
 export interface OrderRequest {
   coin: string;
@@ -203,31 +355,32 @@ function orderTypeToWire(orderType: "market" | "limit"): { limit: { tif: string 
   return { limit: { tif: "Gtc" } };
 }
 
-// Use the @nktkas/hyperliquid SDK for signing - it handles all the complex
-// action hashing, msgpack encoding, and EIP-712 signing correctly
-async function signL1Action(
-  signer: JsonRpcSigner,
+// Sign L1 action using agent key (not browser wallet)
+// The agent key can sign with chainId 1337 which Hyperliquid requires
+async function signL1ActionWithAgent(
+  agentPrivateKey: string,
   action: any,
   nonce: number,
   vaultAddress: string | null = null
 ): Promise<{ r: string; s: string; v: number }> {
-  console.log("Signing action with @nktkas/hyperliquid SDK...");
+  console.log("Signing action with agent key...");
   console.log("Action:", JSON.stringify(action));
   console.log("Nonce:", nonce);
   
-  // The SDK's signL1Action handles:
-  // 1. Correct msgpack encoding with proper key ordering
-  // 2. Action hash computation (action + nonce + vaultMarker + vaultBytes)
-  // 3. EIP-712 signing with chainId 1337 and phantom agent construction
-  const signature = await nktSignL1Action({
-    wallet: signer,
+  // Create a PrivateKeySigner from the agent key
+  const agentSigner = new PrivateKeySigner(agentPrivateKey as `0x${string}`);
+  
+  // Use the SDK's signL1Action with the agent key
+  // This handles chainId 1337, correct action hashing, and phantom agent construction
+  const signature = await sdkSignL1Action({
+    wallet: agentSigner,
     action,
     nonce,
     vaultAddress: vaultAddress ? vaultAddress as `0x${string}` : undefined,
     isTestnet: false,
   });
   
-  console.log("Signature from SDK:", signature);
+  console.log("Agent signature:", signature);
   return signature;
 }
 
@@ -252,6 +405,16 @@ export async function placeOrder(
         error: `Wallet ${signerAddress} not found on Hyperliquid. Please deposit funds at app.hyperliquid.xyz first.` 
       };
     }
+    
+    // Get or create an authorized agent for signing
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) {
+      return { 
+        success: false, 
+        error: "Failed to authorize trading agent. Please try again." 
+      };
+    }
+    console.log("Using agent:", agent.address);
     
     const assetIndex = await getAssetIndex(order.coin);
     if (assetIndex === null) {
@@ -296,7 +459,7 @@ export async function placeOrder(
     };
 
     console.log("Requesting signature for action:", action);
-    const signature = await signL1Action(signer, action, nonce, null);
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
     console.log("Signature received:", signature);
 
     const payload = {
@@ -351,6 +514,12 @@ export async function cancelOrder(
   orderId: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Get or create an authorized agent
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) {
+      return { success: false, error: "Failed to authorize trading agent" };
+    }
+    
     const assetIndex = await getAssetIndex(coin);
     if (assetIndex === null) {
       return { success: false, error: `Unknown asset: ${coin}` };
@@ -366,7 +535,7 @@ export async function cancelOrder(
       }],
     };
 
-    const signature = await signL1Action(signer, action, nonce, null);
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
 
     const payload = {
       action,
@@ -433,6 +602,12 @@ export async function placeTriggerOrder(
   order: TriggerOrderRequest
 ): Promise<OrderResponse> {
   try {
+    // Get or create an authorized agent
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) {
+      return { success: false, error: "Failed to authorize trading agent" };
+    }
+    
     const assetIndex = await getAssetIndex(order.coin);
     if (assetIndex === null) {
       return { success: false, error: `Unknown asset: ${order.coin}` };
@@ -464,7 +639,7 @@ export async function placeTriggerOrder(
       grouping: "na",
     };
 
-    const signature = await signL1Action(signer, action, nonce, null);
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
 
     const payload = {
       action,
@@ -534,6 +709,12 @@ export async function setLeverage(
   isCross: boolean = true
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Get or create an authorized agent
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) {
+      return { success: false, error: "Failed to authorize trading agent" };
+    }
+    
     const assetIndex = await getAssetIndex(coin);
     if (assetIndex === null) {
       return { success: false, error: `Unknown asset: ${coin}` };
@@ -548,7 +729,7 @@ export async function setLeverage(
       leverage,
     };
 
-    const signature = await signL1Action(signer, action, nonce, null);
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
 
     const payload = {
       action,
