@@ -46,21 +46,22 @@ async function authorizeAgent(
   signer: JsonRpcSigner,
   agentAddress: string
 ): Promise<boolean> {
-  const userAddress = await signer.getAddress();
   const nonce = Date.now();
+  const signatureChainId = "0xa4b1"; // Arbitrum One chainId in hex
   
-  // ApproveAgent uses a different EIP-712 domain that works with browser wallets
+  // ApproveAgent uses EIP-712 with the user's network chainId
+  // The signatureChainId in the action tells Hyperliquid which chainId was used for signing
   const domain = {
     name: "HyperliquidSignTransaction",
     version: "1",
-    chainId: 42161, // Use Arbitrum chainId for browser compatibility
+    chainId: parseInt(signatureChainId, 16), // 42161 for Arbitrum
     verifyingContract: "0x0000000000000000000000000000000000000000",
   };
 
+  // EIP-712 types - must match SDK's ApproveAgentTypes exactly
+  // Primary type is "HyperliquidTransaction:ApproveAgent"
   const types = {
-    HyperliquidTransaction: [
-      { name: "type", type: "string" },
-      { name: "signatureChainId", type: "string" },
+    "HyperliquidTransaction:ApproveAgent": [
       { name: "hyperliquidChain", type: "string" },
       { name: "agentAddress", type: "address" },
       { name: "agentName", type: "string" },
@@ -68,9 +69,8 @@ async function authorizeAgent(
     ],
   };
 
+  // Message contains only the fields defined in the type (NOT type or signatureChainId)
   const message = {
-    type: "approveAgent",
-    signatureChainId: "0xa4b1", // Arbitrum One chainId in hex
     hyperliquidChain: "Mainnet",
     agentAddress: agentAddress,
     agentName: "Equilibrium",
@@ -79,6 +79,7 @@ async function authorizeAgent(
 
   console.log("Requesting agent authorization signature...");
   console.log("Domain:", domain);
+  console.log("Types:", types);
   console.log("Message:", message);
   
   try {
@@ -90,10 +91,10 @@ async function authorizeAgent(
     const s = "0x" + signature.slice(66, 130);
     const v = parseInt(signature.slice(130, 132), 16);
     
-    // Submit to Hyperliquid
+    // Submit to Hyperliquid - action includes ALL fields
     const action = {
       type: "approveAgent",
-      signatureChainId: "0xa4b1",
+      signatureChainId: signatureChainId,
       hyperliquidChain: "Mainnet",
       agentAddress: agentAddress,
       agentName: "Equilibrium",
