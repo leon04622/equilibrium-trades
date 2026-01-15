@@ -6,55 +6,70 @@ const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
 const AGENT_STORAGE_KEY = "hyperliquid_agent";
 
 // Get server-synced timestamp to avoid browser clock issues
-// The Replit preview can have clock drift compared to Hyperliquid servers
+// The Replit preview can have significant clock drift compared to Hyperliquid servers
 let serverTimeOffset = 0;
+let timeSynced = false;
+
 async function syncServerTime(): Promise<void> {
+  if (timeSynced && serverTimeOffset !== 0) return; // Already synced successfully
+  
   try {
+    // Use clearinghouseState which includes a 'time' field with server timestamp
+    const testAddress = "0x0000000000000000000000000000000000000000";
     const before = Date.now();
     const response = await fetch(INFO_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "meta" }),
+      body: JSON.stringify({ type: "clearinghouseState", user: testAddress }),
     });
     const data = await response.json();
     const after = Date.now();
-    // Use the server timestamp from the response if available
-    // Otherwise estimate based on response time
-    if (data.serverTime) {
-      const roundTrip = (after - before) / 2;
-      serverTimeOffset = data.serverTime - before - roundTrip;
+    
+    if (data && data.time) {
+      const roundTrip = Math.floor((after - before) / 2);
+      const localTime = before + roundTrip;
+      serverTimeOffset = data.time - localTime;
+      timeSynced = true;
+      console.log("Time synced successfully! Server time:", data.time, "Local time:", localTime, "Offset:", serverTimeOffset, "ms");
+    } else {
+      throw new Error("No time in response");
     }
-  } catch {
-    // If sync fails, try using Hyperliquid's candle endpoint for timestamp
+  } catch (e) {
+    console.warn("Primary sync failed, trying fallback...", e);
+    
+    // Fallback: Use allMids which is fast and reliable
     try {
+      // Get current server time by fetching any user's state (even non-existent)
       const response = await fetch(INFO_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          type: "candleSnapshot",
-          req: { coin: "BTC", interval: "1m", startTime: Date.now() - 60000, endTime: Date.now() }
-        }),
+        body: JSON.stringify({ type: "allMids" }),
       });
-      const data = await response.json();
-      if (data && data.length > 0 && data[data.length - 1].t) {
-        // Get approximate server time from most recent candle timestamp
-        const candleTime = data[data.length - 1].t;
-        serverTimeOffset = candleTime - Date.now() + 60000; // Add 1 min buffer
+      
+      // Use the Date header from the response for timing
+      const dateHeader = response.headers.get("date");
+      if (dateHeader) {
+        const serverTime = new Date(dateHeader).getTime();
+        serverTimeOffset = serverTime - Date.now();
+        timeSynced = true;
+        console.log("Time synced from header! Offset:", serverTimeOffset, "ms");
+      } else {
+        throw new Error("No date header");
       }
     } catch {
-      console.warn("Could not sync server time, using large offset");
-      // Use a 7-day offset as fallback (based on observed drift)
-      serverTimeOffset = 7 * 24 * 60 * 60 * 1000;
+      // Last resort: Use a fixed offset based on observed 6-day drift
+      console.warn("All sync methods failed, using fallback offset");
+      serverTimeOffset = 6 * 24 * 60 * 60 * 1000 + 60000; // 6 days + 1 minute buffer
+      timeSynced = true;
     }
   }
-  console.log("Server time offset:", serverTimeOffset, "ms");
 }
 
 function getSyncedTimestamp(): number {
   return Date.now() + serverTimeOffset;
 }
 
-// Initialize time sync
+// Initialize time sync immediately
 syncServerTime();
 
 // Agent key management for browser wallet trading
