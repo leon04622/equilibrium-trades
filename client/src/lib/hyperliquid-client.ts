@@ -227,49 +227,42 @@ async function signL1Action(
   const hashData = actionHash(action, vaultAddress, nonce);
   const actionHashHex = keccak256(hashData);
 
-  // Hyperliquid L1 action signing uses this EIP-712 structure
-  // This signs directly with the user's wallet, not an agent
+  // Hyperliquid L1 actions use chain ID 1337 (NOT Arbitrum's 42161!)
+  // This is specific to Hyperliquid's phantom agent construction
   const domain: TypedDataDomain = {
-    name: "HyperliquidSignTransaction",
-    version: "1",
-    chainId: 42161, // Arbitrum One mainnet
+    name: "Exchange",
+    version: "1", 
+    chainId: 1337, // Hyperliquid L1 chain ID - CRITICAL: must be 1337
     verifyingContract: "0x0000000000000000000000000000000000000000",
   };
 
   const types: Record<string, TypedDataField[]> = {
-    HyperliquidTransaction: [
-      { name: "action", type: "string" },
-      { name: "nonce", type: "uint64" },
-      { name: "vaultAddress", type: "address" },
-    ],
-  };
-
-  // Phantom signature approach - sign the action hash as a personal message
-  // This is the method Hyperliquid uses for L1 actions
-  const phantomAgent = {
-    source: "a",
-    connectionId: actionHashHex,
-  };
-
-  const phantomDomain: TypedDataDomain = {
-    name: "Exchange",
-    version: "1", 
-    chainId: 42161,
-    verifyingContract: "0x0000000000000000000000000000000000000000",
-  };
-
-  const phantomTypes: Record<string, TypedDataField[]> = {
     Agent: [
       { name: "source", type: "string" },
       { name: "connectionId", type: "bytes32" },
     ],
   };
 
-  const signature = await signer.signTypedData(phantomDomain, phantomTypes, phantomAgent);
+  // For mainnet: source = "a"
+  // For testnet: source = "b" 
+  // The connectionId is the keccak256 hash of the action
+  const message = {
+    source: "a",
+    connectionId: actionHashHex,
+  };
+
+  console.log("Signing with domain:", domain);
+  console.log("Signing message:", message);
   
+  const signature = await signer.signTypedData(domain, types, message);
+  console.log("Raw signature:", signature);
+  
+  // Parse signature - ethers returns 0x + 130 hex chars (65 bytes)
   const r = signature.slice(0, 66);
   const s = "0x" + signature.slice(66, 130);
   const v = parseInt(signature.slice(130, 132), 16);
+  
+  console.log("Parsed signature:", { r, s, v });
   
   return { r, s, v };
 }
