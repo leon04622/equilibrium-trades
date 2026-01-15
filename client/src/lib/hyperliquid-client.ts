@@ -426,10 +426,14 @@ function floatToWire(x: number): string {
   return str;
 }
 
-// Format price for a specific coin - some coins need specific decimal places
+// Format price for a specific coin - each coin has a specific tick size
 function formatPrice(price: number, coin: string): string {
-  // BTC and high-value coins use 1 decimal place
-  if (coin === "BTC" || coin === "ETH") {
+  // BTC uses tick size of 1 (whole numbers only)
+  if (coin === "BTC") {
+    return Math.round(price).toString();
+  }
+  // ETH uses tick size of 0.1
+  if (coin === "ETH") {
     return (Math.round(price * 10) / 10).toString();
   }
   // Other coins use standard 5 sig fig formatting
