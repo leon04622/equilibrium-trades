@@ -22,6 +22,7 @@ import Hyperliquid from "@/pages/hyperliquid";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
 import Portfolio from "@/pages/portfolio";
+import Videos from "@/pages/videos";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function Router() {
@@ -46,6 +47,7 @@ function Router() {
           <Route path="/pricing" component={Pricing} />
           <Route path="/settings" component={Settings} />
           <Route path="/portfolio" component={Portfolio} />
+          <Route path="/videos" component={Videos} />
           <Route component={NotFound} />
         </Switch>
       )}

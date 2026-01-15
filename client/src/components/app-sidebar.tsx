@@ -10,6 +10,7 @@ import {
   TrendingUp,
   Flame,
   Wallet,
+  Play,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,6 +49,11 @@ const mainNavItems = [
     title: "Learn",
     url: "/learn",
     icon: GraduationCap,
+  },
+  {
+    title: "Videos",
+    url: "/videos",
+    icon: Play,
   },
 ];
 
