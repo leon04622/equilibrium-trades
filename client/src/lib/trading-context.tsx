@@ -420,6 +420,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
       
       // Record the trade
+      const exitPrice = result.avgPrice || position.markPrice;
       const realizedPnl = position.unrealizedPnl;
       const fee = position.size * position.markPrice * 0.001;
       
@@ -428,12 +429,44 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         coin: position.coin,
         side: position.side === "long" ? "sell" : "buy",
         size: position.size,
-        price: result.avgPrice || position.markPrice,
+        price: exitPrice,
         pnl: realizedPnl,
         fee: fee,
         timestamp: new Date(),
       };
       setTradeHistory(th => [tradeRecord, ...th]);
+      
+      // Auto-grade the trade
+      try {
+        const walletAddress = await signer.getAddress();
+        // Estimate SL/TP based on position (2% SL, 4% TP typical)
+        const slDistance = position.entryPrice * 0.02;
+        const tpDistance = position.entryPrice * 0.04;
+        const estimatedSL = position.side === "long" 
+          ? position.entryPrice - slDistance 
+          : position.entryPrice + slDistance;
+        const estimatedTP = position.side === "long"
+          ? position.entryPrice + tpDistance
+          : position.entryPrice - tpDistance;
+        
+        await fetch("/api/journal/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            walletAddress,
+            coin: position.coin,
+            side: position.side,
+            entryPrice: position.entryPrice,
+            exitPrice,
+            stopLoss: estimatedSL,
+            takeProfit: estimatedTP,
+            leverage: position.leverage,
+            size: position.size,
+          }),
+        });
+      } catch (gradeError) {
+        console.error("Error grading trade:", gradeError);
+      }
       
       // Refresh positions from Hyperliquid to get updated state
       await refreshAccount();

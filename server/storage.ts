@@ -3,7 +3,8 @@ import {
   type Pattern, type InsertPattern,
   type DetectedPattern, type InsertDetectedPattern,
   type SmaSignal, type InsertSmaSignal,
-  type SubscriptionTier, type InsertSubscriptionTier
+  type SubscriptionTier, type InsertSubscriptionTier,
+  type TradeGrade, type InsertTradeGrade, type WeeklyStats
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -31,6 +32,12 @@ export interface IStorage {
   // Subscription Tiers
   getAllSubscriptionTiers(): Promise<SubscriptionTier[]>;
   getSubscriptionTier(id: string): Promise<SubscriptionTier | undefined>;
+  
+  // Trade Grades
+  getTradeGrades(walletAddress: string, limit?: number): Promise<TradeGrade[]>;
+  getTradeGrade(id: string): Promise<TradeGrade | undefined>;
+  createTradeGrade(grade: InsertTradeGrade): Promise<TradeGrade>;
+  getWeeklyStats(walletAddress: string): Promise<WeeklyStats | null>;
 }
 
 export class MemStorage implements IStorage {
@@ -39,6 +46,7 @@ export class MemStorage implements IStorage {
   private detectedPatterns: Map<string, DetectedPattern>;
   private smaSignals: Map<string, SmaSignal>;
   private subscriptionTiers: Map<string, SubscriptionTier>;
+  private tradeGrades: Map<string, TradeGrade>;
 
   constructor() {
     this.users = new Map();
@@ -46,6 +54,7 @@ export class MemStorage implements IStorage {
     this.detectedPatterns = new Map();
     this.smaSignals = new Map();
     this.subscriptionTiers = new Map();
+    this.tradeGrades = new Map();
     
     this.initializeSubscriptionTiers();
   }
@@ -217,6 +226,75 @@ export class MemStorage implements IStorage {
 
   async getSubscriptionTier(id: string): Promise<SubscriptionTier | undefined> {
     return this.subscriptionTiers.get(id);
+  }
+
+  // Trade Grades
+  async getTradeGrades(walletAddress: string, limit: number = 50): Promise<TradeGrade[]> {
+    return Array.from(this.tradeGrades.values())
+      .filter(g => g.walletAddress.toLowerCase() === walletAddress.toLowerCase())
+      .sort((a, b) => b.tradedAt.getTime() - a.tradedAt.getTime())
+      .slice(0, limit);
+  }
+
+  async getTradeGrade(id: string): Promise<TradeGrade | undefined> {
+    return this.tradeGrades.get(id);
+  }
+
+  async createTradeGrade(grade: InsertTradeGrade): Promise<TradeGrade> {
+    const id = randomUUID();
+    const newGrade: TradeGrade = {
+      ...grade,
+      id,
+      gradedAt: new Date(),
+    };
+    this.tradeGrades.set(id, newGrade);
+    return newGrade;
+  }
+
+  async getWeeklyStats(walletAddress: string): Promise<WeeklyStats | null> {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - dayOfWeek);
+    weekStart.setHours(0, 0, 0, 0);
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+    
+    const weekTrades = Array.from(this.tradeGrades.values())
+      .filter(g => 
+        g.walletAddress.toLowerCase() === walletAddress.toLowerCase() &&
+        g.tradedAt >= weekStart &&
+        g.tradedAt < weekEnd
+      );
+    
+    if (weekTrades.length === 0) return null;
+    
+    const winningTrades = weekTrades.filter(t => t.pnl > 0);
+    const losingTrades = weekTrades.filter(t => t.pnl <= 0);
+    const avgScore = weekTrades.reduce((sum, t) => sum + t.totalScore, 0) / weekTrades.length;
+    const totalPnl = weekTrades.reduce((sum, t) => sum + t.pnl, 0);
+    
+    // Discipline score: consistency in following rules (entry, stop, RR)
+    const avgEntryScore = weekTrades.reduce((sum, t) => sum + t.entryScore, 0) / weekTrades.length;
+    const avgStopScore = weekTrades.reduce((sum, t) => sum + t.stopScore, 0) / weekTrades.length;
+    const avgRRScore = weekTrades.reduce((sum, t) => sum + t.rrScore, 0) / weekTrades.length;
+    const disciplineScore = Math.round((avgEntryScore + avgStopScore + avgRRScore) / 3);
+    
+    const sortedByPnl = [...weekTrades].sort((a, b) => b.pnl - a.pnl);
+    
+    return {
+      weekStart,
+      weekEnd,
+      totalTrades: weekTrades.length,
+      winningTrades: winningTrades.length,
+      losingTrades: losingTrades.length,
+      avgScore: Math.round(avgScore),
+      disciplineScore,
+      totalPnl,
+      bestTrade: sortedByPnl[0],
+      worstTrade: sortedByPnl[sortedByPnl.length - 1],
+    };
   }
 }
 

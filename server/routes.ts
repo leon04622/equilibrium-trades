@@ -11,6 +11,7 @@ import {
   getCandles 
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus } from "./sma-detection";
+import { gradeTrade } from "./trade-grading";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -288,6 +289,62 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error getting SMA status:", error);
       res.status(500).json({ error: "Failed to get SMA status" });
+    }
+  });
+
+  // ============ TRADE JOURNAL & GRADING ============
+
+  // Get trade grades for a wallet
+  app.get("/api/journal/trades/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const trades = await storage.getTradeGrades(req.params.walletAddress, limit);
+      res.json(trades);
+    } catch (error) {
+      console.error("Error fetching trade grades:", error);
+      res.status(500).json({ error: "Failed to fetch trade grades" });
+    }
+  });
+
+  // Get weekly stats for a wallet
+  app.get("/api/journal/weekly/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const stats = await storage.getWeeklyStats(req.params.walletAddress);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching weekly stats:", error);
+      res.status(500).json({ error: "Failed to fetch weekly stats" });
+    }
+  });
+
+  // Grade and save a trade
+  app.post("/api/journal/grade", async (req: Request, res: Response) => {
+    try {
+      // Import and validate with Zod schema
+      const { tradeGradeInputSchema } = await import("@shared/schema");
+      
+      // Parse numbers if they come as strings
+      const body = {
+        ...req.body,
+        entryPrice: Number(req.body.entryPrice),
+        exitPrice: Number(req.body.exitPrice),
+        stopLoss: Number(req.body.stopLoss),
+        takeProfit: Number(req.body.takeProfit),
+        leverage: Number(req.body.leverage) || 1,
+        size: Number(req.body.size) || 1,
+      };
+      
+      const validated = tradeGradeInputSchema.safeParse(body);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+
+      const gradedTrade = gradeTrade(validated.data);
+      const saved = await storage.createTradeGrade(gradedTrade);
+      res.json(saved);
+    } catch (error) {
+      console.error("Error grading trade:", error);
+      res.status(500).json({ error: "Failed to grade trade" });
     }
   });
 

@@ -167,3 +167,16 @@ npm run db:push    # Push database schema (if using DB)
   - Direct submission to Hyperliquid API from frontend
   - No private keys on server - fully non-custodial
   - Works like Hyperliquid UI, GMX, or Uniswap
+- **January 2026**: Trade Journal with Auto-Grading
+  - Every trade automatically graded when position closed
+  - Scoring criteria (0-100 each):
+    - Entry quality (timing relative to breakout)
+    - Stop placement (proper distance, not too tight/wide)
+    - R:R adherence (2:1 minimum, 3:1 ideal)
+    - Leverage appropriateness (lower is safer)
+    - Setup validity (pattern identification)
+  - Overall trade score /100
+  - Letter grades: A-setup, B-execution style display
+  - Weekly discipline score on dashboard
+  - Expandable trade cards with detailed feedback
+  - API: GET /api/journal/trades/:wallet, GET /api/journal/weekly/:wallet, POST /api/journal/grade

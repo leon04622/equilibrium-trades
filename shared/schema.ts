@@ -131,5 +131,72 @@ export interface MarketCondition {
   above5mSma200: boolean;
 }
 
+// Trade Grading Types
+export interface TradeGrade {
+  id: string;
+  walletAddress: string;
+  coin: string;
+  side: "long" | "short";
+  entryPrice: number;
+  exitPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  leverage: number;
+  size: number;
+  pnl: number;
+  pnlPercent: number;
+  
+  // Grading scores (0-100)
+  entryScore: number;       // How close to pattern breakout
+  stopScore: number;        // Stop placement quality (proper distance)
+  rrScore: number;          // Risk/Reward adherence
+  leverageScore: number;    // Appropriate leverage for setup
+  setupScore: number;       // Valid pattern/setup identification
+  
+  // Overall scores
+  totalScore: number;       // Combined score /100
+  setupGrade: "A" | "B" | "C" | "D" | "F";
+  executionGrade: "A" | "B" | "C" | "D" | "F";
+  
+  // Metadata
+  patternType?: string;
+  timeframe?: string;
+  notes: string[];          // Auto-generated feedback
+  tradedAt: Date;
+  gradedAt: Date;
+}
+
+export interface WeeklyStats {
+  weekStart: Date;
+  weekEnd: Date;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  avgScore: number;
+  disciplineScore: number;  // Consistency in following rules
+  totalPnl: number;
+  bestTrade?: TradeGrade;
+  worstTrade?: TradeGrade;
+}
+
+export type InsertTradeGrade = Omit<TradeGrade, "id" | "gradedAt">;
+
+// Zod schema for trade grading input validation
+export const tradeGradeInputSchema = z.object({
+  walletAddress: z.string().min(1),
+  coin: z.string().min(1),
+  side: z.enum(["long", "short"]),
+  entryPrice: z.number().positive(),
+  exitPrice: z.number().positive(),
+  stopLoss: z.number().positive(),
+  takeProfit: z.number().positive(),
+  leverage: z.number().min(1).default(1),
+  size: z.number().positive().default(1),
+  patternType: z.string().optional(),
+  timeframe: z.string().optional(),
+});
+
+export type TradeGradeInput = z.infer<typeof tradeGradeInputSchema>;
+
 // Re-export chat models
 export * from "./models/chat";
