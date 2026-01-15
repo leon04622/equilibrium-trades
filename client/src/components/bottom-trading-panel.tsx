@@ -492,15 +492,11 @@ function OrdersTable({
     <table className="w-full text-xs">
       <thead className="sticky top-0 bg-card/90 backdrop-blur">
         <tr className="text-muted-foreground border-b">
-          <th className="text-left px-3 py-1.5 font-medium">Time</th>
-          <th className="text-left px-3 py-1.5 font-medium">Type</th>
           <th className="text-left px-3 py-1.5 font-medium">Coin</th>
-          <th className="text-left px-3 py-1.5 font-medium">Direction</th>
+          <th className="text-left px-3 py-1.5 font-medium">Type</th>
           <th className="text-right px-3 py-1.5 font-medium">Size</th>
-          <th className="text-right px-3 py-1.5 font-medium">Price</th>
-          <th className="text-right px-3 py-1.5 font-medium">Trigger</th>
-          <th className="text-center px-3 py-1.5 font-medium">Reduce Only</th>
-          <th className="text-right px-3 py-1.5 font-medium">Actions</th>
+          <th className="text-right px-3 py-1.5 font-medium">Trigger Price</th>
+          <th className="text-center px-3 py-1.5 font-medium">Cancel</th>
         </tr>
       </thead>
       <tbody>
@@ -508,36 +504,44 @@ function OrdersTable({
           const orderType = getOrderType(order);
           const isBuy = order.side === "B" || order.side === "buy";
           const isStopLoss = orderType === "Stop Loss";
+          const isTakeProfit = orderType === "Take Profit";
+          const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
           
           return (
             <tr key={order.oid || i} className="border-b border-border/50 hover:bg-muted/30" data-testid={`order-row-${order.oid}`}>
-              <td className="px-3 py-1.5 text-muted-foreground">--</td>
-              <td className={cn("px-3 py-1.5", isStopLoss ? "text-bearish" : "text-bullish")}>
-                {orderType}
+              <td className="px-3 py-1.5">
+                <span className="font-medium">{order.coin}</span>
+                <span className={cn("ml-1.5 text-[10px]", isBuy ? "text-bullish" : "text-bearish")}>
+                  {isBuy ? "Buy" : "Sell"}
+                </span>
               </td>
-              <td className="px-3 py-1.5 font-medium">{order.coin}</td>
-              <td className={cn("px-3 py-1.5", isBuy ? "text-bullish" : "text-bearish")}>
-                {isBuy ? "Buy" : "Sell"}
+              <td className="px-3 py-1.5">
+                <Badge 
+                  variant="outline" 
+                  className={cn(
+                    "text-[10px] px-1.5 py-0",
+                    isStopLoss && "border-red-500/50 text-red-500 bg-red-500/10",
+                    isTakeProfit && "border-green-500/50 text-green-500 bg-green-500/10",
+                    !isStopLoss && !isTakeProfit && "border-blue-500/50 text-blue-500 bg-blue-500/10"
+                  )}
+                >
+                  {isStopLoss ? "STOP LOSS" : isTakeProfit ? "TAKE PROFIT" : orderType.toUpperCase()}
+                </Badge>
               </td>
               <td className="px-3 py-1.5 text-right font-mono">{formatSize(order.sz)}</td>
-              <td className="px-3 py-1.5 text-right font-mono">
-                {order.limitPx === "0" ? "Market" : formatPrice(order.limitPx)}
-              </td>
-              <td className="px-3 py-1.5 text-right font-mono">
-                {order.triggerPx ? formatPrice(order.triggerPx) : "--"}
+              <td className="px-3 py-1.5 text-right font-mono font-medium">
+                {formatPrice(triggerPrice)}
               </td>
               <td className="px-3 py-1.5 text-center">
-                {(order as any).reduceOnly ? "Yes" : "--"}
-              </td>
-              <td className="px-3 py-1.5 text-right">
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-5 w-5 p-0 text-bearish hover:text-bearish hover:bg-bearish/10"
+                  className="h-6 px-2 text-[10px] text-red-500 border-red-500/50 hover:bg-red-500/10 hover:text-red-500"
                   onClick={() => onCancel(order)}
                   data-testid={`button-cancel-order-${order.oid}`}
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-3 w-3 mr-1" />
+                  Cancel
                 </Button>
               </td>
             </tr>
