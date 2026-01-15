@@ -5,17 +5,15 @@ import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
-import { PositionsPanel } from "@/components/positions-panel";
 import { OrderEntry } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
-import { OpenOrdersPanel } from "@/components/open-orders-panel";
-import { PriceLevelsOverlay } from "@/components/price-levels-overlay";
-import { Badge } from "@/components/ui/badge";
+import { BottomTradingPanel } from "@/components/bottom-trading-panel";
+import { ChartPositionOverlay } from "@/components/chart-position-overlay";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, BookOpen, ArrowLeftRight, Brain } from "lucide-react";
+import { Settings, BookOpen, Brain } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
@@ -200,8 +198,8 @@ export default function Trading({ visible = true }: TradingProps) {
 
           {/* Chart and optional order book */}
           <div className="flex-1 flex min-h-0">
-            {/* Chart */}
-            <div className="flex-1 min-w-0">
+            {/* Chart with position overlay */}
+            <div className="flex-1 min-w-0 relative">
               {showAIChart ? (
                 <PatternChart 
                   symbol={coin} 
@@ -213,6 +211,7 @@ export default function Trading({ visible = true }: TradingProps) {
               ) : (
                 <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
               )}
+              <ChartPositionOverlay coin={coin} currentPrice={price} />
             </div>
             
             {/* Optional Order Book Panel */}
@@ -264,18 +263,14 @@ export default function Trading({ visible = true }: TradingProps) {
                 onOrderSubmit={handleOrderSubmit}
               />
               
-              <PriceLevelsOverlay coin={coin} />
-              
-              <OpenOrdersPanel coin={coin} compact />
-              
               <AccountEquity />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bottom - Positions Panel */}
-      <PositionsPanel />
+      {/* Bottom - Positions and Orders Panel (Hyperliquid style) */}
+      <BottomTradingPanel coin={coin} />
     </div>
   );
 }

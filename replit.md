@@ -180,10 +180,10 @@ npm run db:push    # Push database schema (if using DB)
   - Weekly discipline score on dashboard
   - Expandable trade cards with detailed feedback
   - API: GET /api/journal/trades/:wallet, GET /api/journal/weekly/:wallet, POST /api/journal/grade
-- **January 2026**: Visual SL/TP Order Management
-  - OpenOrdersPanel component shows open orders with SL/TP indicators
-  - PriceLevelsOverlay displays entry, current, SL, TP, liquidation prices
+- **January 2026**: Visual SL/TP Order Management (Hyperliquid-style)
+  - BottomTradingPanel: Tabbed panel at bottom of screen (Positions, Open Orders, Trade History, Order History)
+  - ChartPositionOverlay: Shows entry, SL, TP, and liquidation price lines directly on the chart
   - Auto-refresh every 10 seconds for live order status
-  - Cancel orders directly from the trading page
-  - Classification logic: Uses orderType from API, falls back to position-relative logic
-  - Components: open-orders-panel.tsx, price-levels-overlay.tsx
+  - Cancel individual orders or cancel all from bottom panel
+  - Classification logic: Uses orderType from API, falls back to position entry price comparison
+  - Components: bottom-trading-panel.tsx, chart-position-overlay.tsx
