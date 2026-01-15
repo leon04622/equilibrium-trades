@@ -27,7 +27,7 @@ interface TPSLDialogState {
 
 export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("positions");
-  const { positions, openOrders, cancelHLOrder, placeTPSL, connected, currentPrices } = useTrading();
+  const { positions, openOrders, cancelHLOrder, placeTPSL, connected, currentPrices, closePosition, isClosingPosition } = useTrading();
   const { toast } = useToast();
   const [tpslDialog, setTpslDialog] = useState<TPSLDialogState>({
     open: false,
@@ -39,6 +39,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   });
   const [tpPrice, setTpPrice] = useState("");
   const [slPrice, setSlPrice] = useState("");
+  const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
 
   const filteredPositions = coin ? positions.filter(p => p.coin === coin) : positions;
   const filteredOrders = coin ? openOrders.filter(o => o.coin === coin) : openOrders;
@@ -57,6 +58,24 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       await cancelHLOrder(order.coin, order.oid);
     }
     toast({ title: "All Orders Cancelled" });
+  };
+
+  const handleClosePosition = async (pos: any) => {
+    setClosingPositionId(pos.id);
+    const result = await closePosition(pos.id);
+    setClosingPositionId(null);
+    if (result.success) {
+      toast({ 
+        title: "Position Closed", 
+        description: `${pos.coin} ${pos.side} position closed at market` 
+      });
+    } else {
+      toast({ 
+        title: "Close Failed", 
+        description: result.error || "Failed to close position", 
+        variant: "destructive" 
+      });
+    }
   };
 
   const openTPSLDialog = (pos: any) => {
@@ -257,6 +276,9 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
               formatSize={formatSize}
               getTPSLDisplay={getTPSLDisplay}
               onEditTPSL={openTPSLDialog}
+              onClosePosition={handleClosePosition}
+              isClosingPosition={isClosingPosition}
+              closingPositionId={closingPositionId}
             />
           )}
           {activeTab === "orders" && (
@@ -370,6 +392,9 @@ function PositionsTable({
   formatSize,
   getTPSLDisplay,
   onEditTPSL,
+  onClosePosition,
+  isClosingPosition,
+  closingPositionId,
 }: { 
   positions: any[]; 
   currentPrices: Record<string, number>;
@@ -377,6 +402,9 @@ function PositionsTable({
   formatSize: (s: number | string) => string;
   getTPSLDisplay: (pos: any) => { tp: string; sl: string };
   onEditTPSL: (pos: any) => void;
+  onClosePosition: (pos: any) => void;
+  isClosingPosition: boolean;
+  closingPositionId: string | null;
 }) {
   if (positions.length === 0) {
     return (
@@ -439,11 +467,15 @@ function PositionsTable({
               </td>
               <td className="px-3 py-1.5 text-center">
                 <div className="flex items-center justify-center gap-1">
-                  <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground">
-                    Limit
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground">
-                    Market
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-5 px-2 text-[10px] bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
+                    onClick={() => onClosePosition(pos)}
+                    disabled={isClosingPosition}
+                    data-testid={`button-close-position-${pos.coin}`}
+                  >
+                    {isClosingPosition && closingPositionId === pos.id ? "Closing..." : "Market"}
                   </Button>
                 </div>
               </td>

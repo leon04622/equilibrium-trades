@@ -197,3 +197,7 @@ npm run db:push    # Push database schema (if using DB)
   - TP/SL placement: Click pencil icon on position row to set take profit and stop loss prices
   - Uses placeTriggerOrder from Hyperliquid API to place TP/SL as trigger orders
   - Positions table shows: Coin, Size, Position Value, Entry/Mark/Liq prices, PNL (ROE%), Margin, Close All, TP/SL
+  - **Position Close**: Click "Market" button to close position at market price
+    - Uses opposite reduceOnly market order via Hyperliquid API
+    - Shows loading state during close operation
+    - Auto-grades trade after position is closed
