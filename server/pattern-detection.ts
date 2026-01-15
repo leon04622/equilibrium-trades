@@ -105,15 +105,14 @@ Identify any patterns forming or confirmed in this data.`
     ];
 
     if (Array.isArray(patterns)) {
-      return patterns
-        .map((p: any) => {
-          const rawId = p.patternId || p.pattern_id || "";
-          // Normalize the pattern ID to match our library format
-          const normalizedId = rawId.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
-          // Only include patterns with valid IDs
-          const patternId = validPatternIds.includes(normalizedId) ? normalizedId : null;
-          
-          return patternId ? {
+      const mappedPatterns: DetectedPatternResult[] = [];
+      for (const p of patterns) {
+        const rawId = p.patternId || p.pattern_id || "";
+        const normalizedId = rawId.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+        const patternId = validPatternIds.includes(normalizedId) ? normalizedId : null;
+        
+        if (patternId) {
+          mappedPatterns.push({
             patternId,
             patternName: p.patternName || p.pattern_name || "Unknown Pattern",
             type: p.type || "continuation",
@@ -123,9 +122,10 @@ Identify any patterns forming or confirmed in this data.`
             stopLoss: p.stopLoss || p.stop_loss,
             takeProfit: p.takeProfit || p.take_profit,
             description: p.description || "",
-          } : null;
-        })
-        .filter((p): p is DetectedPatternResult => p !== null);
+          });
+        }
+      }
+      return mappedPatterns;
     }
 
     return [];

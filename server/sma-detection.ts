@@ -166,13 +166,20 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     }
     
     const slBuffer = flagRange * 0.1;
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagHigh;
+    let takeProfit = flagHigh + poleHeight;
+    // For bullish patterns, TP MUST be above entry
+    if (takeProfit <= entryPrice) {
+      takeProfit = entryPrice + poleHeight;
+    }
+    
     return {
       name: "bull_flag",
       displayName: "Bull Flag",
       status,
-      entryPrice: status === "breakout_confirmed" ? currentPrice : flagHigh,
+      entryPrice,
       stopLoss: flagLow - slBuffer,
-      takeProfit: flagHigh + poleHeight,
+      takeProfit,
       breakoutLevel: flagHigh,
       currentPrice,
       confidence: status === "breakout_confirmed" ? 80 : 55,
@@ -205,13 +212,20 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     }
     
     const slBuffer = flagRange * 0.1;
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagLow;
+    let takeProfit = flagLow - poleHeight;
+    // For bearish patterns, TP MUST be below entry
+    if (takeProfit >= entryPrice) {
+      takeProfit = entryPrice - poleHeight;
+    }
+    
     return {
       name: "bear_flag",
       displayName: "Bear Flag",
       status,
-      entryPrice: status === "breakout_confirmed" ? currentPrice : flagLow,
+      entryPrice,
       stopLoss: flagHigh + slBuffer,
-      takeProfit: flagLow - poleHeight,
+      takeProfit,
       breakoutLevel: flagLow,
       currentPrice,
       confidence: status === "breakout_confirmed" ? 80 : 55,
@@ -268,6 +282,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   let breakoutLevel: number;
   let stopLoss: number;
   let takeProfit: number;
+  let entryPrice: number;
   
   if (isBullish && (patternName === "ascending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = resistance;
@@ -275,16 +290,26 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     if (breakoutPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
     }
+    entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = support - (range * 0.1);
     takeProfit = resistance + range;
+    // For bullish patterns, TP MUST be above entry
+    if (takeProfit <= entryPrice) {
+      takeProfit = entryPrice + range;
+    }
   } else if (!isBullish && (patternName === "descending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = support;
     const breakoutPercent = ((support - currentPrice) / support) * 100;
     if (breakoutPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
     }
+    entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = resistance + (range * 0.1);
     takeProfit = support - range;
+    // For bearish patterns, TP MUST be below entry
+    if (takeProfit >= entryPrice) {
+      takeProfit = entryPrice - range;
+    }
   } else {
     return null;
   }
@@ -293,7 +318,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     name: patternName,
     displayName,
     status,
-    entryPrice: status === "breakout_confirmed" ? currentPrice : breakoutLevel,
+    entryPrice,
     stopLoss,
     takeProfit,
     breakoutLevel,
@@ -333,13 +358,22 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         status = "breakout_confirmed";
       }
       
+      const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
+      // For bullish patterns, TP MUST be above entry
+      // Base TP on pattern height from entry, not just neckline
+      let takeProfit = neckline + patternHeight;
+      if (takeProfit <= entryPrice) {
+        // If price has broken out strongly, project from entry instead
+        takeProfit = entryPrice + patternHeight;
+      }
+      
       return {
         name: "double_bottom",
         displayName: "Double Bottom",
         status,
-        entryPrice: status === "breakout_confirmed" ? currentPrice : neckline,
+        entryPrice,
         stopLoss: avgLow - (patternHeight * 0.1),
-        takeProfit: neckline + patternHeight,
+        takeProfit,
         breakoutLevel: neckline,
         currentPrice,
         confidence: status === "breakout_confirmed" ? 75 : 50,
@@ -368,13 +402,21 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         status = "breakout_confirmed";
       }
       
+      const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
+      // For bearish patterns, TP MUST be below entry
+      let takeProfit = neckline - patternHeight;
+      if (takeProfit >= entryPrice) {
+        // If price has broken down strongly, project from entry instead
+        takeProfit = entryPrice - patternHeight;
+      }
+      
       return {
         name: "double_top",
         displayName: "Double Top",
         status,
-        entryPrice: status === "breakout_confirmed" ? currentPrice : neckline,
+        entryPrice,
         stopLoss: avgHigh + (patternHeight * 0.1),
-        takeProfit: neckline - patternHeight,
+        takeProfit,
         breakoutLevel: neckline,
         currentPrice,
         confidence: status === "breakout_confirmed" ? 75 : 50,
@@ -414,13 +456,20 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
       status = "breakout_confirmed";
     }
     
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : support;
+    let takeProfit = support - range;
+    // For bearish patterns, TP MUST be below entry
+    if (takeProfit >= entryPrice) {
+      takeProfit = entryPrice - range;
+    }
+    
     return {
       name: "rising_wedge",
       displayName: "Rising Wedge (Bearish)",
       status,
-      entryPrice: status === "breakout_confirmed" ? currentPrice : support,
+      entryPrice,
       stopLoss: resistance + (range * 0.1),
-      takeProfit: support - range,
+      takeProfit,
       breakoutLevel: support,
       currentPrice,
       confidence: status === "breakout_confirmed" ? 70 : 45,
@@ -435,13 +484,20 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
       status = "breakout_confirmed";
     }
     
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : resistance;
+    let takeProfit = resistance + range;
+    // For bullish patterns, TP MUST be above entry
+    if (takeProfit <= entryPrice) {
+      takeProfit = entryPrice + range;
+    }
+    
     return {
       name: "falling_wedge",
       displayName: "Falling Wedge (Bullish)",
       status,
-      entryPrice: status === "breakout_confirmed" ? currentPrice : resistance,
+      entryPrice,
       stopLoss: support - (range * 0.1),
-      takeProfit: resistance + range,
+      takeProfit,
       breakoutLevel: resistance,
       currentPrice,
       confidence: status === "breakout_confirmed" ? 70 : 45,
