@@ -1,13 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { cn } from "@/lib/utils";
-import { GripHorizontal } from "lucide-react";
 
 interface ChartPositionOverlayProps {
   coin: string;
   currentPrice: number;
-  chartHeight?: number;
-  priceRange?: { high: number; low: number };
 }
 
 interface DraggableLine {
@@ -21,9 +18,7 @@ interface DraggableLine {
 
 export function ChartPositionOverlay({ 
   coin, 
-  currentPrice, 
-  chartHeight = 400,
-  priceRange 
+  currentPrice,
 }: ChartPositionOverlayProps) {
   const { positions, openOrders, connected, placeTPSL, cancelHLOrder } = useTrading();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,21 +35,21 @@ export function ChartPositionOverlay({
   const position = positions.find(p => p.coin === coin);
   const coinOrders = openOrders.filter(o => o.coin === coin);
 
-  const pricePadding = currentPrice * 0.02;
-  const effectiveRange = priceRange || {
-    high: currentPrice + pricePadding * 2,
-    low: currentPrice - pricePadding * 2,
+  const pricePadding = currentPrice * 0.03;
+  const effectiveRange = {
+    high: currentPrice + pricePadding,
+    low: currentPrice - pricePadding,
   };
   
   const priceSpan = effectiveRange.high - effectiveRange.low;
 
   const priceToY = useCallback((price: number): number => {
     const ratio = (effectiveRange.high - price) / priceSpan;
-    return Math.max(0, Math.min(100, ratio * 100));
+    return Math.max(5, Math.min(95, ratio * 100));
   }, [effectiveRange.high, priceSpan]);
 
   const formatPrice = useCallback((p: number) => {
-    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
     if (p >= 1) return p.toFixed(2);
     return p.toFixed(4);
   }, []);
@@ -78,15 +73,15 @@ export function ChartPositionOverlay({
   const getLineStyle = useCallback((type: DraggableLine["type"]) => {
     switch (type) {
       case "entry":
-        return { bg: "bg-blue-500", border: "border-blue-500", text: "text-blue-500" };
+        return { bg: "bg-blue-600", border: "border-blue-500" };
       case "liq":
-        return { bg: "bg-orange-500", border: "border-orange-500", text: "text-orange-500" };
+        return { bg: "bg-orange-600", border: "border-orange-500" };
       case "tp":
-        return { bg: "bg-green-500", border: "border-green-500", text: "text-green-500" };
+        return { bg: "bg-green-600", border: "border-green-500" };
       case "sl":
-        return { bg: "bg-red-500", border: "border-red-500", text: "text-red-500" };
+        return { bg: "bg-red-600", border: "border-red-500" };
       default:
-        return { bg: "bg-muted", border: "border-muted", text: "text-muted-foreground" };
+        return { bg: "bg-gray-600", border: "border-gray-500" };
     }
   }, []);
 
@@ -101,7 +96,7 @@ export function ChartPositionOverlay({
       draggable: false,
     });
 
-    if (position.liquidationPrice) {
+    if (position.liquidationPrice && position.liquidationPrice > 0) {
       lines.push({
         id: "liq",
         price: position.liquidationPrice,
@@ -119,7 +114,7 @@ export function ChartPositionOverlay({
     lines.push({
       id: `order-${order.oid}`,
       price: triggerPrice,
-      label: orderType === "tp" ? "Take Profit" : orderType === "sl" ? "Stop Loss" : "Order",
+      label: orderType === "tp" ? "TP" : orderType === "sl" ? "SL" : "Order",
       type: orderType,
       draggable: true,
       orderId: order.oid,
@@ -130,7 +125,7 @@ export function ChartPositionOverlay({
     lines.push({
       id: "pending-tp",
       price: pendingTP,
-      label: "New TP",
+      label: "TP",
       type: "tp",
       draggable: true,
     });
@@ -140,7 +135,7 @@ export function ChartPositionOverlay({
     lines.push({
       id: "pending-sl",
       price: pendingSL,
-      label: "New SL",
+      label: "SL",
       type: "sl",
       draggable: true,
     });
@@ -239,30 +234,9 @@ export function ChartPositionOverlay({
   return (
     <div 
       ref={containerRef}
-      className="absolute inset-0 z-20 overflow-hidden"
-      style={{ pointerEvents: dragState ? "auto" : "none" }}
+      className="absolute inset-0 z-10 overflow-hidden pointer-events-none"
       data-testid="chart-position-overlay"
     >
-      {position && !hasTPOrder && pendingTP === null && (
-        <button
-          onClick={addNewTPLine}
-          className="absolute right-2 top-2 z-30 bg-green-500/80 hover:bg-green-500 text-white text-xs px-2 py-1 rounded pointer-events-auto"
-          data-testid="add-tp-line-btn"
-        >
-          + Add TP Line
-        </button>
-      )}
-      
-      {position && !hasSLOrder && pendingSL === null && (
-        <button
-          onClick={addNewSLLine}
-          className="absolute right-2 top-10 z-30 bg-red-500/80 hover:bg-red-500 text-white text-xs px-2 py-1 rounded pointer-events-auto"
-          data-testid="add-sl-line-btn"
-        >
-          + Add SL Line
-        </button>
-      )}
-
       {lines.map((line) => {
         const displayPrice = dragState?.lineId === line.id 
           ? dragState.currentPrice 
@@ -275,44 +249,57 @@ export function ChartPositionOverlay({
           <div
             key={line.id}
             className={cn(
-              "absolute left-0 right-0 flex items-center transition-none",
+              "absolute left-0 flex items-center transition-none",
               isDragging && "z-50"
             )}
             style={{ 
               top: `${yPosition}%`,
               transform: "translateY(-50%)",
+              width: "120px",
             }}
           >
             <div 
               className={cn(
-                "flex-1 h-0 border-t-2 border-dashed",
-                style.border,
-                isDragging && "border-solid"
-              )} 
-            />
-            
-            <div 
-              className={cn(
-                "flex items-center gap-1 text-white text-xs px-2 py-1 rounded-l font-mono whitespace-nowrap",
+                "flex items-center gap-1 text-white text-[10px] px-1.5 py-0.5 rounded-r font-mono whitespace-nowrap",
                 style.bg,
                 line.draggable && "cursor-ns-resize pointer-events-auto",
-                isDragging && "ring-2 ring-white"
+                isDragging && "ring-1 ring-white"
               )}
               onMouseDown={(e) => handleMouseDown(e, line)}
               data-testid={`line-${line.type}-${line.id}`}
             >
-              {line.draggable && (
-                <GripHorizontal className="w-3 h-3 opacity-70" />
-              )}
-              <span>{line.label}</span>
-              <span className="font-bold">{formatPrice(displayPrice)}</span>
+              <span className="font-semibold">{line.label}</span>
+              <span>{formatPrice(displayPrice)}</span>
             </div>
           </div>
         );
       })}
 
+      {position && (!hasTPOrder && pendingTP === null || !hasSLOrder && pendingSL === null) && (
+        <div className="absolute left-2 bottom-2 flex gap-1 pointer-events-auto z-30">
+          {!hasTPOrder && pendingTP === null && (
+            <button
+              onClick={addNewTPLine}
+              className="bg-green-600/90 hover:bg-green-600 text-white text-[10px] px-2 py-1 rounded"
+              data-testid="add-tp-line-btn"
+            >
+              +TP
+            </button>
+          )}
+          {!hasSLOrder && pendingSL === null && (
+            <button
+              onClick={addNewSLLine}
+              className="bg-red-600/90 hover:bg-red-600 text-white text-[10px] px-2 py-1 rounded"
+              data-testid="add-sl-line-btn"
+            >
+              +SL
+            </button>
+          )}
+        </div>
+      )}
+
       {dragState && (
-        <div className="fixed inset-0 cursor-ns-resize z-40" />
+        <div className="fixed inset-0 cursor-ns-resize z-40 pointer-events-auto" />
       )}
     </div>
   );
