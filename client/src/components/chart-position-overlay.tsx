@@ -37,12 +37,8 @@ export function ChartPositionOverlay({
   const [pendingTP, setPendingTP] = useState<number | null>(null);
   const [pendingSL, setPendingSL] = useState<number | null>(null);
 
-  if (!connected) return null;
-
   const position = positions.find(p => p.coin === coin);
   const coinOrders = openOrders.filter(o => o.coin === coin);
-
-  if (!position && coinOrders.length === 0 && !pendingTP && !pendingSL) return null;
 
   const pricePadding = currentPrice * 0.02;
   const effectiveRange = priceRange || {
@@ -52,22 +48,18 @@ export function ChartPositionOverlay({
   
   const priceSpan = effectiveRange.high - effectiveRange.low;
 
-  const priceToY = (price: number): number => {
+  const priceToY = useCallback((price: number): number => {
     const ratio = (effectiveRange.high - price) / priceSpan;
     return Math.max(0, Math.min(100, ratio * 100));
-  };
+  }, [effectiveRange.high, priceSpan]);
 
-  const yToPrice = (yPercent: number): number => {
-    return effectiveRange.high - (yPercent / 100) * priceSpan;
-  };
-
-  const formatPrice = (p: number) => {
+  const formatPrice = useCallback((p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
     if (p >= 1) return p.toFixed(2);
     return p.toFixed(4);
-  };
+  }, []);
 
-  const getOrderType = (order: HLOpenOrder): "tp" | "sl" | "order" => {
+  const getOrderType = useCallback((order: HLOpenOrder): "tp" | "sl" | "order" => {
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
     
     if (order.orderType === "stop_loss") return "sl";
@@ -81,7 +73,22 @@ export function ChartPositionOverlay({
       }
     }
     return "order";
-  };
+  }, [position]);
+
+  const getLineStyle = useCallback((type: DraggableLine["type"]) => {
+    switch (type) {
+      case "entry":
+        return { bg: "bg-blue-500", border: "border-blue-500", text: "text-blue-500" };
+      case "liq":
+        return { bg: "bg-orange-500", border: "border-orange-500", text: "text-orange-500" };
+      case "tp":
+        return { bg: "bg-green-500", border: "border-green-500", text: "text-green-500" };
+      case "sl":
+        return { bg: "bg-red-500", border: "border-red-500", text: "text-red-500" };
+      default:
+        return { bg: "bg-muted", border: "border-muted", text: "text-muted-foreground" };
+    }
+  }, []);
 
   const lines: DraggableLine[] = [];
 
@@ -105,7 +112,7 @@ export function ChartPositionOverlay({
     }
   }
 
-  coinOrders.forEach((order, idx) => {
+  coinOrders.forEach((order) => {
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
     const orderType = getOrderType(order);
     
@@ -139,22 +146,7 @@ export function ChartPositionOverlay({
     });
   }
 
-  const getLineStyle = (type: DraggableLine["type"]) => {
-    switch (type) {
-      case "entry":
-        return { bg: "bg-blue-500", border: "border-blue-500", text: "text-blue-500" };
-      case "liq":
-        return { bg: "bg-orange-500", border: "border-orange-500", text: "text-orange-500" };
-      case "tp":
-        return { bg: "bg-green-500", border: "border-green-500", text: "text-green-500" };
-      case "sl":
-        return { bg: "bg-red-500", border: "border-red-500", text: "text-red-500" };
-      default:
-        return { bg: "bg-muted", border: "border-muted", text: "text-muted-foreground" };
-    }
-  };
-
-  const handleMouseDown = (e: React.MouseEvent, line: DraggableLine) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent, line: DraggableLine) => {
     if (!line.draggable) return;
     e.preventDefault();
     e.stopPropagation();
@@ -165,7 +157,7 @@ export function ChartPositionOverlay({
       startPrice: line.price,
       currentPrice: line.price,
     });
-  };
+  }, []);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!dragState || !containerRef.current) return;
@@ -222,24 +214,27 @@ export function ChartPositionOverlay({
     }
   }, [dragState, handleMouseMove, handleMouseUp]);
 
-  const addNewTPLine = () => {
+  const addNewTPLine = useCallback(() => {
     if (!position) return;
     const defaultTP = position.side === "long" 
       ? currentPrice * 1.02
       : currentPrice * 0.98;
     setPendingTP(defaultTP);
-  };
+  }, [position, currentPrice]);
 
-  const addNewSLLine = () => {
+  const addNewSLLine = useCallback(() => {
     if (!position) return;
     const defaultSL = position.side === "long"
       ? currentPrice * 0.98
       : currentPrice * 1.02;
     setPendingSL(defaultSL);
-  };
+  }, [position, currentPrice]);
 
   const hasTPOrder = coinOrders.some(o => getOrderType(o) === "tp");
   const hasSLOrder = coinOrders.some(o => getOrderType(o) === "sl");
+
+  if (!connected) return null;
+  if (!position && coinOrders.length === 0 && pendingTP === null && pendingSL === null) return null;
 
   return (
     <div 
