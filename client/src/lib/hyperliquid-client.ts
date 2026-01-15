@@ -260,22 +260,28 @@ export async function placeOrder(
   order: OrderRequest
 ): Promise<OrderResponse> {
   try {
+    console.log("placeOrder called with:", order);
+    
     const assetIndex = await getAssetIndex(order.coin);
     if (assetIndex === null) {
+      console.error("Unknown asset:", order.coin);
       return { success: false, error: `Unknown asset: ${order.coin}` };
     }
+    console.log("Asset index:", assetIndex);
 
     let limitPrice = order.price;
     
     if (order.orderType === "market" || !limitPrice) {
       const midPrice = await getMidPrice(order.coin);
       if (!midPrice) {
+        console.error("Could not get mid price for:", order.coin);
         return { success: false, error: "Could not get current price" };
       }
       const slippage = order.slippage || 0.02;
       limitPrice = order.isBuy 
         ? midPrice * (1 + slippage) 
         : midPrice * (1 - slippage);
+      console.log("Market order - midPrice:", midPrice, "limitPrice with slippage:", limitPrice);
     }
 
     const nonce = Date.now();
@@ -288,6 +294,7 @@ export async function placeOrder(
       r: order.reduceOnly || false,
       t: orderTypeToWire(order.orderType),
     };
+    console.log("Order wire:", orderWire);
 
     const action = {
       type: "order",
@@ -295,7 +302,9 @@ export async function placeOrder(
       grouping: "na",
     };
 
+    console.log("Requesting signature for action:", action);
     const signature = await signL1Action(signer, action, nonce, null);
+    console.log("Signature received:", signature);
 
     const payload = {
       action,
@@ -304,6 +313,7 @@ export async function placeOrder(
       vaultAddress: null,
     };
 
+    console.log("Sending order to Hyperliquid:", JSON.stringify(payload));
     const response = await fetch(EXCHANGE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -311,6 +321,7 @@ export async function placeOrder(
     });
 
     const result = await response.json();
+    console.log("Hyperliquid response:", result);
 
     if (result.status === "ok") {
       const statuses = result.response?.data?.statuses || [];
@@ -509,8 +520,9 @@ export async function closePosition(
   size: number,
   isLong: boolean
 ): Promise<OrderResponse> {
+  console.log("closePosition called:", { coin, size, isLong });
   // To close a position, place opposite market order with reduceOnly
-  return placeOrder(signer, {
+  const result = await placeOrder(signer, {
     coin,
     isBuy: !isLong, // Opposite direction to close
     size,
@@ -518,6 +530,8 @@ export async function closePosition(
     reduceOnly: true,
     slippage: 0.03, // 3% slippage for market close
   });
+  console.log("closePosition result:", result);
+  return result;
 }
 
 export async function setLeverage(

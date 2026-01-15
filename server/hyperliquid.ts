@@ -189,7 +189,24 @@ export async function getCandles(
 ): Promise<HyperliquidCandle[]> {
   try {
     const end = endTime || Date.now();
-    const start = startTime || end - 24 * 60 * 60 * 1000; // Default 24 hours
+    
+    // Calculate appropriate time range based on interval
+    // Need enough candles to display patterns (at least 100-200 candles)
+    const intervalMs: Record<string, number> = {
+      "1m": 60 * 1000,
+      "5m": 5 * 60 * 1000,
+      "15m": 15 * 60 * 1000,
+      "30m": 30 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "4h": 4 * 60 * 60 * 1000,
+      "1d": 24 * 60 * 60 * 1000,
+    };
+    
+    // Get 200 candles worth of data for the interval
+    const candleCount = 200;
+    const msPerCandle = intervalMs[interval] || 60 * 1000;
+    const defaultRange = msPerCandle * candleCount;
+    const start = startTime || end - defaultRange;
     
     const response = await fetch(HYPERLIQUID_API_URL, {
       method: "POST",
