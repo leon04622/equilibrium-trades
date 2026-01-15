@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { X } from "lucide-react";
+import { X, Pencil } from "lucide-react";
 
 interface BottomTradingPanelProps {
   coin?: string;
@@ -12,10 +14,29 @@ interface BottomTradingPanelProps {
 
 type TabType = "positions" | "orders" | "trades" | "history";
 
+interface TPSLDialogState {
+  open: boolean;
+  coin: string;
+  side: "long" | "short";
+  size: number;
+  entryPrice: number;
+  currentTP?: number;
+  currentSL?: number;
+}
+
 export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("positions");
-  const { positions, openOrders, cancelHLOrder, connected } = useTrading();
+  const { positions, openOrders, cancelHLOrder, placeTPSL, connected, currentPrices } = useTrading();
   const { toast } = useToast();
+  const [tpslDialog, setTpslDialog] = useState<TPSLDialogState>({
+    open: false,
+    coin: "",
+    side: "long",
+    size: 0,
+    entryPrice: 0,
+  });
+  const [tpPrice, setTpPrice] = useState("");
+  const [slPrice, setSlPrice] = useState("");
 
   const filteredPositions = coin ? positions.filter(p => p.coin === coin) : positions;
   const filteredOrders = coin ? openOrders.filter(o => o.coin === coin) : openOrders;
@@ -36,6 +57,87 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
     toast({ title: "All Orders Cancelled" });
   };
 
+  const openTPSLDialog = (pos: any) => {
+    const posOrders = openOrders.filter(o => o.coin === pos.coin);
+    const tpOrder = posOrders.find(o => {
+      if (o.orderType === "take_profit") return true;
+      if (o.triggerPx && pos.side === "long" && parseFloat(o.triggerPx) > pos.entryPrice) return true;
+      if (o.triggerPx && pos.side === "short" && parseFloat(o.triggerPx) < pos.entryPrice) return true;
+      return false;
+    });
+    const slOrder = posOrders.find(o => {
+      if (o.orderType === "stop_loss") return true;
+      if (o.triggerPx && pos.side === "long" && parseFloat(o.triggerPx) < pos.entryPrice) return true;
+      if (o.triggerPx && pos.side === "short" && parseFloat(o.triggerPx) > pos.entryPrice) return true;
+      return false;
+    });
+    
+    setTpslDialog({
+      open: true,
+      coin: pos.coin,
+      side: pos.side,
+      size: pos.size,
+      entryPrice: pos.entryPrice,
+      currentTP: tpOrder ? parseFloat(tpOrder.triggerPx!) : undefined,
+      currentSL: slOrder ? parseFloat(slOrder.triggerPx!) : undefined,
+    });
+    setTpPrice(tpOrder?.triggerPx || "");
+    setSlPrice(slOrder?.triggerPx || "");
+  };
+
+  const handleSetTPSL = async () => {
+    const tp = tpPrice ? parseFloat(tpPrice) : undefined;
+    const sl = slPrice ? parseFloat(slPrice) : undefined;
+    
+    if (!tp && !sl) {
+      toast({ title: "No TP/SL Set", description: "Please enter at least one price", variant: "destructive" });
+      return;
+    }
+    
+    const result = await placeTPSL(
+      tpslDialog.coin,
+      tpslDialog.size,
+      tpslDialog.side === "long",
+      tp,
+      sl
+    );
+    
+    if (result.success) {
+      toast({
+        title: "TP/SL Orders Placed",
+        description: `${tp ? `TP: ${tpPrice}` : ""}${tp && sl ? ", " : ""}${sl ? `SL: ${slPrice}` : ""} for ${tpslDialog.coin}`,
+      });
+      setTpslDialog({ ...tpslDialog, open: false });
+    } else {
+      toast({
+        title: "Failed to Place TP/SL",
+        description: result.error || "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getTPSLDisplay = (pos: any) => {
+    const posOrders = openOrders.filter(o => o.coin === pos.coin);
+    let tp = "--";
+    let sl = "--";
+    
+    posOrders.forEach(o => {
+      if (!o.triggerPx) return;
+      const trigger = parseFloat(o.triggerPx);
+      const isTP = o.orderType === "take_profit" || 
+        (pos.side === "long" && trigger > pos.entryPrice) ||
+        (pos.side === "short" && trigger < pos.entryPrice);
+      if (isTP) {
+        tp = formatPrice(trigger);
+      } else {
+        sl = formatPrice(trigger);
+      }
+    });
+    
+    return { tp, sl };
+  };
+
   const formatPrice = (p: number | string) => {
     const price = typeof p === "string" ? parseFloat(p) : p;
     if (price >= 1000) return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -45,7 +147,8 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
 
   const formatSize = (s: number | string) => {
     const size = typeof s === "string" ? parseFloat(s) : s;
-    return size.toFixed(4);
+    if (size >= 1) return size.toFixed(4);
+    return size.toFixed(6);
   };
 
   const getOrderType = (order: HLOpenOrder) => {
@@ -95,86 +198,150 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   }
 
   return (
-    <div className="border-t bg-card/50" data-testid="bottom-trading-panel">
-      <div className="flex items-center justify-between px-2 border-b">
-        <div className="flex items-center gap-1">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "px-3 py-2 text-xs font-medium transition-colors relative",
-                activeTab === tab.id 
-                  ? "text-foreground" 
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              data-testid={`tab-${tab.id}`}
-            >
-              {tab.label}
-              {tab.count > 0 && (
-                <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
-                  {tab.count}
-                </Badge>
-              )}
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-              )}
-            </button>
-          ))}
+    <>
+      <div className="border-t bg-card/50" data-testid="bottom-trading-panel">
+        <div className="flex items-center justify-between px-2 border-b">
+          <div className="flex items-center gap-1">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "px-3 py-2 text-xs font-medium transition-colors relative",
+                  activeTab === tab.id 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                data-testid={`tab-${tab.id}`}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                    {tab.count}
+                  </Badge>
+                )}
+                {activeTab === tab.id && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Filter</span>
+            {activeTab === "orders" && filteredOrders.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs text-bearish hover:text-bearish"
+                onClick={handleCancelAll}
+                data-testid="button-cancel-all"
+              >
+                Cancel All
+              </Button>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Filter</span>
-          {activeTab === "orders" && filteredOrders.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 text-xs text-bearish hover:text-bearish"
-              onClick={handleCancelAll}
-              data-testid="button-cancel-all"
-            >
-              Cancel All
-            </Button>
+        <div className="h-28 overflow-auto">
+          {activeTab === "positions" && (
+            <PositionsTable 
+              positions={filteredPositions} 
+              currentPrices={currentPrices}
+              formatPrice={formatPrice} 
+              formatSize={formatSize}
+              getTPSLDisplay={getTPSLDisplay}
+              onEditTPSL={openTPSLDialog}
+            />
+          )}
+          {activeTab === "orders" && (
+            <OrdersTable 
+              orders={filteredOrders} 
+              formatPrice={formatPrice} 
+              formatSize={formatSize}
+              getOrderType={getOrderType}
+              onCancel={handleCancelOrder}
+            />
+          )}
+          {activeTab === "trades" && (
+            <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+              No trade history
+            </div>
+          )}
+          {activeTab === "history" && (
+            <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+              No order history
+            </div>
           )}
         </div>
       </div>
 
-      <div className="h-28 overflow-auto">
-        {activeTab === "positions" && (
-          <PositionsTable positions={filteredPositions} formatPrice={formatPrice} formatSize={formatSize} />
-        )}
-        {activeTab === "orders" && (
-          <OrdersTable 
-            orders={filteredOrders} 
-            formatPrice={formatPrice} 
-            formatSize={formatSize}
-            getOrderType={getOrderType}
-            onCancel={handleCancelOrder}
-          />
-        )}
-        {activeTab === "trades" && (
-          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-            No trade history
+      <Dialog open={tpslDialog.open} onOpenChange={(open) => setTpslDialog({ ...tpslDialog, open })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Set TP/SL for {tpslDialog.coin}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="text-sm text-muted-foreground">
+              Position: {tpslDialog.side === "long" ? "Long" : "Short"} {formatSize(tpslDialog.size)} @ {formatPrice(tpslDialog.entryPrice)}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-bullish">Take Profit Price</label>
+              <Input
+                type="number"
+                placeholder={tpslDialog.side === "long" ? "Above entry price" : "Below entry price"}
+                value={tpPrice}
+                onChange={(e) => setTpPrice(e.target.value)}
+                className="font-mono"
+                data-testid="input-tp-price"
+              />
+              {tpslDialog.currentTP && (
+                <p className="text-xs text-muted-foreground">Current: {formatPrice(tpslDialog.currentTP)}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-bearish">Stop Loss Price</label>
+              <Input
+                type="number"
+                placeholder={tpslDialog.side === "long" ? "Below entry price" : "Above entry price"}
+                value={slPrice}
+                onChange={(e) => setSlPrice(e.target.value)}
+                className="font-mono"
+                data-testid="input-sl-price"
+              />
+              {tpslDialog.currentSL && (
+                <p className="text-xs text-muted-foreground">Current: {formatPrice(tpslDialog.currentSL)}</p>
+              )}
+            </div>
           </div>
-        )}
-        {activeTab === "history" && (
-          <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-            No order history
-          </div>
-        )}
-      </div>
-    </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTpslDialog({ ...tpslDialog, open: false })}>
+              Cancel
+            </Button>
+            <Button onClick={handleSetTPSL} data-testid="button-confirm-tpsl">
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
 function PositionsTable({ 
   positions, 
+  currentPrices,
   formatPrice, 
-  formatSize 
+  formatSize,
+  getTPSLDisplay,
+  onEditTPSL,
 }: { 
   positions: any[]; 
+  currentPrices: Record<string, number>;
   formatPrice: (p: number) => string;
   formatSize: (s: number | string) => string;
+  getTPSLDisplay: (pos: any) => { tp: string; sl: string };
+  onEditTPSL: (pos: any) => void;
 }) {
   if (positions.length === 0) {
     return (
@@ -189,39 +356,77 @@ function PositionsTable({
       <thead className="sticky top-0 bg-card/90 backdrop-blur">
         <tr className="text-muted-foreground border-b">
           <th className="text-left px-3 py-1.5 font-medium">Coin</th>
-          <th className="text-left px-3 py-1.5 font-medium">Side</th>
           <th className="text-right px-3 py-1.5 font-medium">Size</th>
+          <th className="text-right px-3 py-1.5 font-medium">Position Value</th>
           <th className="text-right px-3 py-1.5 font-medium">Entry Price</th>
           <th className="text-right px-3 py-1.5 font-medium">Mark Price</th>
+          <th className="text-right px-3 py-1.5 font-medium">PNL (ROE %)</th>
           <th className="text-right px-3 py-1.5 font-medium">Liq. Price</th>
-          <th className="text-right px-3 py-1.5 font-medium">Unrealized PnL</th>
-          <th className="text-right px-3 py-1.5 font-medium">Leverage</th>
+          <th className="text-right px-3 py-1.5 font-medium">Margin</th>
+          <th className="text-center px-3 py-1.5 font-medium">Close All</th>
           <th className="text-center px-3 py-1.5 font-medium">TP/SL</th>
         </tr>
       </thead>
       <tbody>
-        {positions.map((pos, i) => (
-          <tr key={i} className="border-b border-border/50 hover:bg-muted/30" data-testid={`position-row-${pos.coin}`}>
-            <td className="px-3 py-1.5 font-medium">{pos.coin}</td>
-            <td className={cn("px-3 py-1.5", pos.side === "long" ? "text-bullish" : "text-bearish")}>
-              {pos.side === "long" ? "Long" : "Short"}
-            </td>
-            <td className="px-3 py-1.5 text-right font-mono">{formatSize(pos.size)}</td>
-            <td className="px-3 py-1.5 text-right font-mono">{formatPrice(pos.entryPrice)}</td>
-            <td className="px-3 py-1.5 text-right font-mono">{formatPrice(pos.markPrice)}</td>
-            <td className="px-3 py-1.5 text-right font-mono text-bearish">
-              {pos.liquidationPrice ? formatPrice(pos.liquidationPrice) : "--"}
-            </td>
-            <td className={cn(
-              "px-3 py-1.5 text-right font-mono",
-              pos.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
-            )}>
-              {pos.unrealizedPnl >= 0 ? "+" : ""}{formatPrice(pos.unrealizedPnl)}
-            </td>
-            <td className="px-3 py-1.5 text-right font-mono">{pos.leverage}x</td>
-            <td className="px-3 py-1.5 text-center">--</td>
-          </tr>
-        ))}
+        {positions.map((pos, i) => {
+          const markPrice = currentPrices[pos.coin] || pos.markPrice || pos.entryPrice;
+          const positionValue = pos.size * markPrice;
+          const roe = pos.margin > 0 ? (pos.unrealizedPnl / pos.margin) * 100 : 0;
+          const { tp, sl } = getTPSLDisplay(pos);
+          
+          return (
+            <tr key={i} className="border-b border-border/50 hover:bg-muted/30" data-testid={`position-row-${pos.coin}`}>
+              <td className="px-3 py-1.5">
+                <span className="font-medium">{pos.coin}</span>
+                <span className={cn("ml-1 text-[10px]", pos.side === "long" ? "text-bullish" : "text-bearish")}>
+                  {pos.leverage}x
+                </span>
+              </td>
+              <td className={cn("px-3 py-1.5 text-right font-mono", pos.side === "long" ? "text-bullish" : "text-bearish")}>
+                {formatSize(pos.size)} {pos.coin}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono">
+                {formatPrice(positionValue)} USDC
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono">{formatPrice(pos.entryPrice)}</td>
+              <td className="px-3 py-1.5 text-right font-mono">{formatPrice(markPrice)}</td>
+              <td className={cn(
+                "px-3 py-1.5 text-right font-mono",
+                pos.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
+              )}>
+                {pos.unrealizedPnl >= 0 ? "+" : ""}{formatPrice(pos.unrealizedPnl)} ({roe >= 0 ? "+" : ""}{roe.toFixed(2)}%)
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-orange-500">
+                {pos.liquidationPrice ? formatPrice(pos.liquidationPrice) : "--"}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono">
+                {formatPrice(pos.margin || 0)}
+              </td>
+              <td className="px-3 py-1.5 text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground">
+                    Limit
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground">
+                    Market
+                  </Button>
+                </div>
+              </td>
+              <td className="px-3 py-1.5 text-center">
+                <button
+                  onClick={() => onEditTPSL(pos)}
+                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                  data-testid={`button-edit-tpsl-${pos.coin}`}
+                >
+                  <span className="text-bullish">{tp}</span>
+                  <span>/</span>
+                  <span className="text-bearish">{sl}</span>
+                  <Pencil className="h-3 w-3 ml-0.5" />
+                </button>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

@@ -7,6 +7,7 @@ import {
   closePosition as hlClosePosition,
   placeOrder as hlPlaceOrder,
   cancelOrder as hlCancelOrder,
+  placeTriggerOrder,
   type Position as HLPosition, 
   type OpenOrder, 
   type AccountState 
@@ -100,6 +101,7 @@ interface TradingContextType {
   closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
   cancelOrder: (orderId: string) => void;
   cancelHLOrder: (coin: string, oid: number) => Promise<{ success: boolean; error?: string }>;
+  placeTPSL: (coin: string, size: number, isLong: boolean, tpPrice?: number, slPrice?: number) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
   refreshAccount: () => Promise<void>;
@@ -540,6 +542,58 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [signer, refreshAccount]);
 
+  const placeTPSL = useCallback(async (
+    coin: string, 
+    size: number, 
+    isLong: boolean, 
+    tpPrice?: number, 
+    slPrice?: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!signer) {
+      return { success: false, error: "Wallet not connected" };
+    }
+    
+    try {
+      const results: Array<{ success: boolean; error?: string }> = [];
+      
+      if (tpPrice && tpPrice > 0) {
+        const tpResult = await placeTriggerOrder(signer, {
+          coin,
+          isBuy: !isLong,
+          size,
+          triggerPrice: tpPrice,
+          isStopLoss: false,
+          reduceOnly: true,
+        });
+        results.push(tpResult);
+      }
+      
+      if (slPrice && slPrice > 0) {
+        const slResult = await placeTriggerOrder(signer, {
+          coin,
+          isBuy: !isLong,
+          size,
+          triggerPrice: slPrice,
+          isStopLoss: true,
+          reduceOnly: true,
+        });
+        results.push(slResult);
+      }
+      
+      await refreshAccount();
+      
+      const errors = results.filter(r => !r.success).map(r => r.error);
+      if (errors.length > 0) {
+        return { success: false, error: errors.join(", ") };
+      }
+      
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error placing TP/SL:", error);
+      return { success: false, error: error.message || "Failed to place TP/SL" };
+    }
+  }, [signer, refreshAccount]);
+
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);
   }, []);
@@ -644,6 +698,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       closePosition,
       cancelOrder,
       cancelHLOrder,
+      placeTPSL,
       setIndicators,
       updatePrices,
       refreshAccount,

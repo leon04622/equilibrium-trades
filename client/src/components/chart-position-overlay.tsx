@@ -16,31 +16,6 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
 
   if (!position && coinOrders.length === 0) return null;
 
-  const allPrices: number[] = [];
-  if (currentPrice > 0) allPrices.push(currentPrice);
-  if (position) {
-    allPrices.push(position.entryPrice);
-    if (position.liquidationPrice) allPrices.push(position.liquidationPrice);
-  }
-  coinOrders.forEach(order => {
-    const price = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    if (price > 0) allPrices.push(price);
-  });
-
-  if (allPrices.length === 0) return null;
-
-  const minPrice = Math.min(...allPrices);
-  const maxPrice = Math.max(...allPrices);
-  const padding = (maxPrice - minPrice) * 0.15 || maxPrice * 0.02;
-  const rangeMin = minPrice - padding;
-  const rangeMax = maxPrice + padding;
-  const range = rangeMax - rangeMin;
-
-  const getYPercent = (price: number) => {
-    if (range === 0) return 50;
-    return ((rangeMax - price) / range) * 100;
-  };
-
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
     if (p >= 1) return p.toFixed(2);
@@ -51,91 +26,104 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
     
     if (order.orderType === "stop_loss") {
-      return { type: "SL", color: "bg-bearish", textColor: "text-bearish", borderColor: "border-bearish" };
+      return { type: "SL", color: "bg-red-500", borderColor: "border-red-500", label: "Stop Loss" };
     }
     if (order.orderType === "take_profit") {
-      return { type: "TP", color: "bg-bullish", textColor: "text-bullish", borderColor: "border-bullish" };
+      return { type: "TP", color: "bg-green-500", borderColor: "border-green-500", label: "Take Profit" };
     }
     
     if (position) {
       if (position.side === "long") {
         if (triggerPrice < position.entryPrice) {
-          return { type: "SL", color: "bg-bearish", textColor: "text-bearish", borderColor: "border-bearish" };
+          return { type: "SL", color: "bg-red-500", borderColor: "border-red-500", label: "Stop Loss" };
         } else {
-          return { type: "TP", color: "bg-bullish", textColor: "text-bullish", borderColor: "border-bullish" };
+          return { type: "TP", color: "bg-green-500", borderColor: "border-green-500", label: "Take Profit" };
         }
       } else {
         if (triggerPrice > position.entryPrice) {
-          return { type: "SL", color: "bg-bearish", textColor: "text-bearish", borderColor: "border-bearish" };
+          return { type: "SL", color: "bg-red-500", borderColor: "border-red-500", label: "Stop Loss" };
         } else {
-          return { type: "TP", color: "bg-bullish", textColor: "text-bullish", borderColor: "border-bullish" };
+          return { type: "TP", color: "bg-green-500", borderColor: "border-green-500", label: "Take Profit" };
         }
       }
     }
     
-    return { type: "Order", color: "bg-muted", textColor: "text-muted-foreground", borderColor: "border-muted" };
+    return { type: "Order", color: "bg-muted", borderColor: "border-muted", label: "Order" };
   };
 
+  const lines: Array<{
+    price: number;
+    label: string;
+    color: string;
+    borderColor: string;
+    style: "solid" | "dashed" | "dotted";
+  }> = [];
+
+  if (position) {
+    lines.push({
+      price: position.entryPrice,
+      label: `Entry ${formatPrice(position.entryPrice)}`,
+      color: "bg-blue-500",
+      borderColor: "border-blue-500",
+      style: "dashed",
+    });
+
+    if (position.liquidationPrice) {
+      lines.push({
+        price: position.liquidationPrice,
+        label: `Liq ${formatPrice(position.liquidationPrice)}`,
+        color: "bg-orange-500",
+        borderColor: "border-orange-500",
+        style: "dotted",
+      });
+    }
+  }
+
+  coinOrders.forEach(order => {
+    const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
+    const info = getOrderInfo(order);
+    
+    lines.push({
+      price: triggerPrice,
+      label: `${info.label} ${formatPrice(triggerPrice)}`,
+      color: info.color,
+      borderColor: info.borderColor,
+      style: "dashed",
+    });
+  });
+
+  if (lines.length === 0) return null;
+
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-20 pointer-events-none z-10" data-testid="chart-position-overlay">
-      {position && (
-        <>
-          <div
-            className="absolute right-0 left-0 flex items-center"
-            style={{ top: `${getYPercent(position.entryPrice)}%` }}
-          >
-            <div className="flex-1 border-t-2 border-dashed border-blue-500" />
-            <div className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-sm font-mono">
-              Entry {formatPrice(position.entryPrice)}
-            </div>
-          </div>
-
-          {position.liquidationPrice && (
-            <div
-              className="absolute right-0 left-0 flex items-center"
-              style={{ top: `${getYPercent(position.liquidationPrice)}%` }}
-            >
-              <div className="flex-1 border-t-2 border-dotted border-orange-500" />
-              <div className="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-sm font-mono">
-                Liq {formatPrice(position.liquidationPrice)}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {coinOrders.map((order, i) => {
-        const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-        const info = getOrderInfo(order);
-        
-        return (
-          <div
-            key={order.oid || i}
-            className="absolute right-0 left-0 flex items-center"
-            style={{ top: `${getYPercent(triggerPrice)}%` }}
-          >
-            <div className={cn("flex-1 border-t-2 border-dashed", info.borderColor)} />
-            <div className={cn(
-              "text-white text-[10px] px-1.5 py-0.5 rounded-sm font-mono",
-              info.color
-            )}>
-              {info.type} {formatPrice(triggerPrice)}
-            </div>
-          </div>
-        );
-      })}
-
-      {currentPrice > 0 && (
+    <div 
+      className="absolute inset-0 pointer-events-none z-10 overflow-hidden"
+      data-testid="chart-position-overlay"
+    >
+      {lines.map((line, i) => (
         <div
-          className="absolute right-0 left-0 flex items-center"
-          style={{ top: `${getYPercent(currentPrice)}%` }}
+          key={`${line.label}-${i}`}
+          className="absolute left-0 right-0 flex items-center"
+          style={{ 
+            top: `${50 - (i - lines.length / 2) * 8}%`,
+          }}
         >
-          <div className="flex-1 border-t border-foreground/50" />
-          <div className="bg-foreground text-background text-[10px] px-1.5 py-0.5 rounded-sm font-mono">
-            {formatPrice(currentPrice)}
+          <div 
+            className={cn(
+              "flex-1 h-0",
+              line.style === "solid" && "border-t",
+              line.style === "dashed" && "border-t-2 border-dashed",
+              line.style === "dotted" && "border-t-2 border-dotted",
+              line.borderColor
+            )} 
+          />
+          <div className={cn(
+            "text-white text-[10px] px-2 py-0.5 rounded font-mono whitespace-nowrap",
+            line.color
+          )}>
+            {line.label}
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }

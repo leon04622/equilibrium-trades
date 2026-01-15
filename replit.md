@@ -187,3 +187,6 @@ npm run db:push    # Push database schema (if using DB)
   - Cancel individual orders or cancel all from bottom panel
   - Classification logic: Uses orderType from API, falls back to position entry price comparison
   - Components: bottom-trading-panel.tsx, chart-position-overlay.tsx
+  - TP/SL placement: Click pencil icon on position row to set take profit and stop loss prices
+  - Uses placeTriggerOrder from Hyperliquid API to place TP/SL as trigger orders
+  - Positions table shows: Coin, Size, Position Value, Entry/Mark/Liq prices, PNL (ROE%), Margin, Close All, TP/SL
