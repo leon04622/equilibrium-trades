@@ -257,8 +257,8 @@ export function TradeJournal() {
       <Card>
         <CardHeader className="pb-2 flex flex-row items-center justify-between gap-4">
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Zap className="h-5 w-5" />
-            Recent Trades
+            <BarChart3 className="h-5 w-5" />
+            Trade Journal
           </CardTitle>
           <Badge variant="outline">{trades.length} trades</Badge>
         </CardHeader>
@@ -270,8 +270,9 @@ export function TradeJournal() {
           ) : trades.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Trophy className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No graded trades yet</p>
-              <p className="text-xs mt-1">Close a position to see your trade graded</p>
+              <p className="font-medium">No graded trades yet</p>
+              <p className="text-xs mt-1">Close a position to see your trade automatically graded</p>
+              <p className="text-xs mt-2">Each trade is scored on entry, stop, R:R, leverage, and setup</p>
             </div>
           ) : (
             <ScrollArea className="h-[400px] pr-2">
