@@ -1,5 +1,5 @@
-import { JsonRpcSigner, keccak256, TypedDataDomain, TypedDataField } from "ethers";
-import { encode as msgpackEncode } from "@msgpack/msgpack";
+import { JsonRpcSigner } from "ethers";
+import { signL1Action as nktSignL1Action } from "@nktkas/hyperliquid/signing";
 
 const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
@@ -203,78 +203,32 @@ function orderTypeToWire(orderType: "market" | "limit"): { limit: { tif: string 
   return { limit: { tif: "Gtc" } };
 }
 
-function actionHash(action: any, vaultAddress: string | null, nonce: number): Uint8Array {
-  const actionBytes = msgpackEncode(action);
-  
-  const vaultBytes = new Uint8Array(20);
-  if (vaultAddress) {
-    const addr = vaultAddress.startsWith('0x') ? vaultAddress.slice(2) : vaultAddress;
-    for (let i = 0; i < 20; i++) {
-      vaultBytes[i] = parseInt(addr.slice(i * 2, i * 2 + 2), 16);
-    }
-  }
-  
-  const nonceBytes = new Uint8Array(8);
-  const nonceView = new DataView(nonceBytes.buffer);
-  nonceView.setBigUint64(0, BigInt(nonce), false);
-  
-  const combined = new Uint8Array(actionBytes.length + vaultBytes.length + nonceBytes.length);
-  combined.set(new Uint8Array(actionBytes), 0);
-  combined.set(vaultBytes, actionBytes.length);
-  combined.set(nonceBytes, actionBytes.length + vaultBytes.length);
-  
-  return combined;
-}
-
+// Use the @nktkas/hyperliquid SDK for signing - it handles all the complex
+// action hashing, msgpack encoding, and EIP-712 signing correctly
 async function signL1Action(
   signer: JsonRpcSigner,
   action: any,
   nonce: number,
   vaultAddress: string | null = null
 ): Promise<{ r: string; s: string; v: number }> {
-  // Create the action hash for signing
-  const hashData = actionHash(action, vaultAddress, nonce);
-  const actionHashHex = keccak256(hashData);
-
-  // For browser wallet signing, we must use Arbitrum chainId (42161) 
-  // because MetaMask validates that EIP-712 domain chainId matches current network
-  // Hyperliquid accepts signatures from Arbitrum One for mainnet trading
-  const domain: TypedDataDomain = {
-    name: "Exchange",
-    version: "1", 
-    chainId: 42161, // Arbitrum One - required for browser wallet signing
-    verifyingContract: "0x0000000000000000000000000000000000000000",
-  };
-
-  const types: Record<string, TypedDataField[]> = {
-    Agent: [
-      { name: "source", type: "string" },
-      { name: "connectionId", type: "bytes32" },
-    ],
-  };
-
-  // For mainnet: source = "a"
-  // For testnet: source = "b" 
-  // The connectionId is the keccak256 hash of the action
-  const message = {
-    source: "a",
-    connectionId: actionHashHex,
-  };
-
-  console.log("Signing with domain:", domain);
-  console.log("Signing message:", message);
+  console.log("Signing action with @nktkas/hyperliquid SDK...");
+  console.log("Action:", JSON.stringify(action));
+  console.log("Nonce:", nonce);
   
-  const signature = await signer.signTypedData(domain, types, message);
-  console.log("Raw signature:", signature);
+  // The SDK's signL1Action handles:
+  // 1. Correct msgpack encoding with proper key ordering
+  // 2. Action hash computation (action + nonce + vaultMarker + vaultBytes)
+  // 3. EIP-712 signing with chainId 1337 and phantom agent construction
+  const signature = await nktSignL1Action({
+    wallet: signer,
+    action,
+    nonce,
+    vaultAddress: vaultAddress ? vaultAddress as `0x${string}` : undefined,
+    isTestnet: false,
+  });
   
-  // Parse signature - ethers returns 0x + 130 hex chars (65 bytes)
-  const r = signature.slice(0, 66);
-  const s = "0x" + signature.slice(66, 130);
-  const v = parseInt(signature.slice(130, 132), 16);
-  
-  console.log("Parsed signature:", { r, s, v });
-  
-  return { r, s, v };
+  console.log("Signature from SDK:", signature);
+  return signature;
 }
 
 export async function placeOrder(
