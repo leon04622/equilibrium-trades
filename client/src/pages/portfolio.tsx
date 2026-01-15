@@ -13,85 +13,28 @@ import {
   Percent,
   BarChart3,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  AlertCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface Position {
-  id: string;
-  symbol: string;
-  side: "long" | "short";
-  size: number;
-  entryPrice: number;
-  markPrice: number;
-  leverage: number;
-  margin: number;
-  unrealizedPnl: number;
-  unrealizedPnlPercent: number;
-  liquidationPrice: number;
-}
-
-interface SpotBalance {
-  asset: string;
-  free: number;
-  locked: number;
-  usdValue: number;
-}
-
-const mockPositions: Position[] = [
-  {
-    id: "1",
-    symbol: "BTC",
-    side: "long",
-    size: 0.15,
-    entryPrice: 102450,
-    markPrice: 104280,
-    leverage: 10,
-    margin: 1537.5,
-    unrealizedPnl: 274.50,
-    unrealizedPnlPercent: 17.86,
-    liquidationPrice: 92205,
-  },
-  {
-    id: "2",
-    symbol: "ETH",
-    side: "short",
-    size: 2.5,
-    entryPrice: 3850,
-    markPrice: 3920,
-    leverage: 5,
-    margin: 1925,
-    unrealizedPnl: -175,
-    unrealizedPnlPercent: -9.09,
-    liquidationPrice: 4620,
-  },
-  {
-    id: "3",
-    symbol: "SOL",
-    side: "long",
-    size: 50,
-    entryPrice: 210,
-    markPrice: 218.50,
-    leverage: 20,
-    margin: 525,
-    unrealizedPnl: 425,
-    unrealizedPnlPercent: 80.95,
-    liquidationPrice: 199.50,
-  },
-];
-
-const mockSpotBalances: SpotBalance[] = [
-  { asset: "USDC", free: 15420.50, locked: 0, usdValue: 15420.50 },
-  { asset: "BTC", free: 0.0245, locked: 0, usdValue: 2554.86 },
-  { asset: "ETH", free: 1.25, locked: 0.5, usdValue: 6860 },
-  { asset: "SOL", free: 25.5, locked: 0, usdValue: 5571.75 },
-];
+import { useTrading } from "@/lib/trading-context";
+import { Link } from "wouter";
 
 export default function Portfolio() {
-  const totalEquity = 28450.75;
-  const availableBalance = 15420.50;
-  const totalUnrealizedPnl = mockPositions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
-  const totalMarginUsed = mockPositions.reduce((sum, p) => sum + p.margin, 0);
+  const { 
+    connected, 
+    positions, 
+    accountValue,
+    marginUsed,
+    balance,
+    currentPrices,
+    refreshAccount,
+  } = useTrading();
+
+  const totalEquity = accountValue || 0;
+  const availableBalance = balance || 0;
+  const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+  const totalMarginUsed = marginUsed || 0;
 
   const formatPrice = (val: number) => {
     if (val >= 1000) return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -104,26 +47,60 @@ export default function Portfolio() {
     return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  const handleRefresh = () => {
+    refreshAccount();
+  };
+
+  if (!connected) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
+            <p className="text-muted-foreground">Manage your holdings and positions</p>
+          </div>
+        </div>
+
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
+            <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Wallet Not Connected</h3>
+            <p className="text-muted-foreground mb-4">
+              Connect your wallet to view your Hyperliquid portfolio, positions, and balances.
+            </p>
+            <Link href="/hyperliquid">
+              <Button data-testid="button-connect-wallet">
+                <Wallet className="h-4 w-4 mr-2" />
+                Connect Wallet
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-          <p className="text-muted-foreground">Manage your holdings and positions</p>
+          <p className="text-muted-foreground">Your Hyperliquid holdings and positions</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" data-testid="button-refresh-portfolio">
+          <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio">
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <Button size="sm" data-testid="button-deposit">
-            <DollarSign className="h-4 w-4 mr-2" />
-            Deposit
-          </Button>
+          <a href="https://app.hyperliquid.xyz/trade" target="_blank" rel="noopener noreferrer">
+            <Button size="sm" data-testid="button-deposit">
+              <DollarSign className="h-4 w-4 mr-2" />
+              Deposit on HL
+            </Button>
+          </a>
         </div>
       </div>
 
-      {/* Account Overview Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card data-testid="card-total-equity">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -132,7 +109,7 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">${formatPrice(totalEquity)}</div>
-            <p className="text-xs text-muted-foreground">Account value + unrealized PnL</p>
+            <p className="text-xs text-muted-foreground">Account value</p>
           </CardContent>
         </Card>
 
@@ -169,7 +146,7 @@ export default function Portfolio() {
                 "text-xs",
                 totalUnrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
               )}>
-                {((totalUnrealizedPnl / totalEquity) * 100).toFixed(2)}% of equity
+                {totalEquity > 0 ? ((totalUnrealizedPnl / totalEquity) * 100).toFixed(2) : "0.00"}% of equity
               </span>
             </div>
           </CardContent>
@@ -183,20 +160,16 @@ export default function Portfolio() {
           <CardContent>
             <div className="text-2xl font-bold">${formatPrice(totalMarginUsed)}</div>
             <p className="text-xs text-muted-foreground">
-              {((totalMarginUsed / totalEquity) * 100).toFixed(1)}% of equity
+              {totalEquity > 0 ? ((totalMarginUsed / totalEquity) * 100).toFixed(1) : "0.0"}% of equity
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs for Positions and Spot */}
       <Tabs defaultValue="perp" className="space-y-4">
         <TabsList data-testid="tabs-portfolio">
           <TabsTrigger value="perp" data-testid="tab-perpetuals">
-            Perpetuals ({mockPositions.length})
-          </TabsTrigger>
-          <TabsTrigger value="spot" data-testid="tab-spot">
-            Spot ({mockSpotBalances.length})
+            Perpetuals ({positions.length})
           </TabsTrigger>
         </TabsList>
 
@@ -204,149 +177,116 @@ export default function Portfolio() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Open Positions</CardTitle>
-              <CardDescription>Your active perpetual futures positions</CardDescription>
+              <CardDescription>Your active perpetual futures positions on Hyperliquid</CardDescription>
             </CardHeader>
             <CardContent>
-              {mockPositions.length === 0 ? (
+              {positions.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No open positions</p>
                   <p className="text-sm">Start trading to see your positions here</p>
+                  <Link href="/trading">
+                    <Button variant="outline" className="mt-4" data-testid="button-go-trading">
+                      Go to Trading
+                    </Button>
+                  </Link>
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
                   <div className="space-y-4">
-                    {mockPositions.map((position) => (
-                      <div
-                        key={position.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover-elevate"
-                        data-testid={`position-${position.id}`}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold">{position.symbol}-PERP</span>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  position.side === "long"
-                                    ? "bg-bullish/15 text-bullish border-bullish/30"
-                                    : "bg-bearish/15 text-bearish border-bearish/30"
-                                )}
-                              >
-                                {position.side === "long" ? (
-                                  <TrendingUp className="h-3 w-3 mr-1" />
-                                ) : (
-                                  <TrendingDown className="h-3 w-3 mr-1" />
-                                )}
-                                {position.side.toUpperCase()} {position.leverage}x
-                              </Badge>
+                    {positions.map((position, index) => {
+                      const markPrice = currentPrices[position.coin] || position.markPrice || position.entryPrice;
+                      const roe = position.margin > 0 ? (position.unrealizedPnl / position.margin) * 100 : 0;
+                      
+                      return (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-4 border rounded-lg hover-elevate"
+                          data-testid={`position-${position.coin}`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{position.coin}-PERP</span>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    position.side === "long"
+                                      ? "bg-bullish/15 text-bullish border-bullish/30"
+                                      : "bg-bearish/15 text-bearish border-bearish/30"
+                                  )}
+                                >
+                                  {position.side === "long" ? (
+                                    <TrendingUp className="h-3 w-3 mr-1" />
+                                  ) : (
+                                    <TrendingDown className="h-3 w-3 mr-1" />
+                                  )}
+                                  {position.side.toUpperCase()} {position.leverage}x
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-muted-foreground mt-1">
+                                Size: {position.size} | Entry: ${formatPrice(position.entryPrice)}
+                              </div>
                             </div>
-                            <div className="text-sm text-muted-foreground mt-1">
-                              Size: {position.size} | Entry: ${formatPrice(position.entryPrice)}
+                          </div>
+
+                          <div className="text-right">
+                            <div className={cn(
+                              "font-semibold",
+                              position.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
+                            )}>
+                              {formatPnl(position.unrealizedPnl)}
+                              <span className="text-xs ml-1">
+                                ({roe >= 0 ? "+" : ""}{roe.toFixed(2)}%)
+                              </span>
                             </div>
+                            <div className="text-sm text-muted-foreground">
+                              Mark: ${formatPrice(markPrice)}
+                            </div>
+                            {position.liquidationPrice > 0 && (
+                              <div className="text-xs text-orange-500">
+                                Liq: ${formatPrice(position.liquidationPrice)}
+                              </div>
+                            )}
                           </div>
-                        </div>
 
-                        <div className="text-right">
-                          <div className={cn(
-                            "font-semibold",
-                            position.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
-                          )}>
-                            {formatPnl(position.unrealizedPnl)}
-                            <span className="text-xs ml-1">
-                              ({position.unrealizedPnl >= 0 ? "+" : ""}{position.unrealizedPnlPercent.toFixed(2)}%)
-                            </span>
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            Mark: ${formatPrice(position.markPrice)}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Liq: ${formatPrice(position.liquidationPrice)}
+                          <div className="flex items-center gap-2">
+                            <Link href={`/trading?coin=${position.coin}`}>
+                              <Button variant="outline" size="sm" data-testid={`button-trade-${position.coin}`}>
+                                Trade
+                              </Button>
+                            </Link>
+                            <a href={`https://app.hyperliquid.xyz/trade/${position.coin}`} target="_blank" rel="noopener noreferrer">
+                              <Button variant="ghost" size="icon" data-testid={`button-hl-${position.coin}`}>
+                                <ExternalLink className="h-4 w-4" />
+                              </Button>
+                            </a>
                           </div>
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" data-testid={`button-close-${position.id}`}>
-                            Close
-                          </Button>
-                          <Button variant="ghost" size="icon" data-testid={`button-edit-${position.id}`}>
-                            <ExternalLink className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               )}
             </CardContent>
           </Card>
         </TabsContent>
-
-        <TabsContent value="spot" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Spot Balances</CardTitle>
-              <CardDescription>Your crypto asset holdings</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[400px]">
-                <div className="space-y-2">
-                  {mockSpotBalances.map((balance) => (
-                    <div
-                      key={balance.asset}
-                      className="flex items-center justify-between p-4 border rounded-lg hover-elevate"
-                      data-testid={`balance-${balance.asset}`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
-                          {balance.asset.slice(0, 2)}
-                        </div>
-                        <div>
-                          <div className="font-semibold">{balance.asset}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Free: {formatPrice(balance.free)}
-                            {balance.locked > 0 && (
-                              <span className="ml-2">| Locked: {formatPrice(balance.locked)}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="font-semibold">${formatPrice(balance.usdValue)}</div>
-                        <div className="text-sm text-muted-foreground">USD Value</div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" data-testid={`button-trade-${balance.asset}`}>
-                          Trade
-                        </Button>
-                        <Button variant="outline" size="sm" data-testid={`button-withdraw-${balance.asset}`}>
-                          Withdraw
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
-      {/* Connection Status */}
-      <Card className="border-dashed">
+      <Card className="bg-muted/30">
         <CardContent className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+            <div className="h-2 w-2 rounded-full bg-green-500" />
             <span className="text-sm text-muted-foreground">
-              Connect your wallet to see real balances and positions
+              Connected to Hyperliquid Mainnet
             </span>
           </div>
-          <Button variant="outline" size="sm" data-testid="button-connect-wallet">
-            Connect Wallet
-          </Button>
+          <a href="https://app.hyperliquid.xyz/portfolio" target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm" data-testid="button-view-on-hl">
+              <ExternalLink className="h-4 w-4 mr-2" />
+              View on Hyperliquid
+            </Button>
+          </a>
         </CardContent>
       </Card>
     </div>
