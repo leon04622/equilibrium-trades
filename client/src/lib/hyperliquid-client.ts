@@ -410,14 +410,30 @@ export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
   }
 }
 
+// Round to 5 significant figures, which is Hyperliquid's precision requirement
 function floatToWire(x: number): string {
-  const rounded = Math.round(x * 1e8) / 1e8;
-  if (Math.abs(rounded) < 1e-8) return "0";
+  if (Math.abs(x) < 1e-8) return "0";
+  
+  // Round to 5 significant figures
+  const magnitude = Math.floor(Math.log10(Math.abs(x)));
+  const scale = Math.pow(10, 4 - magnitude); // 5 sig figs = 4 - magnitude decimals
+  const rounded = Math.round(x * scale) / scale;
+  
   let str = rounded.toString();
   if (str.includes('.')) {
     str = str.replace(/\.?0+$/, '');
   }
   return str;
+}
+
+// Format price for a specific coin - some coins need specific decimal places
+function formatPrice(price: number, coin: string): string {
+  // BTC and high-value coins use 1 decimal place
+  if (coin === "BTC" || coin === "ETH") {
+    return (Math.round(price * 10) / 10).toString();
+  }
+  // Other coins use standard 5 sig fig formatting
+  return floatToWire(price);
 }
 
 function orderTypeToWire(orderType: "market" | "limit"): { limit: { tif: string } } {
@@ -513,7 +529,7 @@ export async function placeOrder(
     const orderWire = {
       a: assetIndex,
       b: order.isBuy,
-      p: floatToWire(limitPrice),
+      p: formatPrice(limitPrice, order.coin),
       s: floatToWire(order.size),
       r: order.reduceOnly || false,
       t: orderTypeToWire(order.orderType),
