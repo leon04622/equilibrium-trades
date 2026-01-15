@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { analyzePatterns, getMarketCondition } from "./pattern-detection";
 import { 
   getAvailableCoins, 
@@ -19,6 +20,9 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Register OpenAI chat routes
   registerChatRoutes(app);
+  
+  // Register Object Storage routes for file uploads
+  registerObjectStorageRoutes(app);
 
   // Get all subscription tiers
   app.get("/api/subscriptions", async (req: Request, res: Response) => {

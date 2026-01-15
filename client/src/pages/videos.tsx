@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,10 +16,13 @@ import {
   TrendingUp, 
   Settings, 
   GraduationCap,
-  ExternalLink
+  Upload,
+  Youtube,
+  Video
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useUpload } from "@/hooks/use-upload";
 import type { TutorialVideo } from "@shared/schema";
 
 function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: string) => void }) {
@@ -38,8 +41,22 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
   const handlePlay = () => {
     if (video.youtubeId) {
       window.open(`https://www.youtube.com/watch?v=${video.youtubeId}`, '_blank');
+    } else if (video.videoPath) {
+      window.open(video.videoPath, '_blank');
     }
   };
+
+  const getThumbnail = () => {
+    if (video.youtubeId) {
+      return `https://img.youtube.com/vi/${video.youtubeId}/maxresdefault.jpg`;
+    }
+    if (video.thumbnailPath) {
+      return video.thumbnailPath;
+    }
+    return null;
+  };
+
+  const thumbnail = getThumbnail();
 
   return (
     <Card className="hover-elevate group" data-testid={`video-card-${video.id}`}>
@@ -47,18 +64,20 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
         className="relative aspect-video bg-muted rounded-t-lg overflow-hidden cursor-pointer"
         onClick={handlePlay}
       >
-        {video.youtubeId ? (
+        {thumbnail ? (
           <img 
-            src={`https://img.youtube.com/vi/${video.youtubeId}/maxresdefault.jpg`}
+            src={thumbnail}
             alt={video.title}
             className="w-full h-full object-cover"
             onError={(e) => {
-              (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${video.youtubeId}/hqdefault.jpg`;
+              if (video.youtubeId) {
+                (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${video.youtubeId}/hqdefault.jpg`;
+              }
             }}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
-            <Play className="h-12 w-12 text-primary/50" />
+            <Video className="h-12 w-12 text-primary/50" />
           </div>
         )}
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -68,6 +87,19 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
         </div>
         <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
           {video.duration}
+        </div>
+        <div className="absolute top-2 left-2">
+          {video.youtubeId ? (
+            <Badge variant="outline" className="bg-red-500/80 text-white border-red-500">
+              <Youtube className="h-3 w-3 mr-1" />
+              YouTube
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="bg-primary/80 text-white border-primary">
+              <Upload className="h-3 w-3 mr-1" />
+              Uploaded
+            </Badge>
+          )}
         </div>
       </div>
       <CardContent className="p-4">
@@ -94,30 +126,48 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
 }
 
 function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
+  const [uploadType, setUploadType] = useState<"youtube" | "upload">("youtube");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [duration, setDuration] = useState("");
   const [category, setCategory] = useState<"strategy" | "platform" | "tips">("strategy");
   const [youtubeId, setYoutubeId] = useState("");
+  const [uploadedVideoPath, setUploadedVideoPath] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
 
+  const { uploadFile, isUploading, progress } = useUpload({
+    onSuccess: (response) => {
+      setUploadedVideoPath(response.objectPath);
+      toast({ title: "Video uploaded successfully" });
+    },
+    onError: (error) => {
+      toast({ title: "Upload failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const createMutation = useMutation({
-    mutationFn: async (data: { title: string; description: string; duration: string; category: string; youtubeId: string }) => {
-      return apiRequest("/api/videos", { method: "POST", body: JSON.stringify(data) });
+    mutationFn: async (data: { title: string; description: string; duration: string; category: string; youtubeId?: string; videoPath?: string }) => {
+      return apiRequest("POST", "/api/videos", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
       toast({ title: "Video added successfully" });
-      setTitle("");
-      setDescription("");
-      setDuration("");
-      setYoutubeId("");
+      resetForm();
       onSuccess();
     },
     onError: () => {
       toast({ title: "Failed to add video", variant: "destructive" });
     },
   });
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setDuration("");
+    setYoutubeId("");
+    setUploadedVideoPath("");
+  };
 
   const extractYoutubeId = (url: string) => {
     const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s]+)/);
@@ -126,12 +176,147 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const extractedId = extractYoutubeId(youtubeId);
-    createMutation.mutate({ title, description, duration, category, youtubeId: extractedId });
+    
+    if (uploadType === "youtube") {
+      const extractedId = extractYoutubeId(youtubeId);
+      createMutation.mutate({ title, description, duration, category, youtubeId: extractedId });
+    } else {
+      if (!uploadedVideoPath) {
+        toast({ title: "Please upload a video first", variant: "destructive" });
+        return;
+      }
+      createMutation.mutate({ title, description, duration, category, videoPath: uploadedVideoPath });
+    }
+  };
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("video/")) {
+      uploadFile(file);
+    } else {
+      toast({ title: "Please drop a video file", variant: "destructive" });
+    }
+  }, [uploadFile, toast]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadFile(file);
+    }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex gap-2 mb-4">
+        <Button
+          type="button"
+          variant={uploadType === "youtube" ? "default" : "outline"}
+          onClick={() => setUploadType("youtube")}
+          className="flex-1"
+          data-testid="button-youtube-type"
+        >
+          <Youtube className="h-4 w-4 mr-2" />
+          YouTube Link
+        </Button>
+        <Button
+          type="button"
+          variant={uploadType === "upload" ? "default" : "outline"}
+          onClick={() => setUploadType("upload")}
+          className="flex-1"
+          data-testid="button-upload-type"
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          Upload Video
+        </Button>
+      </div>
+
+      {uploadType === "upload" && (
+        <div
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+            isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
+          } ${uploadedVideoPath ? "bg-green-500/10 border-green-500" : ""}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          data-testid="dropzone-video"
+        >
+          {isUploading ? (
+            <div className="space-y-2">
+              <Video className="h-10 w-10 mx-auto text-primary animate-pulse" />
+              <p className="text-sm text-muted-foreground">Uploading... {progress}%</p>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div 
+                  className="bg-primary h-2 rounded-full transition-all" 
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          ) : uploadedVideoPath ? (
+            <div className="space-y-2">
+              <Video className="h-10 w-10 mx-auto text-green-500" />
+              <p className="text-sm text-green-600 font-medium">Video uploaded!</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setUploadedVideoPath("")}
+              >
+                Remove & Upload Different
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Upload className="h-10 w-10 mx-auto text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Drag and drop a video file here, or click to browse
+              </p>
+              <input
+                type="file"
+                accept="video/*"
+                className="hidden"
+                id="video-upload"
+                onChange={handleFileSelect}
+                data-testid="input-video-file"
+              />
+              <label htmlFor="video-upload">
+                <Button type="button" variant="outline" size="sm" asChild>
+                  <span>Browse Files</span>
+                </Button>
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+
+      {uploadType === "youtube" && (
+        <div className="space-y-2">
+          <Label htmlFor="youtubeId">YouTube URL or Video ID</Label>
+          <Input 
+            id="youtubeId"
+            value={youtubeId} 
+            onChange={(e) => setYoutubeId(e.target.value)} 
+            placeholder="e.g. https://youtube.com/watch?v=abc123 or just abc123"
+            required={uploadType === "youtube"}
+            data-testid="input-video-youtube"
+          />
+          <p className="text-xs text-muted-foreground">
+            Paste the full YouTube URL or just the video ID
+          </p>
+        </div>
+      )}
+
       <div className="space-y-2">
         <Label htmlFor="title">Title</Label>
         <Input 
@@ -143,6 +328,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
           data-testid="input-video-title"
         />
       </div>
+      
       <div className="space-y-2">
         <Label htmlFor="description">Description</Label>
         <Textarea 
@@ -154,6 +340,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
           data-testid="input-video-description"
         />
       </div>
+      
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="duration">Duration</Label>
@@ -180,21 +367,13 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
           </Select>
         </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="youtubeId">YouTube URL or Video ID</Label>
-        <Input 
-          id="youtubeId"
-          value={youtubeId} 
-          onChange={(e) => setYoutubeId(e.target.value)} 
-          placeholder="e.g. https://youtube.com/watch?v=abc123 or just abc123"
-          required
-          data-testid="input-video-youtube"
-        />
-        <p className="text-xs text-muted-foreground">
-          Paste the full YouTube URL or just the video ID
-        </p>
-      </div>
-      <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-add-video">
+
+      <Button 
+        type="submit" 
+        className="w-full" 
+        disabled={createMutation.isPending || isUploading} 
+        data-testid="button-add-video"
+      >
         {createMutation.isPending ? "Adding..." : "Add Video"}
       </Button>
     </form>
@@ -211,7 +390,7 @@ export default function Videos() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest(`/api/videos/${id}`, { method: "DELETE" });
+      return apiRequest("DELETE", `/api/videos/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
@@ -244,7 +423,7 @@ export default function Videos() {
                 Add Video
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle>Add New Video</DialogTitle>
               </DialogHeader>
@@ -298,7 +477,7 @@ export default function Videos() {
             <Play className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
             <h3 className="font-semibold text-lg mb-2">No Videos Yet</h3>
             <p className="text-muted-foreground mb-4">
-              Add your first tutorial video to help users learn your trading strategy.
+              Add your first tutorial video - upload from your computer or link a YouTube video.
             </p>
             <Button onClick={() => setDialogOpen(true)} data-testid="button-add-first-video">
               <Plus className="h-4 w-4 mr-2" />

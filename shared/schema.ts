@@ -98,7 +98,9 @@ export interface TutorialVideo {
   description: string;
   duration: string;
   category: 'strategy' | 'platform' | 'tips';
-  youtubeId: string;
+  youtubeId?: string;
+  videoPath?: string;
+  thumbnailPath?: string;
   createdAt: Date;
 }
 
@@ -107,7 +109,9 @@ export interface InsertTutorialVideo {
   description: string;
   duration: string;
   category: 'strategy' | 'platform' | 'tips';
-  youtubeId: string;
+  youtubeId?: string;
+  videoPath?: string;
+  thumbnailPath?: string;
 }
 
 export const insertVideoSchema = z.object({
@@ -115,7 +119,11 @@ export const insertVideoSchema = z.object({
   description: z.string().min(1, "Description is required"),
   duration: z.string().min(1, "Duration is required (e.g. 5:30)"),
   category: z.enum(["strategy", "platform", "tips"]),
-  youtubeId: z.string().min(1, "YouTube video ID is required"),
+  youtubeId: z.string().optional(),
+  videoPath: z.string().optional(),
+  thumbnailPath: z.string().optional(),
+}).refine(data => data.youtubeId || data.videoPath, {
+  message: "Either YouTube ID or uploaded video is required"
 });
 
 // Frontend-only types for pattern definitions
