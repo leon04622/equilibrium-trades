@@ -176,13 +176,13 @@ export function TradeJournal() {
   const { address, isConnected } = useWallet();
   
   const { data: trades = [], isLoading: tradesLoading } = useQuery<TradeGrade[]>({
-    queryKey: ["/api/journal/trades", address || ""],
+    queryKey: [`/api/journal/trades/${address}`],
     enabled: !!address && address.length > 0,
     staleTime: 30000,
   });
   
   const { data: weeklyStats } = useQuery<WeeklyStats | null>({
-    queryKey: ["/api/journal/weekly", address || ""],
+    queryKey: [`/api/journal/weekly/${address}`],
     enabled: !!address && address.length > 0,
     staleTime: 30000,
   });
