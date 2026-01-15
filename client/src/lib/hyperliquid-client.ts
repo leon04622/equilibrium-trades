@@ -227,12 +227,13 @@ async function signL1Action(
   const hashData = actionHash(action, vaultAddress, nonce);
   const actionHashHex = keccak256(hashData);
 
-  // Hyperliquid L1 actions use chain ID 1337 (NOT Arbitrum's 42161!)
-  // This is specific to Hyperliquid's phantom agent construction
+  // For browser wallet signing, we must use Arbitrum chainId (42161) 
+  // because MetaMask validates that EIP-712 domain chainId matches current network
+  // Hyperliquid accepts signatures from Arbitrum One for mainnet trading
   const domain: TypedDataDomain = {
     name: "Exchange",
     version: "1", 
-    chainId: 1337, // Hyperliquid L1 chain ID - CRITICAL: must be 1337
+    chainId: 42161, // Arbitrum One - required for browser wallet signing
     verifyingContract: "0x0000000000000000000000000000000000000000",
   };
 
