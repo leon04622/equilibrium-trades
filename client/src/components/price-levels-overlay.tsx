@@ -73,11 +73,26 @@ export function PriceLevelsOverlay({ coin, className }: PriceLevelsOverlayProps)
   
   coinOrders.forEach(order => {
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    const isStopLoss = order.triggerPx && (
-      (position?.side === "long" && triggerPrice < position.entryPrice) ||
-      (position?.side === "short" && triggerPrice > position.entryPrice) ||
-      (!position && order.side !== "B" && order.side !== "buy")
-    );
+    
+    // Use orderType from API if available
+    let isStopLoss = false;
+    if (order.orderType === "stop_loss") {
+      isStopLoss = true;
+    } else if (order.orderType === "take_profit") {
+      isStopLoss = false;
+    } else if (order.triggerPx && position) {
+      // Classify based on trigger price vs entry price
+      if (position.side === "long") {
+        isStopLoss = triggerPrice < position.entryPrice;
+      } else {
+        isStopLoss = triggerPrice > position.entryPrice;
+      }
+    } else if (order.triggerPx) {
+      // No position - classify by order side and trigger direction
+      const isBuy = order.side === "B" || order.side === "buy";
+      const limitPrice = parseFloat(order.limitPx);
+      isStopLoss = isBuy ? triggerPrice > limitPrice : triggerPrice < limitPrice;
+    }
     
     levels.push({
       type: isStopLoss ? "sl" : "tp",

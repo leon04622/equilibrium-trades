@@ -12,7 +12,7 @@ interface OpenOrdersPanelProps {
 }
 
 export function OpenOrdersPanel({ coin, compact = false }: OpenOrdersPanelProps) {
-  const { openOrders, cancelHLOrder, currentPrices, refreshAccount } = useTrading();
+  const { openOrders, cancelHLOrder, positions, refreshAccount } = useTrading();
   const { toast } = useToast();
   
   const filteredOrders = coin 
@@ -43,23 +43,55 @@ export function OpenOrdersPanel({ coin, compact = false }: OpenOrdersPanelProps)
   };
   
   const getOrderTypeInfo = (order: HLOpenOrder) => {
+    // Use orderType from API if available
+    if (order.orderType === "stop_loss") {
+      return { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" };
+    }
+    if (order.orderType === "take_profit") {
+      return { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
+    }
+    
+    // Fallback: classify based on trigger price vs entry price of position
     if (order.triggerPx) {
       const triggerPrice = parseFloat(order.triggerPx);
-      const limitPrice = parseFloat(order.limitPx);
-      const currentPrice = currentPrices[order.coin] || 0;
+      const position = positions.find(p => p.coin === order.coin);
       
-      if (order.side === "B" || order.side === "buy") {
-        if (triggerPrice > currentPrice) {
-          return { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
+      if (position) {
+        // For long position: SL is below entry, TP is above entry
+        // For short position: SL is above entry, TP is below entry
+        if (position.side === "long") {
+          if (triggerPrice < position.entryPrice) {
+            return { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" };
+          } else {
+            return { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
+          }
         } else {
-          return { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" };
+          // Short position
+          if (triggerPrice > position.entryPrice) {
+            return { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" };
+          } else {
+            return { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
+          }
         }
+      }
+      
+      // No position found - classify by order side (closing order logic)
+      // A buy trigger order closes a short, a sell trigger order closes a long
+      // If order is buy and trigger < limit, it's likely an SL for a short
+      // If order is sell and trigger > limit, it's likely an SL for a long
+      const isBuy = order.side === "B" || order.side === "buy";
+      const limitPrice = parseFloat(order.limitPx);
+      
+      if (isBuy) {
+        // Buying to close a short - if trigger > limit, likely SL (price going up = bad for short)
+        return triggerPrice > limitPrice
+          ? { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" }
+          : { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
       } else {
-        if (triggerPrice < currentPrice) {
-          return { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
-        } else {
-          return { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" };
-        }
+        // Selling to close a long - if trigger < limit, likely SL (price going down = bad for long)
+        return triggerPrice < limitPrice
+          ? { type: "Stop Loss", icon: Shield, color: "text-bearish", bgColor: "bg-bearish/10" }
+          : { type: "Take Profit", icon: Target, color: "text-bullish", bgColor: "bg-bullish/10" };
       }
     }
     return { type: "Limit", icon: Clock, color: "text-muted-foreground", bgColor: "bg-muted" };
@@ -73,7 +105,7 @@ export function OpenOrdersPanel({ coin, compact = false }: OpenOrdersPanelProps)
           <CardTitle className="text-sm font-medium">Open Orders</CardTitle>
         </CardHeader>
         <CardContent className="py-3 px-4">
-          <p className="text-xs text-muted-foreground text-center">No open orders</p>
+          <p className="text-xs text-muted-foreground text-center" data-testid="text-no-orders">No open orders</p>
         </CardContent>
       </Card>
     );
