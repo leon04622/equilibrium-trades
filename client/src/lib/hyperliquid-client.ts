@@ -223,30 +223,49 @@ async function signL1Action(
   nonce: number,
   vaultAddress: string | null = null
 ): Promise<{ r: string; s: string; v: number }> {
+  // Create the action hash for signing
   const hashData = actionHash(action, vaultAddress, nonce);
-  const connectionId = keccak256(hashData);
+  const actionHashHex = keccak256(hashData);
 
-  // Hyperliquid uses Arbitrum One chainId for signing
+  // Hyperliquid L1 action signing uses this EIP-712 structure
+  // This signs directly with the user's wallet, not an agent
   const domain: TypedDataDomain = {
-    name: "Exchange",
+    name: "HyperliquidSignTransaction",
     version: "1",
     chainId: 42161, // Arbitrum One mainnet
     verifyingContract: "0x0000000000000000000000000000000000000000",
   };
 
   const types: Record<string, TypedDataField[]> = {
+    HyperliquidTransaction: [
+      { name: "action", type: "string" },
+      { name: "nonce", type: "uint64" },
+      { name: "vaultAddress", type: "address" },
+    ],
+  };
+
+  // Phantom signature approach - sign the action hash as a personal message
+  // This is the method Hyperliquid uses for L1 actions
+  const phantomAgent = {
+    source: "a",
+    connectionId: actionHashHex,
+  };
+
+  const phantomDomain: TypedDataDomain = {
+    name: "Exchange",
+    version: "1", 
+    chainId: 42161,
+    verifyingContract: "0x0000000000000000000000000000000000000000",
+  };
+
+  const phantomTypes: Record<string, TypedDataField[]> = {
     Agent: [
       { name: "source", type: "string" },
       { name: "connectionId", type: "bytes32" },
     ],
   };
 
-  const message = {
-    source: "a",
-    connectionId,
-  };
-
-  const signature = await signer.signTypedData(domain, types, message);
+  const signature = await signer.signTypedData(phantomDomain, phantomTypes, phantomAgent);
   
   const r = signature.slice(0, 66);
   const s = "0x" + signature.slice(66, 130);
@@ -261,6 +280,21 @@ export async function placeOrder(
 ): Promise<OrderResponse> {
   try {
     console.log("placeOrder called with:", order);
+    
+    // Get the signer's address
+    const signerAddress = await signer.getAddress();
+    console.log("Signer address:", signerAddress);
+    
+    // Verify the user has an account on Hyperliquid
+    const accountState = await getAccountState(signerAddress);
+    console.log("Account state:", accountState);
+    
+    if (!accountState || !accountState.marginSummary) {
+      return { 
+        success: false, 
+        error: `Wallet ${signerAddress} not found on Hyperliquid. Please deposit funds at app.hyperliquid.xyz first.` 
+      };
+    }
     
     const assetIndex = await getAssetIndex(order.coin);
     if (assetIndex === null) {
