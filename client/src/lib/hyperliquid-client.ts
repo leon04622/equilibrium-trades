@@ -73,6 +73,15 @@ export interface OpenOrder {
 
 let assetCache: Map<string, number> | null = null;
 
+// Monotonic nonce generator - ensures each nonce is unique and increasing
+let lastNonce = 0;
+function getUniqueNonce(): number {
+  const now = Date.now();
+  // Ensure nonce is always greater than the last one used
+  lastNonce = Math.max(now, lastNonce + 1);
+  return lastNonce;
+}
+
 async function getAssetIndex(coin: string): Promise<number | null> {
   if (!assetCache) {
     try {
@@ -312,8 +321,6 @@ export async function placeOrder(
       console.log("Market order - midPrice:", midPrice, "limitPrice with slippage:", limitPrice);
     }
 
-    const nonce = Date.now();
-    
     const orderWire = {
       a: assetIndex,
       b: order.isBuy,
@@ -323,6 +330,10 @@ export async function placeOrder(
       t: orderTypeToWire(order.orderType),
     };
     console.log("Order wire:", orderWire);
+    
+    // Generate nonce right before signing to ensure freshness
+    const nonce = getUniqueNonce();
+    console.log("Using nonce:", nonce);
 
     const action = {
       type: "order",
@@ -391,7 +402,7 @@ export async function cancelOrder(
       return { success: false, error: `Unknown asset: ${coin}` };
     }
 
-    const nonce = Date.now();
+    const nonce = getUniqueNonce();
     
     const action = {
       type: "cancel",
@@ -473,7 +484,7 @@ export async function placeTriggerOrder(
       return { success: false, error: `Unknown asset: ${order.coin}` };
     }
 
-    const nonce = Date.now();
+    const nonce = getUniqueNonce();
     
     const tpsl = order.isStopLoss ? "sl" : "tp";
     const limitPrice = order.orderPrice || order.triggerPrice;
@@ -574,7 +585,7 @@ export async function setLeverage(
       return { success: false, error: `Unknown asset: ${coin}` };
     }
 
-    const nonce = Date.now();
+    const nonce = getUniqueNonce();
     
     const action = {
       type: "updateLeverage",
