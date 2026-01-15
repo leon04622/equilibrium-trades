@@ -167,12 +167,17 @@ npm run db:push    # Push database schema (if using DB)
   - Direct submission to Hyperliquid API from frontend
   - No private keys on server - fully non-custodial
   - Works like Hyperliquid UI, GMX, or Uniswap
-- **January 2026**: Video Upload System with Drag-and-Drop
+- **January 2026**: Video Upload System with In-App Playback
   - Upload videos from computer via drag-and-drop or file browser
   - YouTube link support (paste URL or video ID)
   - Videos stored in Replit Object Storage
   - Categories: Strategy, Platform, Tips
   - Full CRUD operations via UI (add, view, delete)
+  - **In-App Video Player**: Videos play in modal dialog within the platform
+    - YouTube videos embedded via iframe
+    - Uploaded videos play with HTML5 video player
+    - Keeps users engaged on the platform for revenue generation
+  - Duration field is optional for simplified upload flow
   - API: GET /api/videos, POST /api/videos, DELETE /api/videos/:id
 - **January 2026**: Trade Journal with Auto-Grading
   - Every trade automatically graded when position closed

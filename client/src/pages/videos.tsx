@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { 
   Play, 
   Plus,
@@ -18,14 +18,72 @@ import {
   GraduationCap,
   Upload,
   Youtube,
-  Video
+  Video,
+  X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useUpload } from "@/hooks/use-upload";
 import type { TutorialVideo } from "@shared/schema";
 
-function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: string) => void }) {
+interface VideoPlayerProps {
+  video: TutorialVideo | null;
+  open: boolean;
+  onClose: () => void;
+}
+
+function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
+  if (!video) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="max-w-4xl p-0 overflow-hidden">
+        <DialogHeader className="p-4 pb-0">
+          <DialogTitle className="pr-8">{video.title}</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            {video.description}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="aspect-video w-full bg-black">
+          {video.youtubeId ? (
+            <iframe
+              src={`https://www.youtube.com/embed/${video.youtubeId}?autoplay=1&rel=0`}
+              title={video.title}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          ) : video.videoPath ? (
+            <video
+              src={video.videoPath}
+              controls
+              autoPlay
+              className="w-full h-full"
+            >
+              Your browser does not support the video tag.
+            </video>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-white">
+              Video not available
+            </div>
+          )}
+        </div>
+        <div className="p-4 pt-2 flex items-center justify-between">
+          <Badge variant="outline" className={
+            video.category === "strategy" ? "bg-primary/15 text-primary" :
+            video.category === "platform" ? "bg-blue-500/15 text-blue-400" :
+            "bg-green-500/15 text-green-400"
+          }>
+            {video.category.charAt(0).toUpperCase() + video.category.slice(1)}
+          </Badge>
+          <span className="text-sm text-muted-foreground">{video.duration}</span>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function VideoCard({ video, onDelete, onPlay }: { video: TutorialVideo; onDelete: (id: string) => void; onPlay: (video: TutorialVideo) => void }) {
   const categoryColors = {
     strategy: "bg-primary/15 text-primary border-primary/30",
     platform: "bg-blue-500/15 text-blue-400 border-blue-500/30",
@@ -36,14 +94,6 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
     strategy: "Strategy",
     platform: "Platform",
     tips: "Tips",
-  };
-
-  const handlePlay = () => {
-    if (video.youtubeId) {
-      window.open(`https://www.youtube.com/watch?v=${video.youtubeId}`, '_blank');
-    } else if (video.videoPath) {
-      window.open(video.videoPath, '_blank');
-    }
   };
 
   const getThumbnail = () => {
@@ -62,7 +112,7 @@ function VideoCard({ video, onDelete }: { video: TutorialVideo; onDelete: (id: s
     <Card className="hover-elevate group" data-testid={`video-card-${video.id}`}>
       <div 
         className="relative aspect-video bg-muted rounded-t-lg overflow-hidden cursor-pointer"
-        onClick={handlePlay}
+        onClick={() => onPlay(video)}
       >
         {thumbnail ? (
           <img 
@@ -343,13 +393,12 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
       
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="duration">Duration</Label>
+          <Label htmlFor="duration">Duration (optional)</Label>
           <Input 
             id="duration"
             value={duration} 
             onChange={(e) => setDuration(e.target.value)} 
             placeholder="e.g. 5:30"
-            required
             data-testid="input-video-duration"
           />
         </div>
@@ -382,6 +431,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
 
 export default function Videos() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState<TutorialVideo | null>(null);
   const { toast } = useToast();
 
   const { data: videos = [], isLoading } = useQuery<TutorialVideo[]>({
@@ -505,7 +555,7 @@ export default function Videos() {
           <TabsContent value="all">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {videos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
               ))}
             </div>
           </TabsContent>
@@ -513,7 +563,7 @@ export default function Videos() {
           <TabsContent value="strategy">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {strategyVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
               ))}
             </div>
           </TabsContent>
@@ -521,7 +571,7 @@ export default function Videos() {
           <TabsContent value="platform">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {platformVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
               ))}
             </div>
           </TabsContent>
@@ -529,12 +579,18 @@ export default function Videos() {
           <TabsContent value="tips">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tipsVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
               ))}
             </div>
           </TabsContent>
         </Tabs>
       )}
+
+      <VideoPlayer 
+        video={playingVideo} 
+        open={playingVideo !== null} 
+        onClose={() => setPlayingVideo(null)} 
+      />
     </div>
   );
 }

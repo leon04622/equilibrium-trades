@@ -117,7 +117,7 @@ export interface InsertTutorialVideo {
 export const insertVideoSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().min(1, "Description is required"),
-  duration: z.string().min(1, "Duration is required (e.g. 5:30)"),
+  duration: z.string().optional().default(""),
   category: z.enum(["strategy", "platform", "tips"]),
   youtubeId: z.string().optional(),
   videoPath: z.string().optional(),

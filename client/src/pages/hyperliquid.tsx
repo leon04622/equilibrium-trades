@@ -87,19 +87,11 @@ export default function Hyperliquid() {
         });
       }
     } else {
-      // No wallet detected - use simulated connection for demo
-      const demoAddress = `0x${Math.random().toString(16).slice(2, 42)}`;
-      const connection: HyperliquidConnection = {
-        method: "wallet",
-        address: demoAddress,
-        connectedAt: new Date().toISOString(),
-      };
-      localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
-      setSavedConnection(connection);
-      connectTrading(demoAddress);
+      // No wallet detected - prompt user to install MetaMask
       toast({
-        title: "Demo Wallet Connected",
-        description: "No wallet detected. Using demo mode for testing.",
+        title: "No Wallet Detected",
+        description: "Please install MetaMask or another Web3 wallet to connect.",
+        variant: "destructive",
       });
     }
     
@@ -117,9 +109,8 @@ export default function Hyperliquid() {
     }
 
     setIsConnecting(true);
-    // Simulate API validation
-    await new Promise(resolve => setTimeout(resolve, 1500));
     
+    // Store API credentials - actual trading uses wallet signing
     const connection: HyperliquidConnection = {
       method: "api",
       address: `api-${apiKey.slice(0, 8)}...`,
@@ -132,8 +123,8 @@ export default function Hyperliquid() {
     
     setIsConnecting(false);
     toast({
-      title: "API Connected!",
-      description: "Your Hyperliquid API is now connected to Equilibrium",
+      title: "API Credentials Saved",
+      description: "Note: For trading, please use Wallet Connection instead. API keys are for read-only access.",
     });
   };
 

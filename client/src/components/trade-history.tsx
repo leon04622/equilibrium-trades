@@ -1,9 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { History, TrendingUp, TrendingDown, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTrading } from "@/lib/trading-context";
 
 interface Trade {
   id: string;
@@ -22,65 +22,21 @@ interface TradeHistoryProps {
   className?: string;
 }
 
-const mockTrades: Trade[] = [
-  {
-    id: "1",
-    symbol: "BTC",
-    side: "buy",
-    price: 102450,
-    size: 0.05,
-    value: 5122.50,
-    timestamp: new Date(Date.now() - 3600000),
-    pnl: 125.50,
-    status: "filled",
-  },
-  {
-    id: "2",
-    symbol: "BTC",
-    side: "sell",
-    price: 103200,
-    size: 0.025,
-    value: 2580,
-    timestamp: new Date(Date.now() - 7200000),
-    pnl: 62.75,
-    status: "filled",
-  },
-  {
-    id: "3",
-    symbol: "ETH",
-    side: "buy",
-    price: 3850,
-    size: 1.5,
-    value: 5775,
-    timestamp: new Date(Date.now() - 14400000),
-    pnl: -45.20,
-    status: "filled",
-  },
-  {
-    id: "4",
-    symbol: "SOL",
-    side: "buy",
-    price: 210,
-    size: 25,
-    value: 5250,
-    timestamp: new Date(Date.now() - 86400000),
-    pnl: 312.50,
-    status: "filled",
-  },
-  {
-    id: "5",
-    symbol: "BTC",
-    side: "sell",
-    price: 101800,
-    size: 0.1,
-    value: 10180,
-    timestamp: new Date(Date.now() - 172800000),
-    pnl: -89.00,
-    status: "filled",
-  },
-];
-
 export function TradeHistory({ coin, className }: TradeHistoryProps) {
+  const { tradeHistory } = useTrading();
+  
+  // Convert trading context history to display format
+  const trades: Trade[] = tradeHistory.map(t => ({
+    id: t.id,
+    symbol: t.coin,
+    side: t.side,
+    price: t.price,
+    size: t.size,
+    value: t.size * t.price,
+    timestamp: t.timestamp,
+    pnl: t.pnl,
+    status: "filled" as const,
+  }));
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
     if (p >= 1) return p.toFixed(2);
@@ -101,7 +57,7 @@ export function TradeHistory({ coin, className }: TradeHistoryProps) {
   };
 
   // Filter trades by coin
-  const filteredTrades = mockTrades.filter(t => t.symbol === coin || !coin);
+  const filteredTrades = trades.filter(t => t.symbol === coin || !coin);
 
   const totalPnL = filteredTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
 
