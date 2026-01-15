@@ -8,6 +8,8 @@ import { RecentTrades } from "@/components/recent-trades";
 import { PositionsPanel } from "@/components/positions-panel";
 import { OrderEntry } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
+import { OpenOrdersPanel } from "@/components/open-orders-panel";
+import { PriceLevelsOverlay } from "@/components/price-levels-overlay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -261,6 +263,10 @@ export default function Trading({ visible = true }: TradingProps) {
                 currentPrice={price} 
                 onOrderSubmit={handleOrderSubmit}
               />
+              
+              <PriceLevelsOverlay coin={coin} />
+              
+              <OpenOrdersPanel coin={coin} compact />
               
               <AccountEquity />
             </div>

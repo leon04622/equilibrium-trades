@@ -6,6 +6,7 @@ import {
   getOpenOrders, 
   closePosition as hlClosePosition,
   placeOrder as hlPlaceOrder,
+  cancelOrder as hlCancelOrder,
   type Position as HLPosition, 
   type OpenOrder, 
   type AccountState 
@@ -66,6 +67,18 @@ interface OrderResult {
   error?: string;
 }
 
+export interface HLOpenOrder {
+  coin: string;
+  oid: number;
+  side: string;
+  sz: string;
+  limitPx: string;
+  timestamp: number;
+  origSz: string;
+  orderType?: "limit" | "stop_loss" | "take_profit";
+  triggerPx?: string;
+}
+
 interface TradingContextType {
   connected: boolean;
   address: string;
@@ -74,6 +87,7 @@ interface TradingContextType {
   marginUsed: number;
   positions: Position[];
   orders: Order[];
+  openOrders: HLOpenOrder[];
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
   currentPrices: Record<string, number>;
@@ -85,6 +99,7 @@ interface TradingContextType {
   placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => Promise<OrderResult>;
   closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
   cancelOrder: (orderId: string) => void;
+  cancelHLOrder: (coin: string, oid: number) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
   refreshAccount: () => Promise<void>;
@@ -200,6 +215,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>(() => loadFromStorage(STORAGE_KEYS.orders, []));
+  const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
@@ -250,6 +266,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         openedAt: new Date(),
       }));
       setPositions(convertedPositions);
+      
+      // Store open orders from Hyperliquid (includes SL/TP trigger orders)
+      const convertedOrders: HLOpenOrder[] = (hlOrders || []).map((ord: any) => ({
+        coin: ord.coin,
+        oid: ord.oid,
+        side: ord.side,
+        sz: ord.sz,
+        limitPx: ord.limitPx,
+        timestamp: ord.timestamp,
+        origSz: ord.origSz,
+        orderType: ord.orderType || (ord.triggerPx ? (ord.isTrigger ? (parseFloat(ord.triggerPx) < parseFloat(ord.limitPx) ? "stop_loss" : "take_profit") : "limit") : "limit"),
+        triggerPx: ord.triggerPx,
+      }));
+      setOpenOrders(convertedOrders);
 
     } catch (error) {
       console.error("Error fetching Hyperliquid account:", error);
@@ -492,6 +522,23 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       );
     });
   }, []);
+  
+  const cancelHLOrder = useCallback(async (coin: string, oid: number): Promise<{ success: boolean; error?: string }> => {
+    if (!signer) {
+      return { success: false, error: "Wallet not connected" };
+    }
+    
+    try {
+      const result = await hlCancelOrder(signer, coin, oid);
+      if (result.success) {
+        await refreshAccount();
+      }
+      return result;
+    } catch (error: any) {
+      console.error("Error cancelling order:", error);
+      return { success: false, error: error.message || "Failed to cancel order" };
+    }
+  }, [signer, refreshAccount]);
 
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);
@@ -584,6 +631,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       marginUsed,
       positions,
       orders,
+      openOrders,
       tradeHistory,
       indicators,
       currentPrices,
@@ -595,6 +643,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       placeOrder,
       closePosition,
       cancelOrder,
+      cancelHLOrder,
       setIndicators,
       updatePrices,
       refreshAccount,
