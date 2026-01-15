@@ -5,6 +5,58 @@ const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
 const AGENT_STORAGE_KEY = "hyperliquid_agent";
 
+// Get server-synced timestamp to avoid browser clock issues
+// The Replit preview can have clock drift compared to Hyperliquid servers
+let serverTimeOffset = 0;
+async function syncServerTime(): Promise<void> {
+  try {
+    const before = Date.now();
+    const response = await fetch(INFO_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "meta" }),
+    });
+    const data = await response.json();
+    const after = Date.now();
+    // Use the server timestamp from the response if available
+    // Otherwise estimate based on response time
+    if (data.serverTime) {
+      const roundTrip = (after - before) / 2;
+      serverTimeOffset = data.serverTime - before - roundTrip;
+    }
+  } catch {
+    // If sync fails, try using Hyperliquid's candle endpoint for timestamp
+    try {
+      const response = await fetch(INFO_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          type: "candleSnapshot",
+          req: { coin: "BTC", interval: "1m", startTime: Date.now() - 60000, endTime: Date.now() }
+        }),
+      });
+      const data = await response.json();
+      if (data && data.length > 0 && data[data.length - 1].t) {
+        // Get approximate server time from most recent candle timestamp
+        const candleTime = data[data.length - 1].t;
+        serverTimeOffset = candleTime - Date.now() + 60000; // Add 1 min buffer
+      }
+    } catch {
+      console.warn("Could not sync server time, using large offset");
+      // Use a 7-day offset as fallback (based on observed drift)
+      serverTimeOffset = 7 * 24 * 60 * 60 * 1000;
+    }
+  }
+  console.log("Server time offset:", serverTimeOffset, "ms");
+}
+
+function getSyncedTimestamp(): number {
+  return Date.now() + serverTimeOffset;
+}
+
+// Initialize time sync
+syncServerTime();
+
 // Agent key management for browser wallet trading
 // This uses Hyperliquid's agent authorization flow:
 // 1. Generate a local keypair (agent)
@@ -46,7 +98,11 @@ async function authorizeAgent(
   signer: JsonRpcSigner,
   agentAddress: string
 ): Promise<boolean> {
-  const nonce = Date.now();
+  // Ensure time is synced before authorization
+  await syncServerTime();
+  const nonce = getSyncedTimestamp();
+  console.log("Using synced nonce:", nonce, "offset:", serverTimeOffset);
+  
   const signatureChainId = "0xa4b1"; // Arbitrum One chainId in hex
   
   // ApproveAgent uses EIP-712 with the user's network chainId
@@ -229,7 +285,7 @@ let assetCache: Map<string, number> | null = null;
 // Monotonic nonce generator - ensures each nonce is unique and increasing
 let lastNonce = 0;
 function getUniqueNonce(): number {
-  const now = Date.now();
+  const now = getSyncedTimestamp();
   // Ensure nonce is always greater than the last one used
   lastNonce = Math.max(now, lastNonce + 1);
   return lastNonce;
