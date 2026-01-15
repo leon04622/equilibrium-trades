@@ -31,7 +31,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [reduceOnly, setReduceOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { balance } = useTrading();
+  const { balance, refreshAccount } = useTrading();
   const { isConnected, signer, connect } = useWallet();
   const { toast } = useToast();
 
@@ -147,6 +147,9 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         title: `${side === "buy" ? "Long" : "Short"} Order ${result.status === "filled" ? "Filled" : "Placed"}`,
         description: `${qty} ${coin} at $${formatPrice(result.avgPrice || orderPrice)} with ${leverageValue[0]}x leverage`,
       });
+
+      // Refresh positions after successful order
+      await refreshAccount();
 
       setQuantity("");
       setPrice("");
