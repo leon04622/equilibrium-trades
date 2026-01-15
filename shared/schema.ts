@@ -91,6 +91,33 @@ export const insertSubscriptionTierSchema = createInsertSchema(subscriptionTiers
 export type InsertSubscriptionTier = z.infer<typeof insertSubscriptionTierSchema>;
 export type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
+// Tutorial Videos
+export interface TutorialVideo {
+  id: string;
+  title: string;
+  description: string;
+  duration: string;
+  category: 'strategy' | 'platform' | 'tips';
+  youtubeId: string;
+  createdAt: Date;
+}
+
+export interface InsertTutorialVideo {
+  title: string;
+  description: string;
+  duration: string;
+  category: 'strategy' | 'platform' | 'tips';
+  youtubeId: string;
+}
+
+export const insertVideoSchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  description: z.string().min(1, "Description is required"),
+  duration: z.string().min(1, "Duration is required (e.g. 5:30)"),
+  category: z.enum(["strategy", "platform", "tips"]),
+  youtubeId: z.string().min(1, "YouTube video ID is required"),
+});
+
 // Frontend-only types for pattern definitions
 export interface PatternDefinition {
   id: string;

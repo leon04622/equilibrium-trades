@@ -348,5 +348,45 @@ export async function registerRoutes(
     }
   });
 
+  // Tutorial Videos API
+  app.get("/api/videos", async (req: Request, res: Response) => {
+    try {
+      const videos = await storage.getAllVideos();
+      res.json(videos);
+    } catch (error) {
+      console.error("Error fetching videos:", error);
+      res.status(500).json({ error: "Failed to fetch videos" });
+    }
+  });
+
+  app.post("/api/videos", async (req: Request, res: Response) => {
+    try {
+      const { insertVideoSchema } = await import("@shared/schema");
+      const validated = insertVideoSchema.safeParse(req.body);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+      const video = await storage.createVideo(validated.data);
+      res.json(video);
+    } catch (error) {
+      console.error("Error creating video:", error);
+      res.status(500).json({ error: "Failed to create video" });
+    }
+  });
+
+  app.delete("/api/videos/:id", async (req: Request, res: Response) => {
+    try {
+      const deleted = await storage.deleteVideo(req.params.id);
+      if (deleted) {
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ error: "Video not found" });
+      }
+    } catch (error) {
+      console.error("Error deleting video:", error);
+      res.status(500).json({ error: "Failed to delete video" });
+    }
+  });
+
   return httpServer;
 }

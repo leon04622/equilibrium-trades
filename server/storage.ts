@@ -4,7 +4,8 @@ import {
   type DetectedPattern, type InsertDetectedPattern,
   type SmaSignal, type InsertSmaSignal,
   type SubscriptionTier, type InsertSubscriptionTier,
-  type TradeGrade, type InsertTradeGrade, type WeeklyStats
+  type TradeGrade, type InsertTradeGrade, type WeeklyStats,
+  type TutorialVideo, type InsertTutorialVideo
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -38,6 +39,12 @@ export interface IStorage {
   getTradeGrade(id: string): Promise<TradeGrade | undefined>;
   createTradeGrade(grade: InsertTradeGrade): Promise<TradeGrade>;
   getWeeklyStats(walletAddress: string): Promise<WeeklyStats | null>;
+  
+  // Tutorial Videos
+  getAllVideos(): Promise<TutorialVideo[]>;
+  getVideo(id: string): Promise<TutorialVideo | undefined>;
+  createVideo(video: InsertTutorialVideo): Promise<TutorialVideo>;
+  deleteVideo(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -47,6 +54,7 @@ export class MemStorage implements IStorage {
   private smaSignals: Map<string, SmaSignal>;
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
+  private videos: Map<string, TutorialVideo>;
 
   constructor() {
     this.users = new Map();
@@ -55,6 +63,7 @@ export class MemStorage implements IStorage {
     this.smaSignals = new Map();
     this.subscriptionTiers = new Map();
     this.tradeGrades = new Map();
+    this.videos = new Map();
     
     this.initializeSubscriptionTiers();
   }
@@ -295,6 +304,31 @@ export class MemStorage implements IStorage {
       bestTrade: sortedByPnl[0],
       worstTrade: sortedByPnl[sortedByPnl.length - 1],
     };
+  }
+
+  // Tutorial Videos
+  async getAllVideos(): Promise<TutorialVideo[]> {
+    return Array.from(this.videos.values())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async getVideo(id: string): Promise<TutorialVideo | undefined> {
+    return this.videos.get(id);
+  }
+
+  async createVideo(video: InsertTutorialVideo): Promise<TutorialVideo> {
+    const id = randomUUID();
+    const newVideo: TutorialVideo = {
+      id,
+      ...video,
+      createdAt: new Date(),
+    };
+    this.videos.set(id, newVideo);
+    return newVideo;
+  }
+
+  async deleteVideo(id: string): Promise<boolean> {
+    return this.videos.delete(id);
   }
 }
 
