@@ -20,6 +20,7 @@ interface TPSLDialogState {
   side: "long" | "short";
   size: number;
   entryPrice: number;
+  markPrice: number;
   currentTP?: number;
   currentSL?: number;
 }
@@ -34,6 +35,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
     side: "long",
     size: 0,
     entryPrice: 0,
+    markPrice: 0,
   });
   const [tpPrice, setTpPrice] = useState("");
   const [slPrice, setSlPrice] = useState("");
@@ -72,12 +74,15 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       return false;
     });
     
+    const markPrice = currentPrices[pos.coin] || pos.markPrice || pos.entryPrice;
+    
     setTpslDialog({
       open: true,
       coin: pos.coin,
       side: pos.side,
       size: pos.size,
       entryPrice: pos.entryPrice,
+      markPrice: markPrice,
       currentTP: tpOrder ? parseFloat(tpOrder.triggerPx!) : undefined,
       currentSL: slOrder ? parseFloat(slOrder.triggerPx!) : undefined,
     });
@@ -277,51 +282,81 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       </div>
 
       <Dialog open={tpslDialog.open} onOpenChange={(open) => setTpslDialog({ ...tpslDialog, open })}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Set TP/SL for {tpslDialog.coin}</DialogTitle>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader className="text-center">
+            <DialogTitle className="text-lg">TP/SL for Position</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="text-sm text-muted-foreground">
-              Position: {tpslDialog.side === "long" ? "Long" : "Short"} {formatSize(tpslDialog.size)} @ {formatPrice(tpslDialog.entryPrice)}
+          
+          <div className="space-y-4">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Coin</span>
+              <span className="font-medium">{tpslDialog.coin}</span>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-bullish">Take Profit Price</label>
-              <Input
-                type="number"
-                placeholder={tpslDialog.side === "long" ? "Above entry price" : "Below entry price"}
-                value={tpPrice}
-                onChange={(e) => setTpPrice(e.target.value)}
-                className="font-mono"
-                data-testid="input-tp-price"
-              />
-              {tpslDialog.currentTP && (
-                <p className="text-xs text-muted-foreground">Current: {formatPrice(tpslDialog.currentTP)}</p>
-              )}
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Position</span>
+              <span className={cn(
+                "font-medium",
+                tpslDialog.side === "long" ? "text-bullish" : "text-bearish"
+              )}>
+                {formatSize(tpslDialog.size)} {tpslDialog.coin}
+              </span>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-bearish">Stop Loss Price</label>
-              <Input
-                type="number"
-                placeholder={tpslDialog.side === "long" ? "Below entry price" : "Above entry price"}
-                value={slPrice}
-                onChange={(e) => setSlPrice(e.target.value)}
-                className="font-mono"
-                data-testid="input-sl-price"
-              />
-              {tpslDialog.currentSL && (
-                <p className="text-xs text-muted-foreground">Current: {formatPrice(tpslDialog.currentSL)}</p>
-              )}
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Entry Price</span>
+              <span className="font-mono">{formatPrice(tpslDialog.entryPrice)}</span>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTpslDialog({ ...tpslDialog, open: false })}>
-              Cancel
-            </Button>
-            <Button onClick={handleSetTPSL} data-testid="button-confirm-tpsl">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Mark Price</span>
+              <span className="font-mono">{formatPrice(tpslDialog.markPrice)}</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="space-y-2">
+                <Input
+                  type="number"
+                  placeholder="TP Price"
+                  value={tpPrice}
+                  onChange={(e) => setTpPrice(e.target.value)}
+                  className="font-mono bg-muted/50"
+                  data-testid="input-tp-price"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-bullish text-sm font-medium">Gain</span>
+                <Badge variant="outline" className="text-xs">%</Badge>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Input
+                  type="number"
+                  placeholder="SL Price"
+                  value={slPrice}
+                  onChange={(e) => setSlPrice(e.target.value)}
+                  className="font-mono bg-muted/50"
+                  data-testid="input-sl-price"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-bearish text-sm font-medium">Loss</span>
+                <Badge variant="outline" className="text-xs">%</Badge>
+              </div>
+            </div>
+            
+            <Button 
+              onClick={handleSetTPSL} 
+              className="w-full bg-primary hover:bg-primary/90"
+              data-testid="button-confirm-tpsl"
+            >
               Confirm
             </Button>
-          </DialogFooter>
+            
+            <p className="text-xs text-muted-foreground text-center">
+              By default take-profit and stop-loss orders apply to the entire position. 
+              They automatically cancel after closing the position.
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
     </>
