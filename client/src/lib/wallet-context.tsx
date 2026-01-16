@@ -179,6 +179,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             setSigner(browserSigner);
             setAddress(accounts[0]);
             setChainId(Number(network.chainId));
+          } else if (isMobile && window.ethereum.isMetaMask) {
+            // User opened app in MetaMask in-app browser but not connected yet
+            // This happens after deep link redirect - auto request connection
+            try {
+              setIsConnecting(true);
+              const requestedAccounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+              if (requestedAccounts.length > 0) {
+                const browserProvider = new BrowserProvider(window.ethereum);
+                const browserSigner = await browserProvider.getSigner();
+                const network = await browserProvider.getNetwork();
+                
+                setProvider(browserProvider);
+                setSigner(browserSigner);
+                setAddress(requestedAccounts[0]);
+                setChainId(Number(network.chainId));
+              }
+            } catch (err) {
+              console.error("Error auto-connecting in MetaMask browser:", err);
+            } finally {
+              setIsConnecting(false);
+            }
           }
         } catch (error) {
           console.error("Error checking wallet connection:", error);
@@ -187,7 +208,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
 
     checkConnection();
-  }, []);
+  }, [isMobile]);
+
+  // Handle visibility change for mobile - reconnect when user returns to app
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && isMobile && window.ethereum && !address) {
+        try {
+          const accounts = await window.ethereum.request({ method: "eth_accounts" });
+          if (accounts.length > 0) {
+            const browserProvider = new BrowserProvider(window.ethereum);
+            const browserSigner = await browserProvider.getSigner();
+            const network = await browserProvider.getNetwork();
+            
+            setProvider(browserProvider);
+            setSigner(browserSigner);
+            setAddress(accounts[0]);
+            setChainId(Number(network.chainId));
+          }
+        } catch (error) {
+          console.error("Error reconnecting on visibility change:", error);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isMobile, address]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
     const currentUrl = encodeURIComponent(window.location.href);
