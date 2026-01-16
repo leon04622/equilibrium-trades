@@ -21,22 +21,22 @@ export function MobileBottomNav() {
             (item.href === "/trading" && location.startsWith("/trading"));
           
           return (
-            <Link key={item.href} href={item.href}>
-              <a
-                className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 px-3 py-1.5",
-                  isActive ? "text-primary" : "text-muted-foreground"
-                )}
-                data-testid={`nav-${item.label.toLowerCase()}`}
-              >
-                <item.icon className={cn("h-5 w-5", isActive && "text-primary")} />
-                <span className={cn(
-                  "text-[10px] font-medium",
-                  isActive && "text-primary"
-                )}>
-                  {item.label}
-                </span>
-              </a>
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex flex-col items-center justify-center gap-0.5 px-3 py-1.5",
+                isActive ? "text-primary" : "text-muted-foreground"
+              )}
+              data-testid={`nav-${item.label.toLowerCase()}`}
+            >
+              <item.icon className={cn("h-5 w-5", isActive && "text-primary")} />
+              <span className={cn(
+                "text-[10px] font-medium",
+                isActive && "text-primary"
+              )}>
+                {item.label}
+              </span>
             </Link>
           );
         })}
