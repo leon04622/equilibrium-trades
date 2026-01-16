@@ -285,7 +285,7 @@ export type SupportMessage = typeof supportMessages.$inferSelect;
 
 // Admin users for video management and chat
 export const adminWallets = [
-  "0x0000000000000000000000000000000000000001", // Add your actual admin wallet here
+  "0x115560812df8e7515eecc957b6796531e936edd9",
 ];
 
 export function isAdminWallet(walletAddress: string | null): boolean {
