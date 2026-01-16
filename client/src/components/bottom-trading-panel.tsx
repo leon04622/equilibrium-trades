@@ -203,18 +203,18 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   if (!connected) {
     return (
       <div className="border-t bg-card/50">
-        <div className="flex items-center gap-1 px-2 border-b">
+        <div className="flex items-center gap-1 px-2 border-b overflow-x-auto">
           {tabs.map(tab => (
             <button
               key={tab.id}
-              className="px-3 py-2 text-xs text-muted-foreground"
+              className="px-2 md:px-3 py-1.5 md:py-2 text-[10px] md:text-xs text-muted-foreground whitespace-nowrap"
               disabled
             >
               {tab.label}
             </button>
           ))}
         </div>
-        <div className="h-28 flex items-center justify-center text-xs text-muted-foreground">
+        <div className="h-16 md:h-28 flex items-center justify-center text-[10px] md:text-xs text-muted-foreground">
           Connect wallet to view positions and orders
         </div>
       </div>
@@ -224,23 +224,24 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   return (
     <>
       <div className="border-t bg-card/50" data-testid="bottom-trading-panel">
-        <div className="flex items-center justify-between px-2 border-b">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between px-1 md:px-2 border-b">
+          <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto">
             {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "px-3 py-2 text-xs font-medium transition-colors relative",
+                  "px-2 md:px-3 py-1.5 md:py-2 text-[10px] md:text-xs font-medium transition-colors relative whitespace-nowrap",
                   activeTab === tab.id 
                     ? "text-foreground" 
                     : "text-muted-foreground hover:text-foreground"
                 )}
                 data-testid={`tab-${tab.id}`}
               >
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
                 {tab.count > 0 && (
-                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
                     {tab.count}
                   </Badge>
                 )}
@@ -251,13 +252,13 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Filter</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">Filter</span>
             {activeTab === "orders" && filteredOrders.length > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 text-xs text-bearish hover:text-bearish"
+                className="h-5 md:h-6 text-[10px] md:text-xs text-bearish hover:text-bearish px-1.5"
                 onClick={handleCancelAll}
                 data-testid="button-cancel-all"
               >
@@ -267,7 +268,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
           </div>
         </div>
 
-        <div className="h-28 overflow-auto">
+        <div className="h-16 md:h-28 overflow-auto">
           {activeTab === "positions" && (
             <PositionsTable 
               positions={filteredPositions} 

@@ -12,8 +12,9 @@ import { ChartPositionOverlay } from "@/components/chart-position-overlay";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, BookOpen, Brain } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
@@ -94,44 +95,44 @@ export default function Trading({ visible = true }: TradingProps) {
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Top Header - Symbol info bar */}
-      <div className="flex items-center gap-4 px-3 py-2 border-b bg-card/50">
+      <div className="flex items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50">
         <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
         
-        <Separator orientation="vertical" className="h-6" />
+        <Separator orientation="vertical" className="h-6 hidden sm:block" />
         
         {/* Price and stats */}
-        <div className="flex items-center gap-6 text-xs overflow-x-auto flex-1">
-          <div>
-            <span className="text-muted-foreground">Mark</span>
+        <div className="flex items-center gap-3 md:gap-6 text-xs overflow-x-auto flex-1">
+          <div className="shrink-0">
+            <span className="text-muted-foreground text-[10px] md:text-xs">Mark</span>
             <p className={cn(
-              "font-mono font-bold text-base",
+              "font-mono font-bold text-sm md:text-base",
               priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
             )}>
               {formatPrice(price)}
             </p>
           </div>
           
-          <div>
-            <span className="text-muted-foreground">24h Change</span>
+          <div className="shrink-0">
+            <span className="text-muted-foreground text-[10px] md:text-xs">24h Change</span>
             <p className={cn(
-              "font-mono font-semibold",
+              "font-mono font-semibold text-[11px] md:text-xs",
               priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
             )}>
-              {priceChange >= 0 ? "+" : ""}{formatPrice(priceChange)} ({priceChangePercent >= 0 ? "+" : ""}{priceChangePercent.toFixed(2)}%)
+              {priceChangePercent >= 0 ? "+" : ""}{priceChangePercent.toFixed(2)}%
             </p>
           </div>
           
-          <div className="hidden md:block">
+          <div className="hidden md:block shrink-0">
             <span className="text-muted-foreground">24h Volume</span>
             <p className="font-mono">{formatVolume(volume24h)}</p>
           </div>
           
-          <div className="hidden lg:block">
+          <div className="hidden lg:block shrink-0">
             <span className="text-muted-foreground">Open Interest</span>
             <p className="font-mono">{formatVolume(openInterest)}</p>
           </div>
           
-          <div className="hidden lg:block">
+          <div className="hidden lg:block shrink-0">
             <span className="text-muted-foreground">Funding</span>
             <p className={cn(
               "font-mono",
@@ -154,14 +155,14 @@ export default function Trading({ visible = true }: TradingProps) {
         {/* Left side - Chart */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Chart toolbar */}
-          <div className="flex items-center justify-between px-2 py-1 border-b gap-2">
-            <div className="flex items-center gap-1 overflow-x-auto">
+          <div className="flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2">
+            <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
               {timeframes.map((tf) => (
                 <Button
                   key={tf.value}
                   variant={timeframe === tf.value ? "secondary" : "ghost"}
                   size="sm"
-                  className="h-7 px-2 text-xs font-mono shrink-0"
+                  className="h-6 md:h-7 px-1.5 md:px-2 text-[10px] md:text-xs font-mono shrink-0"
                   onClick={() => setTimeframe(tf.value)}
                   data-testid={`timeframe-${tf.value}`}
                 >
@@ -170,7 +171,7 @@ export default function Trading({ visible = true }: TradingProps) {
               ))}
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-4">
               <div className="flex items-center gap-1.5">
                 <Switch 
                   checked={showAIChart} 
@@ -271,6 +272,36 @@ export default function Trading({ visible = true }: TradingProps) {
 
       {/* Bottom - Positions and Orders Panel (Hyperliquid style) */}
       <BottomTradingPanel coin={coin} />
+
+      {/* Mobile Order Entry Button */}
+      <div className="md:hidden fixed bottom-20 right-4 z-50">
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button 
+              size="lg" 
+              className="h-14 w-14 rounded-full shadow-lg bg-primary hover:bg-primary/90"
+              data-testid="button-mobile-order"
+            >
+              <ArrowUpDown className="h-6 w-6" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="bottom" className="h-[85vh] rounded-t-xl">
+            <SheetHeader className="pb-2">
+              <SheetTitle className="text-center">Trade {coin}</SheetTitle>
+            </SheetHeader>
+            <div className="overflow-y-auto h-full pb-8">
+              <div className="space-y-4 px-2">
+                <OrderEntry 
+                  coin={coin} 
+                  currentPrice={price} 
+                  onOrderSubmit={handleOrderSubmit}
+                />
+                <AccountEquity />
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
     </div>
   );
 }
