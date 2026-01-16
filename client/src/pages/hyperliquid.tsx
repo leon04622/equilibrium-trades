@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { 
   TrendingUp, Link2, ExternalLink, Shield, Zap, 
   Wallet, AlertCircle, CheckCircle2, Copy, Info
@@ -12,8 +13,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HyperliquidStatus } from "@/components/hyperliquid-status";
+import { OnboardingFlow } from "@/components/onboarding-flow";
 import { useToast } from "@/hooks/use-toast";
 import { useTrading } from "@/lib/trading-context";
+import { useWallet } from "@/lib/wallet-context";
 
 const HYPERLIQUID_STORAGE_KEY = "equilibrium_hyperliquid_connection";
 
@@ -25,6 +28,7 @@ interface HyperliquidConnection {
 }
 
 export default function Hyperliquid() {
+  const [, navigate] = useLocation();
   const [connectionMethod, setConnectionMethod] = useState<"wallet" | "api">("wallet");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -33,6 +37,7 @@ export default function Hyperliquid() {
   const [initialized, setInitialized] = useState(false);
   const { toast } = useToast();
   const { connect: connectTrading, disconnect: disconnectTrading, connected: tradingConnected } = useTrading();
+  const { builderCodeApproved, address: walletAddress, refreshApprovalStatus } = useWallet();
 
   // Load saved connection on mount and sync with TradingContext
   useEffect(() => {
@@ -168,6 +173,15 @@ export default function Hyperliquid() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {!builderCodeApproved && (
+            <OnboardingFlow 
+              onComplete={() => {
+                refreshApprovalStatus();
+                navigate("/trading");
+              }} 
+            />
+          )}
+          
           {!connected ? (
             <Card>
               <CardHeader>

@@ -233,5 +233,45 @@ export const tradeGradeInputSchema = z.object({
 
 export type TradeGradeInput = z.infer<typeof tradeGradeInputSchema>;
 
+// Wallet User (for Hyperliquid onboarding)
+export interface WalletUser {
+  id: string;
+  walletAddress: string;
+  email: string | null;
+  builderCodeApproved: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InsertWalletUser {
+  walletAddress: string;
+  email?: string | null;
+  builderCodeApproved?: boolean;
+}
+
+export const insertWalletUserSchema = z.object({
+  walletAddress: z.string().min(1, "Wallet address is required"),
+  email: z.string().email().optional().nullable(),
+  builderCodeApproved: z.boolean().optional().default(false),
+});
+
+export type InsertWalletUserType = z.infer<typeof insertWalletUserSchema>;
+
+// Builder Code Approval
+export interface BuilderCodeApproval {
+  walletAddress: string;
+  signature: string;
+  message: string;
+  approvedAt: Date;
+}
+
+export const builderCodeApprovalSchema = z.object({
+  walletAddress: z.string().min(1),
+  signature: z.string().min(1),
+  message: z.string().min(1),
+});
+
+export type BuilderCodeApprovalInput = z.infer<typeof builderCodeApprovalSchema>;
+
 // Re-export chat models
 export * from "./models/chat";

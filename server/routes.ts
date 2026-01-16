@@ -392,5 +392,130 @@ export async function registerRoutes(
     }
   });
 
+  // ============ WALLET USER / HYPERLIQUID ONBOARDING ============
+
+  // Get wallet user status (check if already registered)
+  app.get("/api/wallet-user/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getWalletUser(req.params.walletAddress);
+      if (!user) {
+        return res.json({ exists: false });
+      }
+      res.json({ 
+        exists: true, 
+        builderCodeApproved: user.builderCodeApproved,
+        email: user.email,
+        createdAt: user.createdAt
+      });
+    } catch (error) {
+      console.error("Error fetching wallet user:", error);
+      res.status(500).json({ error: "Failed to fetch wallet user" });
+    }
+  });
+
+  // Register new wallet user
+  app.post("/api/wallet-user/register", async (req: Request, res: Response) => {
+    try {
+      const { insertWalletUserSchema } = await import("@shared/schema");
+      const validated = insertWalletUserSchema.safeParse(req.body);
+      
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+
+      // Check if user already exists
+      const existing = await storage.getWalletUser(validated.data.walletAddress);
+      if (existing) {
+        return res.json({ 
+          success: true, 
+          message: "User already registered",
+          user: existing 
+        });
+      }
+
+      const user = await storage.createWalletUser(validated.data);
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("Error registering wallet user:", error);
+      res.status(500).json({ error: "Failed to register wallet user" });
+    }
+  });
+
+  // Approve builder code (after signature verification)
+  app.post("/api/wallet-user/approve-builder-code", async (req: Request, res: Response) => {
+    try {
+      const { builderCodeApprovalSchema } = await import("@shared/schema");
+      const validated = builderCodeApprovalSchema.safeParse(req.body);
+      
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+
+      const { walletAddress, signature, message } = validated.data;
+
+      // Verify the signature using ethers
+      const { ethers } = await import("ethers");
+      
+      try {
+        // Recover the address from the signature
+        const recoveredAddress = ethers.verifyMessage(message, signature);
+        
+        // Compare addresses (case-insensitive)
+        if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+          return res.status(400).json({ error: "Invalid signature - address mismatch" });
+        }
+      } catch (sigError) {
+        console.error("Signature verification error:", sigError);
+        return res.status(400).json({ error: "Invalid signature format" });
+      }
+
+      // Check if user exists, create if not
+      let user = await storage.getWalletUser(walletAddress);
+      if (!user) {
+        user = await storage.createWalletUser({ 
+          walletAddress, 
+          builderCodeApproved: true 
+        });
+      } else {
+        // Update existing user
+        user = await storage.updateWalletUserApproval(walletAddress, true);
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Builder code approved",
+        user 
+      });
+    } catch (error) {
+      console.error("Error approving builder code:", error);
+      res.status(500).json({ error: "Failed to approve builder code" });
+    }
+  });
+
+  // Update wallet user email
+  app.patch("/api/wallet-user/:walletAddress/email", async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      const { z } = await import("zod");
+      
+      const emailSchema = z.string().email();
+      const validated = emailSchema.safeParse(email);
+      
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid email format" });
+      }
+
+      const user = await storage.updateWalletUserEmail(req.params.walletAddress, email);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("Error updating wallet user email:", error);
+      res.status(500).json({ error: "Failed to update email" });
+    }
+  });
+
   return httpServer;
 }

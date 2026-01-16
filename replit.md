@@ -82,6 +82,12 @@ shared/
 
 ## API Endpoints
 
+### Wallet User / Hyperliquid Onboarding
+- `GET /api/wallet-user/:walletAddress` - Get wallet user status and builder code approval
+- `POST /api/wallet-user/register` - Register new wallet user
+- `POST /api/wallet-user/approve-builder-code` - Approve builder code with signature verification
+- `PATCH /api/wallet-user/:walletAddress/email` - Update wallet user email
+
 ### Patterns
 - `GET /api/patterns/active` - Get active detected patterns
 - `GET /api/patterns/symbol/:symbol` - Get patterns by symbol
@@ -206,3 +212,19 @@ npm run db:push    # Push database schema (if using DB)
     - Uses opposite reduceOnly market order via Hyperliquid API
     - Shows loading state during close operation
     - Auto-grades trade after position is closed
+- **January 2026**: Non-Custodial Wallet Connect + Builder Code Approval
+  - **One-Click Onboarding Flow**: Single "Create Hyperliquid Account" button
+    - Wallet connection (MetaMask/Rabby) happens client-side only
+    - Builder code approval via EIP-191 message signature
+    - Automatic redirect to trading dashboard after approval
+  - **Builder Code**: Users sign a message approving Equilibrium as their builder on Hyperliquid
+  - **User Data Storage**: 
+    - wallet_address (normalized to lowercase)
+    - email (optional)
+    - builder_code_approved (boolean)
+    - timestamps (createdAt, updatedAt)
+  - **Signature Verification**: Server-side verification using ethers.js verifyMessage
+  - **Security**: No private keys stored, all signing handled by wallet provider
+  - **Components**: OnboardingFlow (client/src/components/onboarding-flow.tsx)
+  - **Context**: WalletContext includes builderCodeApproved status
+  - API: GET /api/wallet-user/:address, POST /api/wallet-user/register, POST /api/wallet-user/approve-builder-code

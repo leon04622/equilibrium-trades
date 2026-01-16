@@ -5,7 +5,8 @@ import {
   type SmaSignal, type InsertSmaSignal,
   type SubscriptionTier, type InsertSubscriptionTier,
   type TradeGrade, type InsertTradeGrade, type WeeklyStats,
-  type TutorialVideo, type InsertTutorialVideo
+  type TutorialVideo, type InsertTutorialVideo,
+  type WalletUser, type InsertWalletUser
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -45,6 +46,12 @@ export interface IStorage {
   getVideo(id: string): Promise<TutorialVideo | undefined>;
   createVideo(video: InsertTutorialVideo): Promise<TutorialVideo>;
   deleteVideo(id: string): Promise<boolean>;
+  
+  // Wallet Users (Hyperliquid onboarding)
+  getWalletUser(walletAddress: string): Promise<WalletUser | undefined>;
+  createWalletUser(user: InsertWalletUser): Promise<WalletUser>;
+  updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined>;
+  updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -55,6 +62,7 @@ export class MemStorage implements IStorage {
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
   private videos: Map<string, TutorialVideo>;
+  private walletUsers: Map<string, WalletUser>;
 
   constructor() {
     this.users = new Map();
@@ -64,6 +72,7 @@ export class MemStorage implements IStorage {
     this.subscriptionTiers = new Map();
     this.tradeGrades = new Map();
     this.videos = new Map();
+    this.walletUsers = new Map();
     
     this.initializeSubscriptionTiers();
   }
@@ -329,6 +338,56 @@ export class MemStorage implements IStorage {
 
   async deleteVideo(id: string): Promise<boolean> {
     return this.videos.delete(id);
+  }
+
+  // Wallet Users (Hyperliquid onboarding)
+  async getWalletUser(walletAddress: string): Promise<WalletUser | undefined> {
+    // Normalize address to lowercase for comparison
+    const normalizedAddress = walletAddress.toLowerCase();
+    return Array.from(this.walletUsers.values()).find(
+      u => u.walletAddress.toLowerCase() === normalizedAddress
+    );
+  }
+
+  async createWalletUser(user: InsertWalletUser): Promise<WalletUser> {
+    const id = randomUUID();
+    const now = new Date();
+    const newUser: WalletUser = {
+      id,
+      walletAddress: user.walletAddress.toLowerCase(),
+      email: user.email ?? null,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.walletUsers.set(id, newUser);
+    return newUser;
+  }
+
+  async updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const user = Array.from(this.walletUsers.values()).find(
+      u => u.walletAddress.toLowerCase() === normalizedAddress
+    );
+    if (user) {
+      user.builderCodeApproved = approved;
+      user.updatedAt = new Date();
+      this.walletUsers.set(user.id, user);
+    }
+    return user;
+  }
+
+  async updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const user = Array.from(this.walletUsers.values()).find(
+      u => u.walletAddress.toLowerCase() === normalizedAddress
+    );
+    if (user) {
+      user.email = email;
+      user.updatedAt = new Date();
+      this.walletUsers.set(user.id, user);
+    }
+    return user;
   }
 }
 

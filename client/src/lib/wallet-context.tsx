@@ -8,9 +8,12 @@ interface WalletContextType {
   isConnected: boolean;
   signer: JsonRpcSigner | null;
   provider: BrowserProvider | null;
+  builderCodeApproved: boolean;
+  isCheckingApproval: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
   switchToArbitrum: () => Promise<void>;
+  refreshApprovalStatus: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -34,8 +37,37 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [signer, setSigner] = useState<JsonRpcSigner | null>(null);
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
+  const [builderCodeApproved, setBuilderCodeApproved] = useState(false);
+  const [isCheckingApproval, setIsCheckingApproval] = useState(false);
 
   const isConnected = !!address && !!signer;
+
+  const refreshApprovalStatus = useCallback(async () => {
+    if (!address) {
+      setBuilderCodeApproved(false);
+      return;
+    }
+    
+    setIsCheckingApproval(true);
+    try {
+      const response = await fetch(`/api/wallet-user/${address}`);
+      const data = await response.json();
+      setBuilderCodeApproved(data.exists && data.builderCodeApproved);
+    } catch (error) {
+      console.error("Error checking approval status:", error);
+      setBuilderCodeApproved(false);
+    } finally {
+      setIsCheckingApproval(false);
+    }
+  }, [address]);
+
+  useEffect(() => {
+    if (address) {
+      refreshApprovalStatus();
+    } else {
+      setBuilderCodeApproved(false);
+    }
+  }, [address, refreshApprovalStatus]);
 
   const handleAccountsChanged = useCallback((accounts: string[]) => {
     if (accounts.length === 0) {
@@ -135,6 +167,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setSigner(null);
     setProvider(null);
     setChainId(null);
+    setBuilderCodeApproved(false);
   }, []);
 
   const switchToArbitrum = useCallback(async () => {
@@ -175,9 +208,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       isConnected,
       signer,
       provider,
+      builderCodeApproved,
+      isCheckingApproval,
       connect,
       disconnect,
       switchToArbitrum,
+      refreshApprovalStatus,
     }}>
       {children}
     </WalletContext.Provider>
