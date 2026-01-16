@@ -67,7 +67,8 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
             videoError ? (
               <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
                 <p className="text-red-400 mb-2">Failed to load video</p>
-                <p className="text-sm text-gray-400 text-center">{videoError}</p>
+                <p className="text-sm text-gray-400 text-center mb-2">{videoError}</p>
+                <p className="text-xs text-gray-500 break-all">Path: {video.videoPath}</p>
               </div>
             ) : (
               <video
