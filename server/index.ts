@@ -15,7 +15,7 @@ declare module "http" {
 
 app.use(
   express.json({
-    verify: (req, _res, buf) => {
+    verify: (req, _res, buf) => {   
       req.rawBody = buf;
     },
   }),
@@ -62,7 +62,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
-  
+
   // Initialize WebSocket manager for heatmap
   heatmapWSManager.initialize(httpServer);
 
