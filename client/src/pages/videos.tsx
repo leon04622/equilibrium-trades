@@ -33,10 +33,20 @@ interface VideoPlayerProps {
 }
 
 function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
+  const [videoError, setVideoError] = useState<string | null>(null);
+  
+  // Reset error when video changes or dialog opens
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      onClose();
+      setVideoError(null);
+    }
+  };
+  
   if (!video) return null;
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl p-0 overflow-hidden">
         <DialogHeader className="p-4 pb-0">
           <DialogTitle className="pr-8">{video.title}</DialogTitle>
@@ -54,16 +64,29 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
               allowFullScreen
             />
           ) : video.videoPath ? (
-            <video
-              src={video.videoPath}
-              controls
-              autoPlay
-              controlsList="nodownload"
-              onContextMenu={(e) => e.preventDefault()}
-              className="w-full h-full"
-            >
-              Your browser does not support the video tag.
-            </video>
+            videoError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-white p-4">
+                <p className="text-red-400 mb-2">Failed to load video</p>
+                <p className="text-sm text-gray-400 text-center">{videoError}</p>
+              </div>
+            ) : (
+              <video
+                src={video.videoPath}
+                controls
+                autoPlay
+                controlsList="nodownload"
+                onContextMenu={(e) => e.preventDefault()}
+                onError={(e) => {
+                  const target = e.target as HTMLVideoElement;
+                  const errorCode = target.error?.code;
+                  const errorMessage = target.error?.message || "Unknown error";
+                  setVideoError(`Error ${errorCode}: ${errorMessage}`);
+                }}
+                className="w-full h-full"
+              >
+                Your browser does not support the video tag.
+              </video>
+            )
           ) : (
             <div className="w-full h-full flex items-center justify-center text-white">
               Video not available
@@ -86,13 +109,13 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
 }
 
 function VideoCard({ video, onDelete, onPlay, isAdmin }: { video: TutorialVideo; onDelete: (id: string) => void; onPlay: (video: TutorialVideo) => void; isAdmin: boolean }) {
-  const categoryColors = {
+  const categoryColors: Record<string, string> = {
     strategy: "bg-primary/15 text-primary border-primary/30",
     platform: "bg-blue-500/15 text-blue-400 border-blue-500/30",
     tips: "bg-green-500/15 text-green-400 border-green-500/30",
   };
 
-  const categoryLabels = {
+  const categoryLabels: Record<string, string> = {
     strategy: "Strategy",
     platform: "Platform",
     tips: "Tips",
