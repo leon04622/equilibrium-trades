@@ -180,25 +180,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             setAddress(accounts[0]);
             setChainId(Number(network.chainId));
           } else if (isMobile && window.ethereum.isMetaMask) {
-            // User opened app in MetaMask in-app browser but not connected yet
-            // This happens after deep link redirect - auto request connection
-            try {
-              setIsConnecting(true);
-              const requestedAccounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-              if (requestedAccounts.length > 0) {
-                const browserProvider = new BrowserProvider(window.ethereum);
-                const browserSigner = await browserProvider.getSigner();
-                const network = await browserProvider.getNetwork();
-                
-                setProvider(browserProvider);
-                setSigner(browserSigner);
-                setAddress(requestedAccounts[0]);
-                setChainId(Number(network.chainId));
+            // Check if user came from deep link redirect
+            const pendingDeepLink = sessionStorage.getItem('metamask_deep_link_pending');
+            if (pendingDeepLink) {
+              // Clear the flag to prevent repeated prompts
+              sessionStorage.removeItem('metamask_deep_link_pending');
+              // User opened app in MetaMask in-app browser after deep link redirect
+              try {
+                setIsConnecting(true);
+                const requestedAccounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+                if (requestedAccounts.length > 0) {
+                  const browserProvider = new BrowserProvider(window.ethereum);
+                  const browserSigner = await browserProvider.getSigner();
+                  const network = await browserProvider.getNetwork();
+                  
+                  setProvider(browserProvider);
+                  setSigner(browserSigner);
+                  setAddress(requestedAccounts[0]);
+                  setChainId(Number(network.chainId));
+                }
+              } catch (err) {
+                console.error("Error auto-connecting in MetaMask browser:", err);
+              } finally {
+                setIsConnecting(false);
               }
-            } catch (err) {
-              console.error("Error auto-connecting in MetaMask browser:", err);
-            } finally {
-              setIsConnecting(false);
             }
           }
         } catch (error) {
@@ -237,9 +242,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [isMobile, address]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
-    const currentUrl = encodeURIComponent(window.location.href);
-    
     if (walletType === "metamask") {
+      // Set flag so we know to auto-connect when returning from MetaMask
+      sessionStorage.setItem('metamask_deep_link_pending', 'true');
       // MetaMask deep link format
       window.location.href = `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`;
     } else if (walletType === "rabby") {
