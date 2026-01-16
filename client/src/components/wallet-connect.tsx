@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/lib/wallet-context";
-import { Wallet, LogOut, AlertTriangle } from "lucide-react";
+import { Wallet, LogOut, AlertTriangle, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WalletConnectSheet } from "./wallet-connect-sheet";
 
 const ARBITRUM_CHAIN_ID = 42161;
 
@@ -19,9 +20,7 @@ export function WalletConnect() {
   const { 
     address, 
     chainId, 
-    isConnecting, 
     isConnected, 
-    connect, 
     disconnect,
     switchToArbitrum 
   } = useWallet();
@@ -29,17 +28,7 @@ export function WalletConnect() {
   const isWrongNetwork = isConnected && chainId !== ARBITRUM_CHAIN_ID;
 
   if (!isConnected) {
-    return (
-      <Button
-        onClick={connect}
-        disabled={isConnecting}
-        className="gap-2"
-        data-testid="button-connect-wallet"
-      >
-        <Wallet className="h-4 w-4" />
-        {isConnecting ? "Connecting..." : "Connect Wallet"}
-      </Button>
-    );
+    return <WalletConnectSheet />;
   }
 
   if (isWrongNetwork) {
@@ -61,7 +50,9 @@ export function WalletConnect() {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="gap-2" data-testid="button-wallet-menu">
           <Wallet className="h-4 w-4" />
-          {shortenAddress(address!)}
+          <span className="hidden sm:inline">{shortenAddress(address!)}</span>
+          <span className="sm:hidden">{address!.slice(0, 4)}...</span>
+          <ChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

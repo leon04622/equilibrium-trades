@@ -1,6 +1,15 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 import { BrowserProvider, JsonRpcSigner } from "ethers";
 
+export type WalletType = "metamask" | "rabby" | "injected" | "none";
+
+export interface DetectedWallet {
+  type: WalletType;
+  name: string;
+  icon?: string;
+  provider?: any;
+}
+
 interface WalletContextType {
   address: string | null;
   chainId: number | null;
@@ -10,10 +19,13 @@ interface WalletContextType {
   provider: BrowserProvider | null;
   builderCodeApproved: boolean;
   isCheckingApproval: boolean;
-  connect: () => Promise<void>;
+  detectedWallets: DetectedWallet[];
+  isMobile: boolean;
+  connect: (walletType?: WalletType) => Promise<void>;
   disconnect: () => void;
   switchToArbitrum: () => Promise<void>;
   refreshApprovalStatus: () => Promise<void>;
+  openInWalletBrowser: (walletType: WalletType) => void;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -27,8 +39,44 @@ declare global {
       on: (event: string, callback: (...args: any[]) => void) => void;
       removeListener: (event: string, callback: (...args: any[]) => void) => void;
       isMetaMask?: boolean;
+      isRabby?: boolean;
+      providers?: any[];
     };
   }
+}
+
+function detectMobile(): boolean {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function detectWallets(): DetectedWallet[] {
+  const wallets: DetectedWallet[] = [];
+  
+  if (!window.ethereum) {
+    return wallets;
+  }
+
+  // Check for multiple providers (MetaMask + Rabby etc.)
+  if (window.ethereum.providers?.length) {
+    for (const provider of window.ethereum.providers) {
+      if (provider.isRabby) {
+        wallets.push({ type: "rabby", name: "Rabby Wallet", provider });
+      } else if (provider.isMetaMask) {
+        wallets.push({ type: "metamask", name: "MetaMask", provider });
+      }
+    }
+  } else {
+    // Single provider
+    if (window.ethereum.isRabby) {
+      wallets.push({ type: "rabby", name: "Rabby Wallet", provider: window.ethereum });
+    } else if (window.ethereum.isMetaMask) {
+      wallets.push({ type: "metamask", name: "MetaMask", provider: window.ethereum });
+    } else {
+      wallets.push({ type: "injected", name: "Browser Wallet", provider: window.ethereum });
+    }
+  }
+
+  return wallets;
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -39,8 +87,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [builderCodeApproved, setBuilderCodeApproved] = useState(false);
   const [isCheckingApproval, setIsCheckingApproval] = useState(false);
+  const [detectedWallets, setDetectedWallets] = useState<DetectedWallet[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
 
   const isConnected = !!address && !!signer;
+
+  // Detect wallets and mobile on mount
+  useEffect(() => {
+    setIsMobile(detectMobile());
+    setDetectedWallets(detectWallets());
+  }, []);
 
   const refreshApprovalStatus = useCallback(async () => {
     if (!address) {
@@ -133,20 +189,52 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     checkConnection();
   }, []);
 
-  const connect = useCallback(async () => {
+  const openInWalletBrowser = useCallback((walletType: WalletType) => {
+    const currentUrl = encodeURIComponent(window.location.href);
+    
+    if (walletType === "metamask") {
+      // MetaMask deep link format
+      window.location.href = `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`;
+    } else if (walletType === "rabby") {
+      // Rabby doesn't have mobile app yet, show message
+      alert("Rabby Wallet is currently desktop-only. Please use MetaMask mobile or open this site in your Rabby browser extension on desktop.");
+    }
+  }, []);
+
+  const connect = useCallback(async (walletType?: WalletType) => {
+    // On mobile without any wallet provider, show deep link options
     if (!window.ethereum) {
-      window.open("https://metamask.io/download/", "_blank");
+      if (isMobile) {
+        openInWalletBrowser("metamask");
+      } else {
+        window.open("https://metamask.io/download/", "_blank");
+      }
       return;
     }
 
     setIsConnecting(true);
     
     try {
-      const accounts = await window.ethereum.request({ 
+      // Find the correct provider based on wallet type
+      let selectedProvider = window.ethereum;
+      
+      if (walletType && window.ethereum.providers?.length) {
+        for (const p of window.ethereum.providers) {
+          if (walletType === "rabby" && p.isRabby) {
+            selectedProvider = p;
+            break;
+          } else if (walletType === "metamask" && p.isMetaMask && !p.isRabby) {
+            selectedProvider = p;
+            break;
+          }
+        }
+      }
+      
+      const accounts = await selectedProvider.request({ 
         method: "eth_requestAccounts" 
       });
       
-      const browserProvider = new BrowserProvider(window.ethereum);
+      const browserProvider = new BrowserProvider(selectedProvider);
       const browserSigner = await browserProvider.getSigner();
       const network = await browserProvider.getNetwork();
       
@@ -160,7 +248,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
-  }, []);
+  }, [isMobile, openInWalletBrowser]);
 
   const disconnect = useCallback(() => {
     setAddress(null);
@@ -210,10 +298,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       provider,
       builderCodeApproved,
       isCheckingApproval,
+      detectedWallets,
+      isMobile,
       connect,
       disconnect,
       switchToArbitrum,
       refreshApprovalStatus,
+      openInWalletBrowser,
     }}>
       {children}
     </WalletContext.Provider>

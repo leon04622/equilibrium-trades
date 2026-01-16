@@ -11,6 +11,7 @@ import { WalletConnect } from "@/components/wallet-connect";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
@@ -71,20 +72,27 @@ function App() {
                 <div className="flex h-screen w-full overflow-hidden">
                   <AppSidebar />
                   <SidebarInset className="flex flex-col flex-1 min-w-0">
-                    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 sticky top-0 z-50 bg-background">
-                      <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-2 md:px-4 sticky top-0 z-50 bg-background">
+                      <div className="flex items-center gap-2">
+                        <SidebarTrigger 
+                          className="border border-primary/30 bg-primary/10 text-primary" 
+                          data-testid="button-sidebar-toggle" 
+                        />
+                        <span className="text-xs font-medium text-muted-foreground hidden sm:block">Menu</span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <WalletConnect />
                         <ThemeToggle />
                       </div>
                     </header>
                   <ScrollArea className="flex-1">
-                    <main className="min-h-0">
+                    <main className="min-h-0 pb-16 md:pb-0">
                       <Router />
                     </main>
                   </ScrollArea>
                 </SidebarInset>
               </div>
+              <MobileBottomNav />
               </SidebarProvider>
               <LiveChat />
               <Toaster />

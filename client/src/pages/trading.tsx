@@ -34,12 +34,15 @@ interface TradingProps {
   visible?: boolean;
 }
 
+type MobileTab = "chart" | "orderbook" | "trades";
+
 export default function Trading({ visible = true }: TradingProps) {
   const [coin, setCoin] = useState("BTC");
   const [timeframe, setTimeframe] = useState("5");
   const [showOrderBook, setShowOrderBook] = useState(false);
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
   const [showAIChart, setShowAIChart] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const { toast } = useToast();
   const { updatePrices } = useTrading();
 
@@ -150,12 +153,58 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
       </div>
 
+      {/* Mobile Tab Bar (Chart / Order Book / Trades) - Hyperliquid style */}
+      <div className="md:hidden flex items-center border-b bg-card/30">
+        <button
+          onClick={() => setMobileTab("chart")}
+          className={cn(
+            "flex-1 py-2.5 text-sm font-medium transition-colors relative",
+            mobileTab === "chart" ? "text-foreground" : "text-muted-foreground"
+          )}
+          data-testid="mobile-tab-chart"
+        >
+          Chart
+          {mobileTab === "chart" && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+        <button
+          onClick={() => setMobileTab("orderbook")}
+          className={cn(
+            "flex-1 py-2.5 text-sm font-medium transition-colors relative",
+            mobileTab === "orderbook" ? "text-foreground" : "text-muted-foreground"
+          )}
+          data-testid="mobile-tab-orderbook"
+        >
+          Order Book
+          {mobileTab === "orderbook" && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+        <button
+          onClick={() => setMobileTab("trades")}
+          className={cn(
+            "flex-1 py-2.5 text-sm font-medium transition-colors relative",
+            mobileTab === "trades" ? "text-foreground" : "text-muted-foreground"
+          )}
+          data-testid="mobile-tab-trades"
+        >
+          Trades
+          {mobileTab === "trades" && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+      </div>
+
       {/* Main trading area */}
       <div className="flex-1 flex min-h-0">
         {/* Left side - Chart */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Chart toolbar */}
-          <div className="flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2">
+          {/* Chart toolbar - only show when chart tab is active on mobile */}
+          <div className={cn(
+            "flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2",
+            mobileTab !== "chart" && "hidden md:flex"
+          )}>
             <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
               {timeframes.map((tf) => (
                 <Button
@@ -199,8 +248,41 @@ export default function Trading({ visible = true }: TradingProps) {
 
           {/* Chart and optional order book */}
           <div className="flex-1 flex min-h-0">
-            {/* Chart with position overlay */}
-            <div className="flex-1 min-w-0 relative">
+            {/* Mobile: Show content based on selected tab */}
+            <div className={cn(
+              "md:hidden flex-1 min-w-0",
+              mobileTab !== "chart" && mobileTab !== "orderbook" && mobileTab !== "trades" && "hidden"
+            )}>
+              {mobileTab === "chart" && (
+                <div className="relative h-full">
+                  {showAIChart ? (
+                    <PatternChart 
+                      symbol={coin} 
+                      interval={
+                        { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
+                      } 
+                      className="h-full" 
+                    />
+                  ) : (
+                    <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+                  )}
+                  <ChartPositionOverlay coin={coin} currentPrice={price} />
+                </div>
+              )}
+              {mobileTab === "orderbook" && (
+                <div className="h-full overflow-y-auto">
+                  <OrderBook coin={coin} />
+                </div>
+              )}
+              {mobileTab === "trades" && (
+                <div className="h-full overflow-y-auto">
+                  <RecentTrades coin={coin} />
+                </div>
+              )}
+            </div>
+
+            {/* Desktop: Chart with position overlay */}
+            <div className="hidden md:block flex-1 min-w-0 relative">
               {showAIChart ? (
                 <PatternChart 
                   symbol={coin} 
@@ -215,9 +297,9 @@ export default function Trading({ visible = true }: TradingProps) {
               <ChartPositionOverlay coin={coin} currentPrice={price} />
             </div>
             
-            {/* Optional Order Book Panel */}
+            {/* Optional Order Book Panel - Desktop only */}
             {showOrderBook && (
-              <div className="w-56 xl:w-64 border-l flex flex-col bg-card/30">
+              <div className="hidden md:flex w-56 xl:w-64 border-l flex-col bg-card/30">
                 <div className="flex items-center border-b">
                   <button
                     className={cn(
