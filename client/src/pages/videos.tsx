@@ -58,6 +58,8 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
               src={video.videoPath}
               controls
               autoPlay
+              controlsList="nodownload"
+              onContextMenu={(e) => e.preventDefault()}
               className="w-full h-full"
             >
               Your browser does not support the video tag.

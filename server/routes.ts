@@ -532,8 +532,8 @@ export async function registerRoutes(
     }
   });
 
-  // Helper to verify wallet ownership - checks if user has approved builder code (signature verified)
-  // For admin wallets, we trust them as they are hardcoded; for regular users, they must have onboarded
+  // Helper to verify wallet ownership for chat - allows any connected wallet to chat
+  // For admin wallets, we trust them as they are hardcoded
   async function verifyWalletAccess(walletAddress: string | undefined, requireAdmin = false): Promise<{ valid: boolean; isAdmin: boolean; error?: string }> {
     if (!walletAddress) {
       return { valid: false, isAdmin: false, error: "Wallet address required" };
@@ -551,12 +551,8 @@ export async function registerRoutes(
       return { valid: true, isAdmin: true };
     }
     
-    // For regular users, verify they have completed onboarding (signature-verified)
-    const user = await storage.getWalletUser(walletAddress);
-    if (!user || !user.builderCodeApproved) {
-      return { valid: false, isAdmin: false, error: "Wallet not verified - please complete onboarding" };
-    }
-    
+    // For regular users, just having a connected wallet is enough to use chat
+    // No need to require onboarding for chat functionality
     return { valid: true, isAdmin: false };
   }
 
