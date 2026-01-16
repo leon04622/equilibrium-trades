@@ -23,8 +23,9 @@ Equilibrium is a beginner-friendly trading platform that teaches users a specifi
 ### Backend (Express + TypeScript)
 - **Framework**: Express.js
 - **AI**: OpenAI via Replit AI Integrations (gpt-5.1)
-- **Storage**: In-memory storage (MemStorage)
+- **Storage**: In-memory storage (MemStorage) for most data, PostgreSQL for persistent data (tutorial videos)
 - **Streaming**: Server-Sent Events for pattern detection
+- **Database**: PostgreSQL (Neon) via @neondatabase/serverless for video metadata persistence
 
 ### Non-Custodial Trading Architecture
 This platform uses a **fully non-custodial** architecture:
