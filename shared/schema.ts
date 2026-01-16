@@ -91,28 +91,22 @@ export const insertSubscriptionTierSchema = createInsertSchema(subscriptionTiers
 export type InsertSubscriptionTier = z.infer<typeof insertSubscriptionTierSchema>;
 export type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
-// Tutorial Videos
-export interface TutorialVideo {
-  id: string;
-  title: string;
-  description: string;
-  duration: string;
-  category: 'strategy' | 'platform' | 'tips';
-  youtubeId?: string;
-  videoPath?: string;
-  thumbnailPath?: string;
-  createdAt: Date;
-}
+// Tutorial Videos - Database table for persistent storage
+export const tutorialVideos = pgTable("tutorial_videos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  duration: text("duration").notNull().default(""),
+  category: text("category").notNull(), // 'strategy' | 'platform' | 'tips'
+  youtubeId: text("youtube_id"),
+  videoPath: text("video_path"),
+  thumbnailPath: text("thumbnail_path"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
 
-export interface InsertTutorialVideo {
-  title: string;
-  description: string;
-  duration: string;
-  category: 'strategy' | 'platform' | 'tips';
-  youtubeId?: string;
-  videoPath?: string;
-  thumbnailPath?: string;
-}
+export const insertTutorialVideoSchema = createInsertSchema(tutorialVideos).omit({ id: true, createdAt: true });
+export type InsertTutorialVideo = z.infer<typeof insertTutorialVideoSchema>;
+export type TutorialVideo = typeof tutorialVideos.$inferSelect;
 
 export const insertVideoSchema = z.object({
   title: z.string().min(1, "Title is required"),

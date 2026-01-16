@@ -6,9 +6,12 @@ import {
   type SubscriptionTier, type InsertSubscriptionTier,
   type TradeGrade, type InsertTradeGrade, type WeeklyStats,
   type TutorialVideo, type InsertTutorialVideo,
-  type WalletUser, type InsertWalletUser
+  type WalletUser, type InsertWalletUser,
+  tutorialVideos
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -61,7 +64,6 @@ export class MemStorage implements IStorage {
   private smaSignals: Map<string, SmaSignal>;
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
-  private videos: Map<string, TutorialVideo>;
   private walletUsers: Map<string, WalletUser>;
 
   constructor() {
@@ -71,7 +73,6 @@ export class MemStorage implements IStorage {
     this.smaSignals = new Map();
     this.subscriptionTiers = new Map();
     this.tradeGrades = new Map();
-    this.videos = new Map();
     this.walletUsers = new Map();
     
     this.initializeSubscriptionTiers();
@@ -315,29 +316,33 @@ export class MemStorage implements IStorage {
     };
   }
 
-  // Tutorial Videos
+  // Tutorial Videos - Now using database for persistence
   async getAllVideos(): Promise<TutorialVideo[]> {
-    return Array.from(this.videos.values())
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
+    return videos;
   }
 
   async getVideo(id: string): Promise<TutorialVideo | undefined> {
-    return this.videos.get(id);
+    const [video] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
+    return video;
   }
 
   async createVideo(video: InsertTutorialVideo): Promise<TutorialVideo> {
-    const id = randomUUID();
-    const newVideo: TutorialVideo = {
-      id,
-      ...video,
-      createdAt: new Date(),
-    };
-    this.videos.set(id, newVideo);
+    const [newVideo] = await db.insert(tutorialVideos).values({
+      title: video.title,
+      description: video.description,
+      duration: video.duration || "",
+      category: video.category,
+      youtubeId: video.youtubeId || null,
+      videoPath: video.videoPath || null,
+      thumbnailPath: video.thumbnailPath || null,
+    }).returning();
     return newVideo;
   }
 
   async deleteVideo(id: string): Promise<boolean> {
-    return this.videos.delete(id);
+    const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
+    return result.length > 0;
   }
 
   // Wallet Users (Hyperliquid onboarding)
