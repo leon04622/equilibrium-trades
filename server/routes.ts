@@ -363,9 +363,16 @@ export async function registerRoutes(
     }
   });
 
+  // Create video - admin only
   app.post("/api/videos", async (req: Request, res: Response) => {
     try {
-      const { insertVideoSchema } = await import("@shared/schema");
+      const { insertVideoSchema, isAdminWallet } = await import("@shared/schema");
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      
+      if (!walletAddress || !isAdminWallet(walletAddress)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
       const validated = insertVideoSchema.safeParse(req.body);
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
@@ -378,8 +385,16 @@ export async function registerRoutes(
     }
   });
 
+  // Delete video - admin only
   app.delete("/api/videos/:id", async (req: Request, res: Response) => {
     try {
+      const { isAdminWallet } = await import("@shared/schema");
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      
+      if (!walletAddress || !isAdminWallet(walletAddress)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
       const deleted = await storage.deleteVideo(req.params.id);
       if (deleted) {
         res.json({ success: true });
@@ -514,6 +529,146 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating wallet user email:", error);
       res.status(500).json({ error: "Failed to update email" });
+    }
+  });
+
+  // Helper to verify wallet ownership - checks if user has approved builder code (signature verified)
+  // For admin wallets, we trust them as they are hardcoded; for regular users, they must have onboarded
+  async function verifyWalletAccess(walletAddress: string | undefined, requireAdmin = false): Promise<{ valid: boolean; isAdmin: boolean; error?: string }> {
+    if (!walletAddress) {
+      return { valid: false, isAdmin: false, error: "Wallet address required" };
+    }
+    
+    const { isAdminWallet } = await import("@shared/schema");
+    const isAdmin = isAdminWallet(walletAddress);
+    
+    if (requireAdmin && !isAdmin) {
+      return { valid: false, isAdmin: false, error: "Admin access required" };
+    }
+    
+    // Admin wallets are trusted (hardcoded list)
+    if (isAdmin) {
+      return { valid: true, isAdmin: true };
+    }
+    
+    // For regular users, verify they have completed onboarding (signature-verified)
+    const user = await storage.getWalletUser(walletAddress);
+    if (!user || !user.builderCodeApproved) {
+      return { valid: false, isAdmin: false, error: "Wallet not verified - please complete onboarding" };
+    }
+    
+    return { valid: true, isAdmin: false };
+  }
+
+  // Support Chat API
+  // Get messages for a conversation - users can only access their own conversation, admins can access all
+  app.get("/api/support/messages/:conversationId", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const conversationId = req.params.conversationId.toLowerCase();
+      
+      const { valid, isAdmin, error } = await verifyWalletAccess(walletAddress);
+      if (!valid) {
+        return res.status(401).json({ error });
+      }
+      
+      const isOwnConversation = walletAddress!.toLowerCase() === conversationId;
+      
+      if (!isAdmin && !isOwnConversation) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const messages = await storage.getMessages(conversationId);
+      res.json(messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  });
+
+  // Get all conversations - admin only
+  app.get("/api/support/conversations", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      
+      const { valid, error } = await verifyWalletAccess(walletAddress, true);
+      if (!valid) {
+        return res.status(403).json({ error });
+      }
+      
+      const conversations = await storage.getAllConversations();
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  // Send a message - server validates sender type based on verified wallet
+  app.post("/api/support/messages", async (req: Request, res: Response) => {
+    try {
+      const { insertSupportMessageSchema } = await import("@shared/schema");
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      
+      const { valid, isAdmin, error } = await verifyWalletAccess(walletAddress);
+      if (!valid) {
+        return res.status(401).json({ error });
+      }
+      
+      const conversationId = (req.body.conversationId || "").toLowerCase();
+      
+      // Non-admin users can only send to their own conversation
+      if (!isAdmin && walletAddress!.toLowerCase() !== conversationId) {
+        return res.status(403).json({ error: "Can only send to your own conversation" });
+      }
+      
+      // Override senderType based on server-verified admin status
+      const messageData = {
+        ...req.body,
+        senderType: isAdmin ? "admin" : "user",
+        senderWallet: isAdmin ? null : walletAddress!.toLowerCase(),
+        conversationId: conversationId,
+      };
+      
+      const validated = insertSupportMessageSchema.safeParse(messageData);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+      const message = await storage.createMessage(validated.data);
+      res.json(message);
+    } catch (error) {
+      console.error("Error creating message:", error);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  // Mark messages as read - admin only
+  app.post("/api/support/messages/:conversationId/read", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      
+      const { valid, error } = await verifyWalletAccess(walletAddress, true);
+      if (!valid) {
+        return res.status(403).json({ error });
+      }
+      
+      await storage.markMessagesAsRead(req.params.conversationId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking messages as read:", error);
+      res.status(500).json({ error: "Failed to mark messages as read" });
+    }
+  });
+
+  // Check if wallet is admin
+  app.get("/api/admin/check/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const { isAdminWallet } = await import("@shared/schema");
+      const isAdmin = isAdminWallet(req.params.walletAddress);
+      res.json({ isAdmin });
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      res.status(500).json({ error: "Failed to check admin status" });
     }
   });
 

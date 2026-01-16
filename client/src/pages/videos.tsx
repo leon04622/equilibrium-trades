@@ -18,12 +18,12 @@ import {
   GraduationCap,
   Upload,
   Youtube,
-  Video,
-  X
+  Video
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useUpload } from "@/hooks/use-upload";
+import { useWallet } from "@/lib/wallet-context";
 import type { TutorialVideo } from "@shared/schema";
 
 interface VideoPlayerProps {
@@ -83,7 +83,7 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
   );
 }
 
-function VideoCard({ video, onDelete, onPlay }: { video: TutorialVideo; onDelete: (id: string) => void; onPlay: (video: TutorialVideo) => void }) {
+function VideoCard({ video, onDelete, onPlay, isAdmin }: { video: TutorialVideo; onDelete: (id: string) => void; onPlay: (video: TutorialVideo) => void; isAdmin: boolean }) {
   const categoryColors = {
     strategy: "bg-primary/15 text-primary border-primary/30",
     platform: "bg-blue-500/15 text-blue-400 border-blue-500/30",
@@ -160,16 +160,18 @@ function VideoCard({ video, onDelete, onPlay }: { video: TutorialVideo; onDelete
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{video.description}</p>
-        <div className="flex justify-end">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={(e) => { e.stopPropagation(); onDelete(video.id); }}
-            data-testid={`button-delete-video-${video.id}`}
-          >
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
-        </div>
+        {isAdmin && (
+          <div className="flex justify-end">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={(e) => { e.stopPropagation(); onDelete(video.id); }}
+              data-testid={`button-delete-video-${video.id}`}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -185,6 +187,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
   const [uploadedVideoPath, setUploadedVideoPath] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
+  const { address } = useWallet();
 
   const { uploadFile, isUploading, progress } = useUpload({
     onSuccess: (response) => {
@@ -198,7 +201,17 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
 
   const createMutation = useMutation({
     mutationFn: async (data: { title: string; description: string; duration: string; category: string; youtubeId?: string; videoPath?: string }) => {
-      return apiRequest("POST", "/api/videos", data);
+      if (!address) throw new Error("Wallet not connected");
+      const res = await fetch("/api/videos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-wallet-address": address,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create video");
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
@@ -433,6 +446,19 @@ export default function Videos() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<TutorialVideo | null>(null);
   const { toast } = useToast();
+  const { address } = useWallet();
+
+  const { data: isAdminData } = useQuery<{ isAdmin: boolean }>({
+    queryKey: ["/api/admin/check", address],
+    queryFn: async () => {
+      if (!address) return { isAdmin: false };
+      const res = await fetch(`/api/admin/check/${address}`);
+      return res.json();
+    },
+    enabled: !!address,
+  });
+
+  const isAdmin = isAdminData?.isAdmin ?? false;
 
   const { data: videos = [], isLoading } = useQuery<TutorialVideo[]>({
     queryKey: ["/api/videos"],
@@ -440,7 +466,13 @@ export default function Videos() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/videos/${id}`);
+      if (!address) throw new Error("Wallet not connected");
+      const res = await fetch(`/api/videos/${id}`, {
+        method: "DELETE",
+        headers: { "x-wallet-address": address },
+      });
+      if (!res.ok) throw new Error("Failed to delete video");
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
@@ -465,22 +497,24 @@ export default function Videos() {
           <h1 className="text-2xl font-bold tracking-tight">Video Tutorials</h1>
           <p className="text-muted-foreground">Learn trading strategies and how to use Equilibrium</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-open-add-video">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Video
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Add New Video</DialogTitle>
-              </DialogHeader>
-              <AddVideoForm onSuccess={() => setDialogOpen(false)} />
-            </DialogContent>
-          </Dialog>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-open-add-video">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Video
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add New Video</DialogTitle>
+                </DialogHeader>
+                <AddVideoForm onSuccess={() => setDialogOpen(false)} />
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -527,12 +561,16 @@ export default function Videos() {
             <Play className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
             <h3 className="font-semibold text-lg mb-2">No Videos Yet</h3>
             <p className="text-muted-foreground mb-4">
-              Add your first tutorial video - upload from your computer or link a YouTube video.
+              {isAdmin 
+                ? "Add your first tutorial video - upload from your computer or link a YouTube video."
+                : "Tutorial videos will be available soon. Check back later!"}
             </p>
-            <Button onClick={() => setDialogOpen(true)} data-testid="button-add-first-video">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Your First Video
-            </Button>
+            {isAdmin && (
+              <Button onClick={() => setDialogOpen(true)} data-testid="button-add-first-video">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Your First Video
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -555,7 +593,7 @@ export default function Videos() {
           <TabsContent value="all">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {videos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} isAdmin={isAdmin} />
               ))}
             </div>
           </TabsContent>
@@ -563,7 +601,7 @@ export default function Videos() {
           <TabsContent value="strategy">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {strategyVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} isAdmin={isAdmin} />
               ))}
             </div>
           </TabsContent>
@@ -571,7 +609,7 @@ export default function Videos() {
           <TabsContent value="platform">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {platformVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} isAdmin={isAdmin} />
               ))}
             </div>
           </TabsContent>
@@ -579,7 +617,7 @@ export default function Videos() {
           <TabsContent value="tips">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tipsVideos.map((video) => (
-                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} />
+                <VideoCard key={video.id} video={video} onDelete={handleDelete} onPlay={setPlayingVideo} isAdmin={isAdmin} />
               ))}
             </div>
           </TabsContent>

@@ -7,7 +7,8 @@ import {
   type TradeGrade, type InsertTradeGrade, type WeeklyStats,
   type TutorialVideo, type InsertTutorialVideo,
   type WalletUser, type InsertWalletUser,
-  tutorialVideos
+  type SupportMessage, type InsertSupportMessage,
+  tutorialVideos, supportMessages
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -55,6 +56,12 @@ export interface IStorage {
   createWalletUser(user: InsertWalletUser): Promise<WalletUser>;
   updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined>;
   updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined>;
+  
+  // Support Messages
+  getMessages(conversationId: string): Promise<SupportMessage[]>;
+  getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]>;
+  createMessage(message: InsertSupportMessage): Promise<SupportMessage>;
+  markMessagesAsRead(conversationId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -393,6 +400,51 @@ export class MemStorage implements IStorage {
       this.walletUsers.set(user.id, user);
     }
     return user;
+  }
+
+  // Support Messages - Using database for persistence
+  async getMessages(conversationId: string): Promise<SupportMessage[]> {
+    const messages = await db.select().from(supportMessages)
+      .where(eq(supportMessages.conversationId, conversationId.toLowerCase()))
+      .orderBy(supportMessages.createdAt);
+    return messages;
+  }
+
+  async getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]> {
+    const messages = await db.select().from(supportMessages).orderBy(desc(supportMessages.createdAt));
+    
+    const conversationMap = new Map<string, { messages: SupportMessage[] }>();
+    for (const msg of messages) {
+      const convId = msg.conversationId.toLowerCase();
+      if (!conversationMap.has(convId)) {
+        conversationMap.set(convId, { messages: [] });
+      }
+      conversationMap.get(convId)!.messages.push(msg);
+    }
+    
+    return Array.from(conversationMap.entries()).map(([conversationId, data]) => ({
+      conversationId,
+      lastMessage: data.messages[0],
+      unreadCount: data.messages.filter(m => !m.isRead && m.senderType === 'user').length,
+    }));
+  }
+
+  async createMessage(message: InsertSupportMessage): Promise<SupportMessage> {
+    const [newMessage] = await db.insert(supportMessages).values({
+      senderType: message.senderType,
+      senderWallet: message.senderWallet?.toLowerCase() || null,
+      senderName: message.senderName || null,
+      message: message.message,
+      isRead: message.isRead || false,
+      conversationId: message.conversationId.toLowerCase(),
+    }).returning();
+    return newMessage;
+  }
+
+  async markMessagesAsRead(conversationId: string): Promise<void> {
+    await db.update(supportMessages)
+      .set({ isRead: true })
+      .where(eq(supportMessages.conversationId, conversationId.toLowerCase()));
   }
 }
 

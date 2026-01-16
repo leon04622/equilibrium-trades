@@ -229,3 +229,24 @@ npm run db:push    # Push database schema (if using DB)
   - **Components**: OnboardingFlow (client/src/components/onboarding-flow.tsx)
   - **Context**: WalletContext includes builderCodeApproved status
   - API: GET /api/wallet-user/:address, POST /api/wallet-user/register, POST /api/wallet-user/approve-builder-code
+- **January 2026**: Live Chat Customer Support System with Server-Side Authorization
+  - **Real-time Chat Widget**: Floating chat button visible on all screens
+    - Users send messages linked to their wallet address as conversation ID
+    - Messages stored in PostgreSQL (support_messages table)
+    - 5-second polling interval for real-time updates
+  - **Admin Inbox**: Admin users see all conversations with unread counts
+    - Click conversation to view/reply to customer messages
+    - Back button to return to conversation list
+  - **Server-Side Authorization**: 
+    - All chat/video endpoints require x-wallet-address header
+    - Regular users must complete onboarding (builder code signature) before using chat
+    - Admin wallets are hardcoded in schema (adminWallets array in shared/schema.ts)
+    - Server verifies wallet ownership via builderCodeApproved status
+    - SenderType is server-determined based on verified admin status (prevents spoofing)
+    - Users can only access their own conversations; admins can access all
+  - **Admin Access Control**: 
+    - Video add/delete buttons hidden for non-admin users (frontend)
+    - Video POST/DELETE endpoints require admin wallet (backend)
+    - API: GET /api/admin/check/:walletAddress
+  - **Components**: live-chat.tsx (database-backed with auth)
+  - **API**: GET /api/support/messages/:conversationId, POST /api/support/messages, GET /api/support/conversations, POST /api/support/messages/:conversationId/read

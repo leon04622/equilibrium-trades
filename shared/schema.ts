@@ -267,5 +267,31 @@ export const builderCodeApprovalSchema = z.object({
 
 export type BuilderCodeApprovalInput = z.infer<typeof builderCodeApprovalSchema>;
 
+// Support Chat Messages
+export const supportMessages = pgTable("support_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  senderType: text("sender_type").notNull(), // 'user' | 'admin'
+  senderWallet: text("sender_wallet"), // wallet address for users
+  senderName: text("sender_name"), // display name
+  message: text("message").notNull(),
+  isRead: boolean("is_read").default(false),
+  conversationId: text("conversation_id").notNull(), // wallet address as conversation ID
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertSupportMessageSchema = createInsertSchema(supportMessages).omit({ id: true, createdAt: true });
+export type InsertSupportMessage = z.infer<typeof insertSupportMessageSchema>;
+export type SupportMessage = typeof supportMessages.$inferSelect;
+
+// Admin users for video management and chat
+export const adminWallets = [
+  "0x0000000000000000000000000000000000000001", // Add your actual admin wallet here
+];
+
+export function isAdminWallet(walletAddress: string | null): boolean {
+  if (!walletAddress) return false;
+  return adminWallets.includes(walletAddress.toLowerCase());
+}
+
 // Re-export chat models
 export * from "./models/chat";
