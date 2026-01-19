@@ -160,11 +160,11 @@ export default function Candles() {
                   data-testid={`card-pattern-${pattern.id}`}
                 >
                   {pattern.image && (
-                    <div className="relative w-full h-36 overflow-hidden rounded-t-lg bg-muted/30">
+                    <div className="relative w-full h-52 overflow-hidden rounded-t-lg bg-muted/30">
                       <img 
                         src={pattern.image} 
                         alt={`${pattern.name} candlestick pattern`}
-                        className="w-full h-full object-contain p-2"
+                        className="w-full h-full object-contain p-3"
                       />
                     </div>
                   )}
@@ -240,7 +240,7 @@ export default function Candles() {
               <ScrollArea className="max-h-[60vh] pr-4">
                 <div className="space-y-6 py-4">
                   {selectedPattern.image && (
-                    <div className="relative w-full h-48 overflow-hidden rounded-lg bg-muted/30 border">
+                    <div className="relative w-full h-64 overflow-hidden rounded-lg bg-muted/30 border">
                       <img 
                         src={selectedPattern.image} 
                         alt={`${selectedPattern.name} candlestick pattern diagram`}

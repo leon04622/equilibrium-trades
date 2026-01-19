@@ -94,10 +94,30 @@ export default function Learn() {
   const [selectedPattern, setSelectedPattern] = useState<PatternDefinition | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [completedLessonIds, setCompletedLessonIds] = useState<Set<string>>(() => loadProgress(address || undefined));
+  const [isInitialized, setIsInitialized] = useState(false);
 
+  // Load progress when wallet address changes
   useEffect(() => {
-    setCompletedLessonIds(loadProgress(address || undefined));
+    const loaded = loadProgress(address || undefined);
+    setCompletedLessonIds(loaded);
+    setIsInitialized(true);
   }, [address]);
+
+  // Auto-save progress whenever it changes (after initial load)
+  useEffect(() => {
+    if (isInitialized && completedLessonIds.size >= 0) {
+      saveProgress(completedLessonIds, address);
+    }
+  }, [completedLessonIds, address, isInitialized]);
+
+  // Save progress before page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      saveProgress(completedLessonIds, address);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [completedLessonIds, address]);
 
   const buildModules = useCallback((): Module[] => {
     return moduleDefinitions.map((def, moduleIndex) => {
