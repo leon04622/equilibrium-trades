@@ -248,34 +248,34 @@ export default function Trading({ visible = true }: TradingProps) {
 
           {/* Chart and optional order book - fills remaining space */}
           <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Mobile: Show content based on selected tab - use absolute positioning for full height */}
+            {/* Mobile: Show content based on selected tab */}
             <div className={cn(
-              "md:hidden flex-1 min-w-0 relative",
+              "md:hidden flex-1 min-w-0 min-h-0 flex flex-col",
               mobileTab !== "chart" && mobileTab !== "orderbook" && mobileTab !== "trades" && "hidden"
             )}>
               {mobileTab === "chart" && (
-                <div className="absolute inset-0">
+                <div className="flex-1 min-h-0 relative">
                   {showAIChart ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
                         { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                       } 
-                      className="h-full w-full" 
+                      className="absolute inset-0" 
                     />
                   ) : (
-                    <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full w-full" />
+                    <TradingViewChart symbol={tvSymbol} interval={timeframe} className="absolute inset-0" />
                   )}
                   <ChartPositionOverlay coin={coin} currentPrice={price} />
                 </div>
               )}
               {mobileTab === "orderbook" && (
-                <div className="absolute inset-0 overflow-y-auto">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   <OrderBook coin={coin} />
                 </div>
               )}
               {mobileTab === "trades" && (
-                <div className="absolute inset-0 overflow-y-auto">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   <RecentTrades coin={coin} />
                 </div>
               )}

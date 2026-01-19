@@ -748,6 +748,31 @@ function getEducationalContent(
 }
 
 // Educational pattern analysis - no entry/SL/TP
+// Helper function to get SMA data for a specific timeframe
+async function getSMAForTimeframe(coin: string, timeframe: string): Promise<SMAValues | null> {
+  const intervalMap: Record<string, string> = {
+    "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+  };
+  const candleMinutes: Record<string, number> = {
+    "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+  };
+  
+  const interval = intervalMap[timeframe] || "1m";
+  const minutes = candleMinutes[timeframe] || 1;
+  const requiredCandles = 250;
+  const durationMs = requiredCandles * minutes * 60 * 1000;
+  
+  const endTime = Date.now();
+  const startTime = endTime - durationMs;
+  
+  try {
+    const candles = await getCandles(coin, interval, startTime, endTime);
+    return calculateSMAFromCandles(candles);
+  } catch {
+    return null;
+  }
+}
+
 export async function analyzeForEducationalPatterns(
   coin: string,
   timeframe: string = "1m"
@@ -783,6 +808,27 @@ export async function analyzeForEducationalPatterns(
     let bias: "bullish" | "bearish" | "neutral" = "neutral";
     if (smaGapPercent > 0.1) {
       bias = isBullish ? "bullish" : "bearish";
+    }
+    
+    // MULTI-TIMEFRAME VALIDATION FOR CONTINUATION PATTERNS
+    // For bull/bear flags: Require 21 SMA > 200 SMA on BOTH 1m AND 5m timeframes
+    // This prevents false signals when only one timeframe shows bullish alignment
+    let multiTimeframeBullish = false;
+    let multiTimeframeBearish = false;
+    
+    // Get SMA data for both 1m and 5m timeframes for validation
+    const [sma1m, sma5m] = await Promise.all([
+      timeframe === "1m" ? Promise.resolve(currentSMA) : getSMAForTimeframe(coin, "1m"),
+      timeframe === "5m" ? Promise.resolve(currentSMA) : getSMAForTimeframe(coin, "5m"),
+    ]);
+    
+    if (sma1m && sma5m) {
+      // For bullish continuation patterns: BOTH timeframes must have 21 > 200
+      const is1mBullish = sma1m.sma21 > sma1m.sma200;
+      const is5mBullish = sma5m.sma21 > sma5m.sma200;
+      
+      multiTimeframeBullish = is1mBullish && is5mBullish;
+      multiTimeframeBearish = !is1mBullish && !is5mBullish;
     }
     
     // Check for SMA crossover first
@@ -821,12 +867,45 @@ export async function analyzeForEducationalPatterns(
     // Scan for all pattern types
     const patterns: DetectedPattern[] = [];
     
+    // CONTINUATION PATTERNS (Bull/Bear Flags, Pennants, Triangles)
+    // These require MULTI-TIMEFRAME ALIGNMENT:
+    // - Bull patterns: 21 > 200 SMA on BOTH 1m AND 5m
+    // - Bear patterns: 21 < 200 SMA on BOTH 1m AND 5m
     const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
-    if (flagPattern) patterns.push(flagPattern);
+    if (flagPattern) {
+      const isBullishPattern = flagPattern.name === "bull_flag";
+      const isBearishPattern = flagPattern.name === "bear_flag";
+      
+      // Only include bull flags if BOTH 1m and 5m are bullish
+      // Only include bear flags if BOTH 1m and 5m are bearish
+      if ((isBullishPattern && multiTimeframeBullish) || 
+          (isBearishPattern && multiTimeframeBearish)) {
+        patterns.push(flagPattern);
+      }
+      // If multi-timeframe doesn't align, skip this pattern - it's a false signal
+    }
     
     const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
-    if (trianglePattern) patterns.push(trianglePattern);
+    if (trianglePattern) {
+      // Ascending triangles need bullish multi-timeframe alignment
+      // Descending triangles need bearish multi-timeframe alignment
+      // Symmetrical triangles can go either way - still require alignment
+      const isBullishPattern = trianglePattern.name === "ascending_triangle";
+      const isBearishPattern = trianglePattern.name === "descending_triangle";
+      
+      if (trianglePattern.name === "symmetrical_triangle") {
+        // Symmetrical can break either way, require at least some alignment
+        if (multiTimeframeBullish || multiTimeframeBearish) {
+          patterns.push(trianglePattern);
+        }
+      } else if ((isBullishPattern && multiTimeframeBullish) || 
+                 (isBearishPattern && multiTimeframeBearish)) {
+        patterns.push(trianglePattern);
+      }
+    }
     
+    // REVERSAL PATTERNS (Double Top/Bottom, Wedges) - these don't require multi-TF alignment
+    // as they indicate potential reversals
     const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
     if (doublePattern) patterns.push(doublePattern);
     
@@ -849,10 +928,16 @@ export async function analyzeForEducationalPatterns(
     );
     
     let smaRelationship: string;
+    const mtfStatus = multiTimeframeBullish 
+      ? "CONFIRMED on 1m+5m" 
+      : multiTimeframeBearish 
+        ? "CONFIRMED on 1m+5m" 
+        : "NOT aligned on both 1m+5m";
+    
     if (bias === "bullish") {
-      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is above 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BULLISH structure. Look for long setups.`;
+      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is above 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BULLISH structure (${mtfStatus}). Look for long setups.`;
     } else if (bias === "bearish") {
-      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is below 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BEARISH structure. Look for short setups.`;
+      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is below 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BEARISH structure (${mtfStatus}). Look for short setups.`;
     } else {
       smaRelationship = `21 SMA and 200 SMA are very close - NEUTRAL/CHOPPY conditions. Wait for clearer separation.`;
     }
