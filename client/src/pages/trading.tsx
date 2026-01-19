@@ -355,19 +355,19 @@ export default function Trading({ visible = true }: TradingProps) {
       {/* Bottom - Positions and Orders Panel (Hyperliquid style) */}
       <BottomTradingPanel coin={coin} />
 
-      {/* Mobile Order Entry Button */}
-      <div className="md:hidden fixed bottom-20 right-4 z-50">
+      {/* Mobile Order Entry Button - positioned above the collapsed bottom panel */}
+      <div className="md:hidden fixed bottom-12 right-3 z-50">
         <Sheet>
           <SheetTrigger asChild>
             <Button 
               size="lg" 
-              className="h-14 w-14 rounded-full shadow-lg bg-primary hover:bg-primary/90"
+              className="h-12 w-12 rounded-full shadow-lg bg-primary hover:bg-primary/90"
               data-testid="button-mobile-order"
             >
-              <ArrowUpDown className="h-6 w-6" />
+              <ArrowUpDown className="h-5 w-5" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="bottom" className="h-[85vh] rounded-t-xl">
+          <SheetContent side="bottom" className="h-[80vh] rounded-t-xl">
             <SheetHeader className="pb-2">
               <SheetTitle className="text-center">Trade {coin}</SheetTitle>
             </SheetHeader>

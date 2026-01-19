@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { X, Pencil } from "lucide-react";
+import { X, Pencil, ChevronUp, ChevronDown } from "lucide-react";
 
 interface BottomTradingPanelProps {
   coin?: string;
@@ -27,6 +27,7 @@ interface TPSLDialogState {
 
 export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("positions");
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const { positions, openOrders, cancelHLOrder, placeTPSL, connected, currentPrices, closePosition, isClosingPosition } = useTrading();
   const { toast } = useToast();
   const [tpslDialog, setTpslDialog] = useState<TPSLDialogState>({
@@ -224,8 +225,24 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   return (
     <>
       <div className="border-t bg-card/50" data-testid="bottom-trading-panel">
+        {/* Mobile: Collapsed header with expand button */}
         <div className="flex items-center justify-between px-1 md:px-2 border-b">
-          <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto">
+          {/* Mobile expand/collapse toggle */}
+          <button 
+            className="md:hidden flex items-center gap-1 px-2 py-1.5 text-[10px] text-muted-foreground"
+            onClick={() => setMobileExpanded(!mobileExpanded)}
+            data-testid="button-expand-panel"
+          >
+            {mobileExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+            <span className="font-medium text-foreground">
+              {filteredPositions.length > 0 ? `${filteredPositions.length} Position${filteredPositions.length > 1 ? 's' : ''}` : 'Positions'}
+            </span>
+          </button>
+          
+          <div className={cn(
+            "flex items-center gap-0.5 md:gap-1 overflow-x-auto",
+            !mobileExpanded && "hidden md:flex"
+          )}>
             {tabs.map(tab => (
               <button
                 key={tab.id}
@@ -252,7 +269,10 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             ))}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className={cn(
+            "flex items-center gap-2 shrink-0",
+            !mobileExpanded && "hidden md:flex"
+          )}>
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">Filter</span>
             {activeTab === "orders" && filteredOrders.length > 0 && (
               <Button
@@ -268,7 +288,11 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
           </div>
         </div>
 
-        <div className="h-16 md:h-28 overflow-auto">
+        {/* Content area - collapsed on mobile by default */}
+        <div className={cn(
+          "overflow-auto transition-all",
+          mobileExpanded ? "h-32" : "h-0 md:h-28"
+        )}>
           {activeTab === "positions" && (
             <PositionsTable 
               positions={filteredPositions} 
