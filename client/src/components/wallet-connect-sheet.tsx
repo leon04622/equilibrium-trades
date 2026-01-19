@@ -146,7 +146,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
             /* Mobile options */
             <>
               <p className="text-sm text-muted-foreground mb-4">
-                Open this page in your wallet's browser to connect.
+                Tap below to open Equilibrium in your wallet's browser and connect.
               </p>
               <Button
                 variant="outline"
@@ -159,15 +159,33 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
                     <Hexagon className="h-5 w-5 text-orange-500" />
                   </div>
                   <div className="text-left">
-                    <span className="font-medium block">Open in MetaMask</span>
-                    <span className="text-xs text-muted-foreground">Mobile App</span>
+                    <span className="font-medium block">MetaMask</span>
+                    <span className="text-xs text-muted-foreground">Recommended for mobile</span>
                   </div>
                 </div>
                 <Smartphone className="h-4 w-4 text-muted-foreground" />
               </Button>
-              <p className="text-xs text-muted-foreground text-center pt-2">
-                Note: Rabby is desktop-only. Use MetaMask for mobile.
-              </p>
+              <Button
+                variant="outline"
+                className="w-full justify-between h-14"
+                onClick={() => window.open("https://rabby.io/", "_blank")}
+                data-testid="button-rabby-mobile"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center">
+                    <Globe className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <div className="text-left">
+                    <span className="font-medium block">Rabby Wallet</span>
+                    <span className="text-xs text-muted-foreground">Desktop browser only</span>
+                  </div>
+                </div>
+                <ExternalLink className="h-4 w-4 text-muted-foreground" />
+              </Button>
+              <div className="text-xs text-muted-foreground text-center pt-2 space-y-1">
+                <p>After tapping MetaMask, the app will open in MetaMask's browser.</p>
+                <p className="text-primary">You'll trade directly from MetaMask's browser.</p>
+              </div>
             </>
           )}
         </div>

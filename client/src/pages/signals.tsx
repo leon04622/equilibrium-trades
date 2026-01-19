@@ -72,79 +72,79 @@ function PatternCard({ signal }: { signal: PatternSignal }) {
         isBullish ? "bg-green-500" : isBearish ? "bg-red-500" : "bg-gray-500"
       )} />
       
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-2 px-3 md:px-6 pt-3 md:pt-6">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-bold">{signal.coin}</span>
-            <Badge variant="outline" className="text-xs">
+          <div className="flex items-center gap-1.5 md:gap-2">
+            <span className="text-base md:text-lg font-bold">{signal.coin}</span>
+            <Badge variant="outline" className="text-[10px] md:text-xs px-1.5 py-0">
               {signal.timeframe}
             </Badge>
             {getStatusBadge()}
           </div>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1 text-[10px] md:text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
             {timeSince(signal.detectedAt)}
           </div>
         </div>
       </CardHeader>
       
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 md:space-y-4 px-3 md:px-6 pb-3 md:pb-6">
         {/* Pattern Name & Bias */}
         <div className="flex items-center gap-2">
           {isBullish ? (
-            <TrendingUp className="h-5 w-5 text-green-500" />
+            <TrendingUp className="h-4 w-4 md:h-5 md:w-5 text-green-500 shrink-0" />
           ) : isBearish ? (
-            <TrendingDown className="h-5 w-5 text-red-500" />
+            <TrendingDown className="h-4 w-4 md:h-5 md:w-5 text-red-500 shrink-0" />
           ) : (
-            <BarChart3 className="h-5 w-5 text-gray-500" />
+            <BarChart3 className="h-4 w-4 md:h-5 md:w-5 text-gray-500 shrink-0" />
           )}
           <span className={cn(
-            "font-semibold",
+            "font-semibold text-sm md:text-base truncate",
             isBullish ? "text-green-500" : isBearish ? "text-red-500" : "text-gray-500"
           )}>
             {signal.patternName}
           </span>
-          <Badge variant="secondary" className="ml-auto text-xs">
-            {signal.bias.charAt(0).toUpperCase() + signal.bias.slice(1)} Bias
+          <Badge variant="secondary" className="ml-auto text-[10px] md:text-xs shrink-0">
+            {signal.bias.charAt(0).toUpperCase()} Bias
           </Badge>
         </div>
 
         {/* SMA Relationship - Educational */}
-        <div className="p-3 rounded-lg bg-muted/50 border border-muted">
-          <div className="flex items-center gap-2 mb-2">
-            <Eye className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium">SMA Analysis</span>
+        <div className="p-2 md:p-3 rounded-lg bg-muted/50 border border-muted">
+          <div className="flex items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
+            <Eye className="h-3 w-3 md:h-4 md:w-4 text-primary" />
+            <span className="text-xs md:text-sm font-medium">SMA Analysis</span>
           </div>
-          <p className="text-sm text-muted-foreground">{signal.smaRelationship}</p>
+          <p className="text-xs md:text-sm text-muted-foreground line-clamp-2 md:line-clamp-none">{signal.smaRelationship}</p>
         </div>
         
         {/* Current Market Data */}
-        <div className="grid grid-cols-3 gap-3 pt-2 border-t">
+        <div className="grid grid-cols-3 gap-2 md:gap-3 pt-2 border-t">
           <div>
-            <p className="text-xs text-muted-foreground">21 SMA</p>
-            <p className="font-mono text-sm">${formatPrice(signal.sma21)}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground">21 SMA</p>
+            <p className="font-mono text-xs md:text-sm">${formatPrice(signal.sma21)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">200 SMA</p>
-            <p className="font-mono text-sm">${formatPrice(signal.sma200)}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground">200 SMA</p>
+            <p className="font-mono text-xs md:text-sm">${formatPrice(signal.sma200)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Price</p>
-            <p className="font-mono text-sm font-medium">${formatPrice(signal.currentPrice)}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground">Price</p>
+            <p className="font-mono text-xs md:text-sm font-medium">${formatPrice(signal.currentPrice)}</p>
           </div>
         </div>
         
-        {/* Educational Note */}
-        <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
-          <div className="flex items-center gap-2 mb-2">
-            <BookOpen className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium text-primary">What This Means</span>
+        {/* Educational Note - Collapsible on mobile */}
+        <div className="p-2 md:p-3 rounded-lg bg-primary/5 border border-primary/20">
+          <div className="flex items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
+            <BookOpen className="h-3 w-3 md:h-4 md:w-4 text-primary" />
+            <span className="text-xs md:text-sm font-medium text-primary">What This Means</span>
           </div>
-          <p className="text-sm text-muted-foreground">{signal.educationalNote}</p>
+          <p className="text-xs md:text-sm text-muted-foreground line-clamp-2 md:line-clamp-none">{signal.educationalNote}</p>
         </div>
 
-        {/* What to Watch */}
-        <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+        {/* What to Watch - Hidden on small mobile to save space */}
+        <div className="p-2 md:p-3 rounded-lg bg-amber-500/5 border border-amber-500/20 hidden sm:block">
           <div className="flex items-center gap-2 mb-2">
             <Target className="h-4 w-4 text-amber-600" />
             <span className="text-sm font-medium text-amber-600">What to Watch</span>
@@ -216,37 +216,40 @@ export default function Signals() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-6 overflow-y-auto">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <Activity className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-display font-bold">Pattern Scanner</h1>
-          <Badge className="ml-2 bg-primary/15 text-primary border-primary/30">
+          <Activity className="h-6 w-6 md:h-8 md:w-8 text-primary" />
+          <h1 className="text-xl md:text-3xl font-display font-bold">Pattern Scanner</h1>
+          <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] md:text-xs">
             <BookOpen className="h-3 w-3 mr-1" />
             Educational
           </Badge>
-          <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">
-              Last scan: {formatLastUpdate()}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs md:text-sm text-muted-foreground">
+            Learn to identify patterns across timeframes
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
+              Last: {formatLastUpdate()}
             </span>
             <Button 
               variant="outline" 
               size="sm" 
               onClick={() => refetch()}
               disabled={isFetching}
+              className="h-7 text-xs px-2"
               data-testid="button-refresh-signals"
             >
-              <RefreshCw className={cn("h-4 w-4 mr-1", isFetching && "animate-spin")} />
-              Scan Now
+              <RefreshCw className={cn("h-3 w-3 mr-1", isFetching && "animate-spin")} />
+              Scan
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground">
-          Learn to identify patterns and understand market bias across timeframes
-        </p>
       </div>
 
-      <Alert className="border-blue-500/50 bg-blue-500/5">
+      <Alert className="border-blue-500/50 bg-blue-500/5 hidden md:block">
         <BookOpen className="h-4 w-4 text-blue-500" />
         <AlertTitle className="text-blue-600">Educational Tool</AlertTitle>
         <AlertDescription className="text-muted-foreground">
@@ -256,14 +259,14 @@ export default function Signals() {
         </AlertDescription>
       </Alert>
 
-      <div className="flex items-center gap-4 flex-wrap">
-        <span className="text-sm font-medium">Scan Timeframes:</span>
+      <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+        <span className="text-xs md:text-sm font-medium">Timeframes:</span>
         {["1m", "5m", "15m", "1h", "4h"].map(tf => (
           <Badge 
             key={tf}
             variant={selectedTimeframes.includes(tf) ? "default" : "outline"}
             className={cn(
-              "cursor-pointer transition-all",
+              "cursor-pointer transition-all text-[10px] md:text-xs",
               selectedTimeframes.includes(tf) && "bg-primary"
             )}
             onClick={() => toggleTimeframe(tf)}
@@ -272,67 +275,68 @@ export default function Signals() {
             {tf}
           </Badge>
         ))}
-        <span className="text-xs text-muted-foreground ml-auto">
+        <span className="text-[10px] md:text-xs text-muted-foreground ml-auto hidden sm:inline">
           Auto-scans every minute
         </span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
         <Card className="bg-primary/5 border-primary/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
-                <Eye className="h-5 w-5 text-primary" />
+          <CardContent className="p-2 md:p-4">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-primary/15 shrink-0">
+                <Eye className="h-4 w-4 md:h-5 md:w-5 text-primary" />
               </div>
-              <div>
-                <p className="text-2xl font-bold">{signals.length}</p>
-                <p className="text-xs text-muted-foreground">Patterns Found</p>
+              <div className="min-w-0">
+                <p className="text-lg md:text-2xl font-bold">{signals.length}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Patterns</p>
               </div>
             </div>
           </CardContent>
         </Card>
         <Card className="bg-green-500/5 border-green-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/15">
-                <TrendingUp className="h-5 w-5 text-green-500" />
+          <CardContent className="p-2 md:p-4">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-green-500/15 shrink-0">
+                <TrendingUp className="h-4 w-4 md:h-5 md:w-5 text-green-500" />
               </div>
-              <div>
-                <p className="text-2xl font-bold">{bullishSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Bullish Bias</p>
+              <div className="min-w-0">
+                <p className="text-lg md:text-2xl font-bold">{bullishSignals.length}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Bullish</p>
               </div>
             </div>
           </CardContent>
         </Card>
         <Card className="bg-red-500/5 border-red-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/15">
-                <TrendingDown className="h-5 w-5 text-red-500" />
+          <CardContent className="p-2 md:p-4">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-red-500/15 shrink-0">
+                <TrendingDown className="h-4 w-4 md:h-5 md:w-5 text-red-500" />
               </div>
-              <div>
-                <p className="text-2xl font-bold">{bearishSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Bearish Bias</p>
+              <div className="min-w-0">
+                <p className="text-lg md:text-2xl font-bold">{bearishSignals.length}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Bearish</p>
               </div>
             </div>
           </CardContent>
         </Card>
         <Card className="bg-amber-500/5 border-amber-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/15">
-                <Clock className="h-5 w-5 text-amber-500" />
+          <CardContent className="p-2 md:p-4">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-amber-500/15 shrink-0">
+                <Clock className="h-4 w-4 md:h-5 md:w-5 text-amber-500" />
               </div>
-              <div>
-                <p className="text-2xl font-bold">{formingSignals.length}</p>
-                <p className="text-xs text-muted-foreground">Forming Now</p>
+              <div className="min-w-0">
+                <p className="text-lg md:text-2xl font-bold">{formingSignals.length}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Forming</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
+      {/* Hide SMA explanation card on mobile - takes too much space */}
+      <Card className="hidden md:block">
         <CardHeader className="pb-3">
           <CardTitle className="font-display text-sm flex items-center gap-2">
             <BookOpen className="h-4 w-4" />
@@ -378,21 +382,21 @@ export default function Signals() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="all" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="all" data-testid="tab-all-signals">
-            All Patterns ({signals.length})
+      <Tabs defaultValue="all" className="space-y-3 md:space-y-4">
+        <TabsList className="w-full overflow-x-auto flex justify-start gap-0 h-auto p-1">
+          <TabsTrigger value="all" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-all-signals">
+            All ({signals.length})
           </TabsTrigger>
-          <TabsTrigger value="forming" data-testid="tab-forming-signals">
+          <TabsTrigger value="forming" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-forming-signals">
             Forming ({formingSignals.length})
           </TabsTrigger>
-          <TabsTrigger value="developed" data-testid="tab-developed-signals">
+          <TabsTrigger value="developed" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-developed-signals">
             Developed ({developedSignals.length})
           </TabsTrigger>
-          <TabsTrigger value="bullish" data-testid="tab-bullish-signals">
+          <TabsTrigger value="bullish" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-bullish-signals">
             Bullish ({bullishSignals.length})
           </TabsTrigger>
-          <TabsTrigger value="bearish" data-testid="tab-bearish-signals">
+          <TabsTrigger value="bearish" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-bearish-signals">
             Bearish ({bearishSignals.length})
           </TabsTrigger>
         </TabsList>

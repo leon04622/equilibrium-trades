@@ -196,13 +196,13 @@ export default function Trading({ visible = true }: TradingProps) {
         </button>
       </div>
 
-      {/* Main trading area */}
-      <div className="flex-1 flex min-h-0">
+      {/* Main trading area - fills remaining space */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left side - Chart */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Chart toolbar - only show when chart tab is active on mobile */}
           <div className={cn(
-            "flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2",
+            "flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2 shrink-0",
             mobileTab !== "chart" && "hidden md:flex"
           )}>
             <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
@@ -246,36 +246,36 @@ export default function Trading({ visible = true }: TradingProps) {
             </div>
           </div>
 
-          {/* Chart and optional order book */}
-          <div className="flex-1 flex min-h-0">
-            {/* Mobile: Show content based on selected tab */}
+          {/* Chart and optional order book - fills remaining space */}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Mobile: Show content based on selected tab - use absolute positioning for full height */}
             <div className={cn(
-              "md:hidden flex-1 min-w-0",
+              "md:hidden flex-1 min-w-0 relative",
               mobileTab !== "chart" && mobileTab !== "orderbook" && mobileTab !== "trades" && "hidden"
             )}>
               {mobileTab === "chart" && (
-                <div className="relative h-full">
+                <div className="absolute inset-0">
                   {showAIChart ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
                         { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                       } 
-                      className="h-full" 
+                      className="h-full w-full" 
                     />
                   ) : (
-                    <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+                    <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full w-full" />
                   )}
                   <ChartPositionOverlay coin={coin} currentPrice={price} />
                 </div>
               )}
               {mobileTab === "orderbook" && (
-                <div className="h-full overflow-y-auto">
+                <div className="absolute inset-0 overflow-y-auto">
                   <OrderBook coin={coin} />
                 </div>
               )}
               {mobileTab === "trades" && (
-                <div className="h-full overflow-y-auto">
+                <div className="absolute inset-0 overflow-y-auto">
                   <RecentTrades coin={coin} />
                 </div>
               )}
