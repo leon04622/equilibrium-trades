@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, BookOpen, Brain, ArrowUpDown } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
   const [showAIChart, setShowAIChart] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
 
@@ -96,9 +97,15 @@ export default function Trading({ visible = true }: TradingProps) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      {/* Top Header - Symbol info bar */}
-      <div className="flex items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50">
+    <div className={cn(
+      "h-full flex flex-col bg-background",
+      isFullscreen && "md:h-full chart-fullscreen"
+    )}>
+      {/* Top Header - Symbol info bar - hidden in fullscreen on mobile */}
+      <div className={cn(
+        "flex items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50",
+        isFullscreen && "hidden md:flex"
+      )}>
         <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
         
         <Separator orientation="vertical" className="h-6 hidden sm:block" />
@@ -153,8 +160,11 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
       </div>
 
-      {/* Mobile Tab Bar (Chart / Order Book / Trades) - Hyperliquid style */}
-      <div className="md:hidden flex items-center border-b bg-card/30">
+      {/* Mobile Tab Bar (Chart / Order Book / Trades) - Hyperliquid style - hidden in fullscreen */}
+      <div className={cn(
+        "md:hidden flex items-center border-b bg-card/30",
+        isFullscreen && "hidden"
+      )}>
         <button
           onClick={() => setMobileTab("chart")}
           className={cn(
@@ -203,8 +213,19 @@ export default function Trading({ visible = true }: TradingProps) {
           {/* Chart toolbar - only show when chart tab is active on mobile */}
           <div className={cn(
             "flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2 shrink-0",
-            mobileTab !== "chart" && "hidden md:flex"
+            mobileTab !== "chart" && !isFullscreen && "hidden md:flex"
           )}>
+            {/* Fullscreen toggle for mobile - exit button when fullscreen */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden h-7 w-7 shrink-0"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              data-testid="button-fullscreen-toggle"
+            >
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+            
             <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
               {timeframes.map((tf) => (
                 <Button
@@ -251,9 +272,10 @@ export default function Trading({ visible = true }: TradingProps) {
             {/* Mobile: Show content based on selected tab */}
             <div className={cn(
               "md:hidden flex-1 min-w-0 min-h-0 flex flex-col",
-              mobileTab !== "chart" && mobileTab !== "orderbook" && mobileTab !== "trades" && "hidden"
+              !isFullscreen && mobileTab !== "chart" && mobileTab !== "orderbook" && mobileTab !== "trades" && "hidden",
+              isFullscreen && "chart-wrapper-mobile"
             )}>
-              {mobileTab === "chart" && (
+              {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 min-h-0 relative">
                   {showAIChart ? (
                     <PatternChart 
@@ -269,12 +291,12 @@ export default function Trading({ visible = true }: TradingProps) {
                   <ChartPositionOverlay coin={coin} currentPrice={price} />
                 </div>
               )}
-              {mobileTab === "orderbook" && (
+              {!isFullscreen && mobileTab === "orderbook" && (
                 <div className="flex-1 min-h-0 overflow-y-auto">
                   <OrderBook coin={coin} />
                 </div>
               )}
-              {mobileTab === "trades" && (
+              {!isFullscreen && mobileTab === "trades" && (
                 <div className="flex-1 min-h-0 overflow-y-auto">
                   <RecentTrades coin={coin} />
                 </div>
@@ -352,11 +374,16 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
       </div>
 
-      {/* Bottom - Positions and Orders Panel (Hyperliquid style) */}
-      <BottomTradingPanel coin={coin} />
+      {/* Bottom - Positions and Orders Panel (Hyperliquid style) - hidden in fullscreen on mobile */}
+      <div className={cn(isFullscreen && "hidden md:block")}>
+        <BottomTradingPanel coin={coin} />
+      </div>
 
-      {/* Mobile Order Entry Button - positioned above the collapsed bottom panel */}
-      <div className="md:hidden fixed bottom-12 right-3 z-50">
+      {/* Mobile Order Entry Button - positioned above the collapsed bottom panel - hidden in fullscreen */}
+      <div className={cn(
+        "md:hidden fixed bottom-12 right-3 z-50",
+        isFullscreen && "hidden"
+      )}>
         <Sheet>
           <SheetTrigger asChild>
             <Button 
