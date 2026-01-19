@@ -385,6 +385,80 @@ export const tradingPatterns: PatternDefinition[] = [
     successRate: 63,
     difficulty: "intermediate",
     iconName: "Sunset"
+  },
+
+  // Hidden Divergences - Advanced Patterns
+  {
+    id: "hidden-bullish-divergence",
+    name: "Hidden Bullish Divergence",
+    type: "continuation",
+    direction: "bullish",
+    description: "A hidden bullish divergence occurs during an uptrend when price makes a higher low while the oscillator (RSI, MACD) makes a lower low. This signals the trend is likely to continue upward.",
+    howToIdentify: [
+      "Must occur during an established uptrend",
+      "Price makes a higher low compared to previous low",
+      "RSI or MACD makes a lower low at the same time",
+      "The divergence between price and indicator suggests hidden buying pressure"
+    ],
+    entryStrategy: "Enter long when the oscillator turns back up from the lower low, confirming the divergence. Wait for price to show bullish momentum.",
+    exitStrategy: "Target previous swing highs or resistance levels. Stop below the higher low that formed the divergence.",
+    successRate: 68,
+    difficulty: "advanced",
+    iconName: "TrendingUp"
+  },
+  {
+    id: "hidden-bearish-divergence",
+    name: "Hidden Bearish Divergence",
+    type: "continuation",
+    direction: "bearish",
+    description: "A hidden bearish divergence occurs during a downtrend when price makes a lower high while the oscillator (RSI, MACD) makes a higher high. This signals the trend is likely to continue downward.",
+    howToIdentify: [
+      "Must occur during an established downtrend",
+      "Price makes a lower high compared to previous high",
+      "RSI or MACD makes a higher high at the same time",
+      "The divergence between price and indicator suggests hidden selling pressure"
+    ],
+    entryStrategy: "Enter short when the oscillator turns back down from the higher high, confirming the divergence. Wait for price to show bearish momentum.",
+    exitStrategy: "Target previous swing lows or support levels. Stop above the lower high that formed the divergence.",
+    successRate: 67,
+    difficulty: "advanced",
+    iconName: "TrendingDown"
+  },
+  {
+    id: "regular-bullish-divergence",
+    name: "Regular Bullish Divergence",
+    type: "reversal",
+    direction: "bullish",
+    description: "A regular bullish divergence occurs when price makes a lower low while the oscillator makes a higher low. This is a reversal signal indicating potential trend change from bearish to bullish.",
+    howToIdentify: [
+      "Occurs at the end of a downtrend",
+      "Price makes a lower low (new bottom)",
+      "RSI or MACD makes a higher low (not confirming the new low)",
+      "Volume often decreases on the second low"
+    ],
+    entryStrategy: "Enter long when price breaks above the swing high between the two lows, or when the oscillator crosses above its signal line.",
+    exitStrategy: "Target previous resistance levels or the swing high. Stop below the most recent swing low.",
+    successRate: 65,
+    difficulty: "intermediate",
+    iconName: "ArrowUpRight"
+  },
+  {
+    id: "regular-bearish-divergence",
+    name: "Regular Bearish Divergence",
+    type: "reversal",
+    direction: "bearish",
+    description: "A regular bearish divergence occurs when price makes a higher high while the oscillator makes a lower high. This is a reversal signal indicating potential trend change from bullish to bearish.",
+    howToIdentify: [
+      "Occurs at the end of an uptrend",
+      "Price makes a higher high (new top)",
+      "RSI or MACD makes a lower high (not confirming the new high)",
+      "Volume often decreases on the second high"
+    ],
+    entryStrategy: "Enter short when price breaks below the swing low between the two highs, or when the oscillator crosses below its signal line.",
+    exitStrategy: "Target previous support levels or the swing low. Stop above the most recent swing high.",
+    successRate: 64,
+    difficulty: "intermediate",
+    iconName: "ArrowDownRight"
   }
 ];
 

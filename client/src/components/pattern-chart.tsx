@@ -15,22 +15,20 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, Target, AlertCircle } from "lucide-react";
 
-interface PatternSignal {
+interface EducationalPatternSignal {
   id: string;
   coin: string;
-  type: string;
-  status: string;
   timeframe: string;
+  bias: "bullish" | "bearish" | "neutral";
+  patternName: string;
+  patternStatus: "forming" | "developed" | "breakout_watch";
   sma21: number;
   sma200: number;
   currentPrice: number;
-  entryPrice: number;
-  suggestedSL: number;
-  suggestedTP: number;
-  confidence: number;
+  smaRelationship: string;
+  educationalNote: string;
+  whatToWatch: string;
   detectedAt: string;
-  description: string;
-  patternType?: string;
 }
 
 interface PatternChartProps {
@@ -64,7 +62,7 @@ function PatternChartComponent({
   const priceLineRefs = useRef<any[]>([]);
   const isInitialLoadRef = useRef(true);
   const { theme } = useTheme();
-  const [activeSignal, setActiveSignal] = useState<PatternSignal | null>(null);
+  const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
   const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
 
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
@@ -74,9 +72,9 @@ function PatternChartComponent({
     refetchInterval: 10000,
   });
 
-  const { data: signals } = useQuery<PatternSignal[]>({
-    queryKey: [`/api/signals/crossover?timeframes=${interval}`],
-    refetchInterval: 30000,
+  const { data: signals } = useQuery<EducationalPatternSignal[]>({
+    queryKey: [`/api/signals/patterns?timeframes=${interval}`],
+    refetchInterval: 60000,
   });
 
   const parsePrice = useCallback((val: number | string): number => {
@@ -134,7 +132,7 @@ function PatternChartComponent({
 
   useEffect(() => {
     if (currentSignal && smaStatus) {
-      const signalIsBullish = currentSignal.type.includes("bullish");
+      const signalIsBullish = currentSignal.bias === "bullish";
       if ((smaStatus.isBullish && signalIsBullish) || (!smaStatus.isBullish && !signalIsBullish)) {
         setActiveSignal(currentSignal);
       } else {
@@ -277,42 +275,20 @@ function PatternChartComponent({
     });
     priceLineRefs.current = [];
 
+    // Educational mode - no entry/SL/TP lines, only show current price reference
     if (!activeSignal) return;
 
-    if (activeSignal.entryPrice) {
-      const entryLine = series.createPriceLine({
-        price: activeSignal.entryPrice,
-        color: "#f59e0b",
-        lineWidth: 2,
-        lineStyle: 0,
+    // Show current price as reference
+    if (activeSignal.currentPrice) {
+      const priceLine = series.createPriceLine({
+        price: activeSignal.currentPrice,
+        color: activeSignal.bias === "bullish" ? "#22c55e" : activeSignal.bias === "bearish" ? "#ef4444" : "#f59e0b",
+        lineWidth: 1,
+        lineStyle: 2,
         axisLabelVisible: true,
-        title: "Entry",
+        title: "Current",
       });
-      priceLineRefs.current.push(entryLine);
-    }
-
-    if (activeSignal.suggestedSL) {
-      const slLine = series.createPriceLine({
-        price: activeSignal.suggestedSL,
-        color: "#ef4444",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "SL",
-      });
-      priceLineRefs.current.push(slLine);
-    }
-
-    if (activeSignal.suggestedTP) {
-      const tpLine = series.createPriceLine({
-        price: activeSignal.suggestedTP,
-        color: "#22c55e",
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: "TP",
-      });
-      priceLineRefs.current.push(tpLine);
+      priceLineRefs.current.push(priceLine);
     }
   }, [activeSignal]);
 
@@ -330,40 +306,32 @@ function PatternChartComponent({
       {activeSignal && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg max-w-xs z-10">
           <div className="flex items-center gap-2 mb-2">
-            {isBullish ? (
+            {activeSignal.bias === "bullish" ? (
               <TrendingUp className="h-5 w-5 text-green-500" />
-            ) : (
+            ) : activeSignal.bias === "bearish" ? (
               <TrendingDown className="h-5 w-5 text-red-500" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-yellow-500" />
             )}
             <span className="font-semibold text-sm">
-              {activeSignal.patternType || patternName}
+              {activeSignal.patternName}
             </span>
             <Badge 
-              variant={activeSignal.status === "breakout" ? "default" : activeSignal.status === "forming" ? "secondary" : "outline"}
-              className={`text-xs ${activeSignal.status === "breakout" ? "bg-green-600" : activeSignal.status === "forming" ? "bg-yellow-600" : ""}`}
+              variant={activeSignal.patternStatus === "breakout_watch" ? "default" : activeSignal.patternStatus === "forming" ? "secondary" : "outline"}
+              className={`text-xs ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-yellow-600" : activeSignal.patternStatus === "developed" ? "bg-green-600" : ""}`}
             >
-              {activeSignal.status === "breakout" ? "ENTRY NOW" : activeSignal.status === "forming" ? "WAIT" : activeSignal.status}
+              {activeSignal.patternStatus === "breakout_watch" ? "WATCH" : activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
             </Badge>
           </div>
           
-          {activeSignal.status === "forming" && (
-            <div className="bg-yellow-500/20 border border-yellow-500/50 rounded px-2 py-1 mb-2">
-              <p className="text-xs text-yellow-500 font-medium">
-                Pattern forming - DO NOT ENTER yet. Wait for breakout!
-              </p>
-            </div>
-          )}
-          
-          {activeSignal.status === "breakout" && (
-            <div className="bg-green-500/20 border border-green-500/50 rounded px-2 py-1 mb-2">
-              <p className="text-xs text-green-500 font-medium">
-                Breakout confirmed - Entry signal active!
-              </p>
-            </div>
-          )}
+          <div className="bg-blue-500/20 border border-blue-500/50 rounded px-2 py-1 mb-2">
+            <p className="text-xs text-blue-400 font-medium">
+              Educational - Learn to identify your own entry/exit
+            </p>
+          </div>
           
           <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-            {activeSignal.description}
+            {activeSignal.educationalNote}
           </p>
           
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -379,52 +347,18 @@ function PatternChartComponent({
             </div>
           </div>
 
-          {activeSignal.entryPrice && activeSignal.suggestedSL && activeSignal.suggestedTP && (
-            <div className="mt-3 pt-3 border-t space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <Target className="h-3 w-3" /> {activeSignal.status === "forming" ? "Entry (on breakout)" : "Entry"}
-                </span>
-                <span className="font-mono text-amber-500">${activeSignal.entryPrice.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <AlertCircle className="h-3 w-3" /> Stop Loss
-                </span>
-                <span className="font-mono text-red-500">${activeSignal.suggestedSL.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <Target className="h-3 w-3" /> Take Profit
-                </span>
-                <span className="font-mono text-green-500">${activeSignal.suggestedTP.toFixed(2)}</span>
-              </div>
-            </div>
-          )}
+          <div className="mt-3 pt-3 border-t">
+            <p className="text-xs font-medium text-amber-500 mb-1">What to Watch:</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {activeSignal.whatToWatch}
+            </p>
+          </div>
 
           <div className="mt-3 pt-2 border-t">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Risk:Reward</span>
-              <Badge variant="outline" className="font-mono">
-                {activeSignal.suggestedTP && activeSignal.suggestedSL && activeSignal.entryPrice ? (
-                  (() => {
-                    const isBull = activeSignal.type.includes("bullish");
-                    const risk = isBull 
-                      ? activeSignal.entryPrice - activeSignal.suggestedSL
-                      : activeSignal.suggestedSL - activeSignal.entryPrice;
-                    const reward = isBull
-                      ? activeSignal.suggestedTP - activeSignal.entryPrice
-                      : activeSignal.entryPrice - activeSignal.suggestedTP;
-                    const rr = risk > 0 ? (reward / risk).toFixed(1) : "0";
-                    return `${rr}:1`;
-                  })()
-                ) : "N/A"}
-              </Badge>
-            </div>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Confidence</span>
-              <Badge variant={activeSignal.confidence >= 70 ? "default" : "secondary"}>
-                {activeSignal.confidence}%
+              <span className="text-xs text-muted-foreground">Bias</span>
+              <Badge variant={activeSignal.bias === "bullish" ? "default" : activeSignal.bias === "bearish" ? "destructive" : "secondary"}>
+                {activeSignal.bias.charAt(0).toUpperCase() + activeSignal.bias.slice(1)}
               </Badge>
             </div>
           </div>

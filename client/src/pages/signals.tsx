@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Zap, TrendingUp, TrendingDown, Clock, RefreshCw, AlertTriangle, Activity, Target, BookOpen, BarChart3, Eye } from "lucide-react";
+import { Zap, TrendingUp, TrendingDown, Clock, RefreshCw, AlertTriangle, Activity, Target, BookOpen, BarChart3, Eye, MessageCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useChat } from "@/lib/chat-context";
 
 interface PatternSignal {
   id: string;
@@ -29,6 +29,7 @@ interface PatternSignal {
 function PatternCard({ signal }: { signal: PatternSignal }) {
   const isBullish = signal.bias === "bullish";
   const isBearish = signal.bias === "bearish";
+  const { openChat } = useChat();
   
   const formatPrice = (price: number) => {
     if (price >= 1000) return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -153,18 +154,17 @@ function PatternCard({ signal }: { signal: PatternSignal }) {
           <p className="text-sm text-muted-foreground">{signal.whatToWatch}</p>
         </div>
 
-        {/* Study on Chart */}
+        {/* Ask About Pattern */}
         <div className="pt-2">
-          <Link href={`/trading?coin=${signal.coin}`}>
-            <Button 
-              variant="outline"
-              className="w-full"
-              data-testid={`button-study-${signal.id}`}
-            >
-              <BarChart3 className="h-4 w-4 mr-2" />
-              Study on Chart
-            </Button>
-          </Link>
+          <Button 
+            variant="outline"
+            className="w-full"
+            onClick={() => openChat(`I'd like to learn more about the ${signal.patternName} pattern I'm seeing on ${signal.coin} (${signal.timeframe}). Can you help me understand what I should be looking for?`)}
+            data-testid={`button-discuss-${signal.id}`}
+          >
+            <MessageCircle className="h-4 w-4 mr-2" />
+            Discuss This Pattern
+          </Button>
         </div>
       </CardContent>
     </Card>

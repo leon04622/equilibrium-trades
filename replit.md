@@ -132,17 +132,19 @@ shared/
 - **Pro** ($49/mo): AI pattern detection, real-time alerts, trade recommendations
 - **Elite** ($149/mo): Liquidity heatmap, order flow, 1-on-1 coaching
 
-## Pattern Library (18+ Patterns)
+## Pattern Library (22+ Patterns)
 ### Continuation Patterns
 - Bull Flag, Bear Flag, Pennant
 - Ascending/Descending/Symmetrical Triangles
 - Cup and Handle
+- Hidden Bullish Divergence, Hidden Bearish Divergence
 
 ### Reversal Patterns
 - Head and Shoulders, Inverse H&S
 - Double Top/Bottom, Triple Top/Bottom
 - Diamond, Rising/Falling Wedge
 - Engulfing patterns, Morning/Evening Star
+- Regular Bullish Divergence, Regular Bearish Divergence
 
 ## Design System
 - **Primary**: Blue (#3b82f6)

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MessageCircle, X, Send, Shield, User, Minimize2, Loader2, ArrowLeft } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { useChat } from "@/lib/chat-context";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SupportMessage } from "@shared/schema";
 
@@ -26,12 +27,19 @@ const quickReplies = [
 ];
 
 export function LiveChat() {
-  const [isOpen, setIsOpen] = useState(false);
+  const { isOpen, openChat, closeChat, pendingMessage, clearPendingMessage } = useChat();
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { address } = useWallet();
+
+  useEffect(() => {
+    if (pendingMessage && isOpen) {
+      setInputValue(pendingMessage);
+      clearPendingMessage();
+    }
+  }, [pendingMessage, isOpen, clearPendingMessage]);
 
   const { data: isAdminData } = useQuery<{ isAdmin: boolean }>({
     queryKey: ["/api/admin/check", address],
@@ -118,7 +126,7 @@ export function LiveChat() {
 
   const chatContent = !isOpen ? (
     <Button
-      onClick={() => setIsOpen(true)}
+      onClick={() => openChat()}
       className="fixed bottom-20 right-4 md:bottom-4 md:right-4 h-14 w-14 rounded-full shadow-lg"
       size="icon"
       style={{ zIndex: 9999 }}
@@ -182,7 +190,7 @@ export function LiveChat() {
             variant="ghost"
             size="icon"
             className="h-7 w-7 hover:bg-primary-foreground/20"
-            onClick={() => setIsOpen(false)}
+            onClick={() => closeChat()}
             data-testid="button-close-chat"
           >
             <X className="h-4 w-4" />

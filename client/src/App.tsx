@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { TradingProvider } from "@/lib/trading-context";
 import { WalletProvider } from "@/lib/wallet-context";
+import { ChatProvider } from "@/lib/chat-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletConnect } from "@/components/wallet-connect";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
@@ -67,6 +68,7 @@ function App() {
       <ThemeProvider>
         <WalletProvider>
           <TradingProvider>
+            <ChatProvider>
             <TooltipProvider>
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex h-screen w-full overflow-hidden">
@@ -97,6 +99,7 @@ function App() {
               <LiveChat />
               <Toaster />
             </TooltipProvider>
+            </ChatProvider>
           </TradingProvider>
         </WalletProvider>
       </ThemeProvider>
