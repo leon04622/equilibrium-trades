@@ -11,7 +11,7 @@ import {
   getRecentTrades,
   getCandles 
 } from "./hyperliquid";
-import { scanForSignals, getSMAStatus } from "./sma-detection";
+import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
 import { gradeTrade } from "./trade-grading";
 
 export async function registerRoutes(
@@ -252,7 +252,31 @@ export async function registerRoutes(
     }
   });
 
-  // ============ SMA CROSSOVER SIGNALS ============
+  // ============ EDUCATIONAL PATTERN SCANNER ============
+
+  // Scan for educational patterns (no entry/SL/TP - for learning)
+  app.get("/api/signals/patterns", async (req: Request, res: Response) => {
+    try {
+      const coinsParam = req.query.coins as string;
+      const timeframesParam = req.query.timeframes as string;
+      
+      const coins = coinsParam 
+        ? coinsParam.split(",") 
+        : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP"];
+      
+      const timeframes = timeframesParam 
+        ? timeframesParam.split(",") 
+        : ["1m", "5m", "15m"];
+      
+      const patterns = await scanForEducationalPatterns(coins, timeframes);
+      res.json(patterns);
+    } catch (error) {
+      console.error("Error scanning for educational patterns:", error);
+      res.status(500).json({ error: "Failed to scan for patterns" });
+    }
+  });
+
+  // ============ SMA CROSSOVER SIGNALS (Legacy) ============
 
   // Scan for real-time SMA crossover signals
   app.get("/api/signals/crossover", async (req: Request, res: Response) => {

@@ -98,9 +98,14 @@ shared/
 ### Market Data
 - `GET /api/market/:symbol` - Get market condition (SMA values, trend)
 
-### SMA Signals
-- `GET /api/signals/sma` - Get recent SMA signals
-- `POST /api/signals/sma` - Create SMA signal
+### Educational Pattern Scanner (NEW)
+- `GET /api/signals/patterns` - Scan for educational patterns (no entry/SL/TP)
+  - Returns: pattern name, bias, SMA relationship, educational notes, what to watch
+  - Scans every 60 seconds for live market updates
+  - Focus: teaching pattern recognition, not providing trade signals
+
+### SMA Signals (Legacy)
+- `GET /api/signals/crossover` - Legacy crossover signals with entry/SL/TP
 
 ### Subscriptions
 - `GET /api/subscriptions` - Get all subscription tiers

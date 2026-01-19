@@ -677,6 +677,234 @@ export async function scanForSignals(
   return signals;
 }
 
+// Educational pattern signal - no entry/SL/TP
+export interface EducationalPatternSignal {
+  id: string;
+  coin: string;
+  timeframe: string;
+  bias: "bullish" | "bearish" | "neutral";
+  patternName: string;
+  patternStatus: "forming" | "developed" | "breakout_watch";
+  sma21: number;
+  sma200: number;
+  currentPrice: number;
+  smaRelationship: string;
+  educationalNote: string;
+  whatToWatch: string;
+  detectedAt: Date;
+}
+
+// Generate educational content based on pattern
+function getEducationalContent(
+  patternName: string,
+  bias: "bullish" | "bearish" | "neutral",
+  status: "forming" | "breakout_pending" | "breakout_confirmed",
+  sma21: number,
+  sma200: number,
+  price: number
+): { educationalNote: string; whatToWatch: string; patternStatus: "forming" | "developed" | "breakout_watch" } {
+  const smaGap = ((sma21 - sma200) / sma200 * 100).toFixed(2);
+  const priceVs200 = price > sma200 ? "above" : "below";
+  const priceVs21 = price > sma21 ? "above" : "below";
+  
+  const patternStatus = status === "breakout_confirmed" ? "developed" : 
+                        status === "breakout_pending" ? "breakout_watch" : "forming";
+  
+  const educationalNotes: Record<string, string> = {
+    "Bull Flag": `A bull flag forms after a strong upward move (the pole) followed by a consolidation that slopes slightly downward (the flag). This is typically a continuation pattern suggesting the prior uptrend may resume.`,
+    "Bear Flag": `A bear flag forms after a strong downward move (the pole) followed by a consolidation that slopes slightly upward (the flag). This is typically a continuation pattern suggesting the prior downtrend may resume.`,
+    "Ascending Triangle": `An ascending triangle has a flat resistance level and rising support (higher lows). This pattern suggests buyers are becoming more aggressive and may eventually break through resistance.`,
+    "Descending Triangle": `A descending triangle has a flat support level and falling resistance (lower highs). This pattern suggests sellers are becoming more aggressive and price may eventually break through support.`,
+    "Symmetrical Triangle": `A symmetrical triangle has both falling resistance and rising support, creating a narrowing range. This is a neutral pattern - the breakout direction determines the next move.`,
+    "Double Bottom": `A double bottom forms when price tests the same support level twice and holds. The pattern is confirmed when price breaks above the neckline (the high between the two lows).`,
+    "Double Top": `A double top forms when price tests the same resistance level twice and fails. The pattern is confirmed when price breaks below the neckline (the low between the two highs).`,
+    "Rising Wedge (Bearish)": `A rising wedge has both trendlines moving up but converging. Despite the upward slope, this is typically a bearish pattern as momentum is weakening.`,
+    "Falling Wedge (Bullish)": `A falling wedge has both trendlines moving down but converging. Despite the downward slope, this is typically a bullish pattern as selling pressure is weakening.`,
+  };
+
+  const watchNotes: Record<string, string> = {
+    "forming": `Pattern is still developing. Wait for more price action to confirm the formation. Check if price respects the pattern boundaries.`,
+    "breakout_watch": `Pattern structure is complete. Watch for a breakout with increased volume. A breakout in the direction of the bias is more reliable.`,
+    "developed": `Pattern has developed significantly. Monitor for continuation or reversal signals. Remember: patterns can fail - always have a plan.`,
+  };
+
+  let smaNote = "";
+  if (bias === "bullish") {
+    smaNote = `The 21 SMA is ${smaGap}% above the 200 SMA, indicating bullish momentum. Price is currently ${priceVs200} the 200 SMA.`;
+  } else if (bias === "bearish") {
+    smaNote = `The 21 SMA is ${Math.abs(parseFloat(smaGap))}% below the 200 SMA, indicating bearish momentum. Price is currently ${priceVs200} the 200 SMA.`;
+  } else {
+    smaNote = `The SMAs are very close together (${Math.abs(parseFloat(smaGap))}% apart), suggesting neutral/choppy conditions. Be cautious.`;
+  }
+
+  const educationalNote = educationalNotes[patternName] || 
+    `${patternName} pattern detected. Study this pattern on the chart to understand its structure and typical behavior.`;
+
+  const whatToWatch = bias !== "neutral" 
+    ? `${smaNote} ${watchNotes[patternStatus]}`
+    : `${smaNote} When SMAs are close, both directions are possible. Wait for clearer signals.`;
+
+  return { educationalNote, whatToWatch, patternStatus };
+}
+
+// Educational pattern analysis - no entry/SL/TP
+export async function analyzeForEducationalPatterns(
+  coin: string,
+  timeframe: string = "1m"
+): Promise<EducationalPatternSignal | null> {
+  try {
+    const intervalMap: Record<string, string> = {
+      "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+    };
+    
+    const interval = intervalMap[timeframe] || "1m";
+    const candleMinutes: Record<string, number> = {
+      "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+    };
+    
+    const minutes = candleMinutes[timeframe] || 1;
+    const requiredCandles = 350;
+    const durationMs = requiredCandles * minutes * 60 * 1000;
+    
+    const endTime = Date.now();
+    const startTime = endTime - durationMs;
+    
+    const candles = await getCandles(coin, interval, startTime, endTime);
+    
+    if (candles.length < 210) return null;
+    
+    const currentSMA = calculateSMAFromCandles(candles);
+    if (!currentSMA) return null;
+    
+    const isBullish = currentSMA.sma21 > currentSMA.sma200;
+    const smaGapPercent = Math.abs((currentSMA.sma21 - currentSMA.sma200) / currentSMA.sma200) * 100;
+    
+    // Determine bias
+    let bias: "bullish" | "bearish" | "neutral" = "neutral";
+    if (smaGapPercent > 0.1) {
+      bias = isBullish ? "bullish" : "bearish";
+    }
+    
+    // Check for SMA crossover first
+    const previousCandles = candles.slice(0, -5);
+    const previousSMA = calculateSMAFromCandles(previousCandles);
+    const crossover = detectCrossover(currentSMA, previousSMA);
+    
+    if (crossover) {
+      const crossBias = crossover === "bullish_crossover" ? "bullish" : "bearish";
+      const { educationalNote, whatToWatch, patternStatus } = getEducationalContent(
+        "SMA Crossover",
+        crossBias,
+        "breakout_confirmed",
+        currentSMA.sma21,
+        currentSMA.sma200,
+        currentSMA.price
+      );
+      
+      return {
+        id: `${coin}-${timeframe}-${Date.now()}`,
+        coin,
+        timeframe,
+        bias: crossBias,
+        patternName: `21/200 SMA ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"} Crossover`,
+        patternStatus,
+        sma21: currentSMA.sma21,
+        sma200: currentSMA.sma200,
+        currentPrice: currentSMA.price,
+        smaRelationship: `The 21 SMA just crossed ${crossover === "bullish_crossover" ? "ABOVE" : "BELOW"} the 200 SMA. This is a significant momentum shift.`,
+        educationalNote: `A ${crossover === "bullish_crossover" ? "bullish" : "bearish"} SMA crossover occurs when the faster 21 SMA crosses ${crossover === "bullish_crossover" ? "above" : "below"} the slower 200 SMA. This often indicates a change in momentum and can signal the start of a new trend.`,
+        whatToWatch: `Look for continuation patterns (flags, triangles) to form after this crossover. These can provide cleaner setups for entries. Always confirm on higher timeframes.`,
+        detectedAt: new Date(),
+      };
+    }
+    
+    // Scan for all pattern types
+    const patterns: DetectedPattern[] = [];
+    
+    const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
+    if (flagPattern) patterns.push(flagPattern);
+    
+    const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
+    if (trianglePattern) patterns.push(trianglePattern);
+    
+    const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
+    if (doublePattern) patterns.push(doublePattern);
+    
+    const wedgePattern = detectWedgePattern(candles, isBullish, timeframe);
+    if (wedgePattern) patterns.push(wedgePattern);
+    
+    if (patterns.length === 0) return null;
+    
+    // Sort by confidence
+    patterns.sort((a, b) => b.confidence - a.confidence);
+    
+    const bestPattern = patterns[0];
+    const { educationalNote, whatToWatch, patternStatus } = getEducationalContent(
+      bestPattern.displayName,
+      bias,
+      bestPattern.status,
+      currentSMA.sma21,
+      currentSMA.sma200,
+      currentSMA.price
+    );
+    
+    let smaRelationship: string;
+    if (bias === "bullish") {
+      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is above 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BULLISH structure. Look for long setups.`;
+    } else if (bias === "bearish") {
+      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is below 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BEARISH structure. Look for short setups.`;
+    } else {
+      smaRelationship = `21 SMA and 200 SMA are very close - NEUTRAL/CHOPPY conditions. Wait for clearer separation.`;
+    }
+    
+    return {
+      id: `${coin}-${timeframe}-${Date.now()}`,
+      coin,
+      timeframe,
+      bias,
+      patternName: bestPattern.displayName,
+      patternStatus,
+      sma21: currentSMA.sma21,
+      sma200: currentSMA.sma200,
+      currentPrice: currentSMA.price,
+      smaRelationship,
+      educationalNote,
+      whatToWatch,
+      detectedAt: new Date(),
+    };
+  } catch (error) {
+    console.error(`Error analyzing ${coin} for educational patterns:`, error);
+    return null;
+  }
+}
+
+// Scan multiple coins for educational patterns
+export async function scanForEducationalPatterns(
+  coins: string[] = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP"],
+  timeframes: string[] = ["1m", "5m", "15m", "1h", "4h"]
+): Promise<EducationalPatternSignal[]> {
+  const patterns: EducationalPatternSignal[] = [];
+  
+  for (const coin of coins) {
+    for (const timeframe of timeframes) {
+      try {
+        const pattern = await analyzeForEducationalPatterns(coin, timeframe);
+        if (pattern) {
+          patterns.push(pattern);
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (error) {
+        console.error(`Error scanning ${coin} ${timeframe}:`, error);
+      }
+    }
+  }
+  
+  // Sort by detection time (newest first)
+  patterns.sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
+  
+  return patterns;
+}
+
 // Get current SMA status for a coin
 export async function getSMAStatus(
   coin: string,
