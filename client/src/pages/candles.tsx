@@ -159,6 +159,15 @@ export default function Candles() {
                   onClick={() => handlePatternClick(pattern)}
                   data-testid={`card-pattern-${pattern.id}`}
                 >
+                  {pattern.image && (
+                    <div className="relative w-full h-36 overflow-hidden rounded-t-lg bg-muted/30">
+                      <img 
+                        src={pattern.image} 
+                        alt={`${pattern.name} candlestick pattern`}
+                        className="w-full h-full object-contain p-2"
+                      />
+                    </div>
+                  )}
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -230,6 +239,16 @@ export default function Candles() {
 
               <ScrollArea className="max-h-[60vh] pr-4">
                 <div className="space-y-6 py-4">
+                  {selectedPattern.image && (
+                    <div className="relative w-full h-48 overflow-hidden rounded-lg bg-muted/30 border">
+                      <img 
+                        src={selectedPattern.image} 
+                        alt={`${selectedPattern.name} candlestick pattern diagram`}
+                        className="w-full h-full object-contain p-4"
+                      />
+                    </div>
+                  )}
+
                   <div>
                     <h3 className="font-semibold flex items-center gap-2 mb-2">
                       <Info className="h-4 w-4 text-primary" />
