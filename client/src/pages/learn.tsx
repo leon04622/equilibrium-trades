@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   GraduationCap, PlayCircle, CheckCircle2, Lock, Clock,
-  TrendingUp, BookOpen, Target, ChevronRight
+  TrendingUp, BookOpen, Target, ChevronRight, RotateCcw
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { PatternModal } from "@/components/pattern-modal";
 import { tradingPatterns } from "@/lib/patterns";
 import type { PatternDefinition } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@/lib/wallet-context";
+import { useToast } from "@/hooks/use-toast";
 
 interface Module {
   id: string;
@@ -29,66 +31,133 @@ interface Lesson {
   patternId?: string;
 }
 
-const modules: Module[] = [
-  {
-    id: "basics",
-    title: "Trading Basics",
-    description: "Learn the fundamental concepts of technical analysis",
-    completed: 2,
-    lessons: [
-      { id: "1", title: "Introduction to Technical Analysis", duration: "5 min", completed: true, locked: false },
-      { id: "2", title: "Understanding Candlesticks", duration: "8 min", completed: true, locked: false },
-      { id: "3", title: "Support and Resistance", duration: "10 min", completed: false, locked: false },
-      { id: "4", title: "Trend Lines and Channels", duration: "12 min", completed: false, locked: false },
-    ],
-  },
-  {
-    id: "sma-strategy",
-    title: "The Equilibrium SMA Strategy",
-    description: "Master the 21/200 SMA crossover system",
-    completed: 1,
-    lessons: [
-      { id: "5", title: "Understanding Moving Averages", duration: "7 min", completed: true, locked: false },
-      { id: "6", title: "The 21 SMA - Fast Signal", duration: "6 min", completed: false, locked: false },
-      { id: "7", title: "The 200 SMA - Trend Filter", duration: "8 min", completed: false, locked: false },
-      { id: "8", title: "5-Minute Confirmation", duration: "10 min", completed: false, locked: true },
-      { id: "9", title: "Putting It All Together", duration: "15 min", completed: false, locked: true },
-    ],
-  },
-  {
-    id: "continuation",
-    title: "Continuation Patterns",
-    description: "Learn patterns that signal trend continuation",
-    completed: 0,
-    lessons: [
-      { id: "10", title: "Bull Flags", duration: "10 min", completed: false, locked: false, patternId: "bull-flag" },
-      { id: "11", title: "Bear Flags", duration: "10 min", completed: false, locked: false, patternId: "bear-flag" },
-      { id: "12", title: "Ascending Triangles", duration: "12 min", completed: false, locked: true, patternId: "ascending-triangle" },
-      { id: "13", title: "Descending Triangles", duration: "12 min", completed: false, locked: true, patternId: "descending-triangle" },
-      { id: "14", title: "Pennants", duration: "8 min", completed: false, locked: true, patternId: "pennant" },
-    ],
-  },
-  {
-    id: "reversal",
-    title: "Reversal Patterns",
-    description: "Identify when trends are about to change",
-    completed: 0,
-    lessons: [
-      { id: "15", title: "Double Tops & Bottoms", duration: "12 min", completed: false, locked: true, patternId: "double-top" },
-      { id: "16", title: "Head and Shoulders", duration: "15 min", completed: false, locked: true, patternId: "head-and-shoulders" },
-      { id: "17", title: "Wedges", duration: "10 min", completed: false, locked: true, patternId: "wedge-rising" },
-      { id: "18", title: "Diamond Patterns", duration: "12 min", completed: false, locked: true, patternId: "diamond" },
-    ],
-  },
+const initialLessons: Omit<Lesson, 'completed' | 'locked'>[] = [
+  { id: "1", title: "Introduction to Technical Analysis", duration: "5 min" },
+  { id: "2", title: "Understanding Candlesticks", duration: "8 min" },
+  { id: "3", title: "Support and Resistance", duration: "10 min" },
+  { id: "4", title: "Trend Lines and Channels", duration: "12 min" },
+  { id: "5", title: "Understanding Moving Averages", duration: "7 min" },
+  { id: "6", title: "The 21 SMA - Fast Signal", duration: "6 min" },
+  { id: "7", title: "The 200 SMA - Trend Filter", duration: "8 min" },
+  { id: "8", title: "5-Minute Confirmation", duration: "10 min" },
+  { id: "9", title: "Putting It All Together", duration: "15 min" },
+  { id: "10", title: "Bull Flags", duration: "10 min", patternId: "bull-flag" },
+  { id: "11", title: "Bear Flags", duration: "10 min", patternId: "bear-flag" },
+  { id: "12", title: "Ascending Triangles", duration: "12 min", patternId: "ascending-triangle" },
+  { id: "13", title: "Descending Triangles", duration: "12 min", patternId: "descending-triangle" },
+  { id: "14", title: "Pennants", duration: "8 min", patternId: "pennant" },
+  { id: "15", title: "Double Tops & Bottoms", duration: "12 min", patternId: "double-top" },
+  { id: "16", title: "Head and Shoulders", duration: "15 min", patternId: "head-and-shoulders" },
+  { id: "17", title: "Wedges", duration: "10 min", patternId: "wedge-rising" },
+  { id: "18", title: "Diamond Patterns", duration: "12 min", patternId: "diamond" },
 ];
 
+const moduleDefinitions = [
+  { id: "basics", title: "Trading Basics", description: "Learn the fundamental concepts of technical analysis", lessonIds: ["1", "2", "3", "4"] },
+  { id: "sma-strategy", title: "The Equilibrium SMA Strategy", description: "Master the 21/200 SMA crossover system", lessonIds: ["5", "6", "7", "8", "9"] },
+  { id: "continuation", title: "Continuation Patterns", description: "Learn patterns that signal trend continuation", lessonIds: ["10", "11", "12", "13", "14"] },
+  { id: "reversal", title: "Reversal Patterns", description: "Identify when trends are about to change", lessonIds: ["15", "16", "17", "18"] },
+];
+
+const STORAGE_KEY = "equilibrium_learning_progress";
+
+const getStorageKey = (walletAddress?: string) => {
+  return walletAddress ? `${STORAGE_KEY}_${walletAddress.toLowerCase()}` : STORAGE_KEY;
+};
+
+const loadProgress = (walletAddress?: string): Set<string> => {
+  try {
+    const key = getStorageKey(walletAddress);
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return new Set(parsed);
+    }
+  } catch (e) {
+    console.error("Failed to load learning progress:", e);
+  }
+  return new Set();
+};
+
+const saveProgress = (completedLessons: Set<string>, walletAddress?: string | null) => {
+  try {
+    const key = getStorageKey(walletAddress || undefined);
+    localStorage.setItem(key, JSON.stringify(Array.from(completedLessons)));
+  } catch (e) {
+    console.error("Failed to save learning progress:", e);
+  }
+};
+
 export default function Learn() {
+  const { address } = useWallet();
+  const { toast } = useToast();
   const [selectedPattern, setSelectedPattern] = useState<PatternDefinition | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [completedLessonIds, setCompletedLessonIds] = useState<Set<string>>(() => loadProgress(address || undefined));
 
+  useEffect(() => {
+    setCompletedLessonIds(loadProgress(address || undefined));
+  }, [address]);
+
+  const buildModules = useCallback((): Module[] => {
+    return moduleDefinitions.map((def, moduleIndex) => {
+      const lessons: Lesson[] = def.lessonIds.map((lessonId, lessonIndex) => {
+        const lessonDef = initialLessons.find(l => l.id === lessonId)!;
+        const completed = completedLessonIds.has(lessonId);
+        
+        let locked = false;
+        if (moduleIndex >= 2 && lessonIndex >= 2) {
+          const prevLessonId = def.lessonIds[lessonIndex - 1];
+          locked = !completedLessonIds.has(prevLessonId);
+        } else if (moduleIndex === 1 && lessonIndex >= 3) {
+          const prevLessonId = def.lessonIds[lessonIndex - 1];
+          locked = !completedLessonIds.has(prevLessonId);
+        }
+        
+        return {
+          ...lessonDef,
+          completed,
+          locked,
+        };
+      });
+      
+      const completedCount = lessons.filter(l => l.completed).length;
+      
+      return {
+        id: def.id,
+        title: def.title,
+        description: def.description,
+        lessons,
+        completed: completedCount,
+      };
+    });
+  }, [completedLessonIds]);
+
+  const modules = buildModules();
   const totalLessons = modules.reduce((acc, m) => acc + m.lessons.length, 0);
-  const completedLessons = modules.reduce((acc, m) => acc + m.completed, 0);
-  const progress = (completedLessons / totalLessons) * 100;
+  const completedLessonsCount = modules.reduce((acc, m) => acc + m.completed, 0);
+  const progress = (completedLessonsCount / totalLessons) * 100;
+
+  const markLessonComplete = (lessonId: string) => {
+    const newCompleted = new Set(completedLessonIds);
+    newCompleted.add(lessonId);
+    setCompletedLessonIds(newCompleted);
+    saveProgress(newCompleted, address);
+    toast({
+      title: "Lesson Completed!",
+      description: "Your progress has been saved.",
+    });
+  };
+
+  const resetProgress = () => {
+    const emptySet = new Set<string>();
+    setCompletedLessonIds(emptySet);
+    saveProgress(emptySet, address);
+    toast({
+      title: "Progress Reset",
+      description: "Your learning progress has been reset.",
+    });
+  };
 
   const handleLessonClick = (lesson: Lesson) => {
     if (lesson.locked) return;
@@ -98,6 +167,9 @@ export default function Learn() {
         setSelectedPattern(pattern);
         setModalOpen(true);
       }
+    }
+    if (!lesson.completed) {
+      markLessonComplete(lesson.id);
     }
   };
 
@@ -117,19 +189,33 @@ export default function Learn() {
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex-1">
-              <h2 className="text-xl font-semibold mb-2">Your Learning Progress</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-semibold">Your Learning Progress</h2>
+                {completedLessonsCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={resetProgress}
+                    className="text-muted-foreground"
+                    data-testid="button-reset-progress"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-1" />
+                    Reset
+                  </Button>
+                )}
+              </div>
               <p className="text-muted-foreground mb-4">
-                You've completed {completedLessons} of {totalLessons} lessons
+                You've completed {completedLessonsCount} of {totalLessons} lessons
               </p>
               <Progress value={progress} className="h-3" />
             </div>
             <div className="flex items-center gap-4">
               <div className="text-center">
-                <p className="text-3xl font-bold font-display">{completedLessons}</p>
+                <p className="text-3xl font-bold font-display">{completedLessonsCount}</p>
                 <p className="text-xs text-muted-foreground">Completed</p>
               </div>
               <div className="text-center">
-                <p className="text-3xl font-bold font-display">{totalLessons - completedLessons}</p>
+                <p className="text-3xl font-bold font-display">{totalLessons - completedLessonsCount}</p>
                 <p className="text-xs text-muted-foreground">Remaining</p>
               </div>
             </div>

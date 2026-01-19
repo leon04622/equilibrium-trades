@@ -11,6 +11,7 @@ import {
   Flame,
   Wallet,
   Play,
+  CandlestickChart,
 } from "lucide-react";
 import {
   Sidebar,
@@ -44,6 +45,11 @@ const mainNavItems = [
     title: "Pattern Library",
     url: "/patterns",
     icon: BookOpen,
+  },
+  {
+    title: "Candlesticks",
+    url: "/candles",
+    icon: CandlestickChart,
   },
   {
     title: "Learn",

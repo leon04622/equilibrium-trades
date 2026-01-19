@@ -25,6 +25,7 @@ import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
 import Portfolio from "@/pages/portfolio";
 import Videos from "@/pages/videos";
+import Candles from "@/pages/candles";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function Router() {
@@ -42,6 +43,7 @@ function Router() {
         <Switch>
           <Route path="/" component={Dashboard} />
           <Route path="/patterns" component={Patterns} />
+          <Route path="/candles" component={Candles} />
           <Route path="/learn" component={Learn} />
           <Route path="/signals" component={Signals} />
           <Route path="/heatmap" component={Heatmap} />

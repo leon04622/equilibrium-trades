@@ -370,6 +370,46 @@ export async function getAccountState(address: string): Promise<AccountState | n
   }
 }
 
+export interface SpotBalance {
+  coin: string;
+  hold: string;
+  total: string;
+  entryNtl: string;
+}
+
+export interface SpotState {
+  balances: SpotBalance[];
+}
+
+export async function getSpotState(address: string): Promise<SpotState | null> {
+  try {
+    const response = await fetch(INFO_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "spotClearinghouseState",
+        user: address,
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching spot state:", error);
+    return null;
+  }
+}
+
+export async function getSpotBalances(address: string): Promise<SpotBalance[]> {
+  const state = await getSpotState(address);
+  if (!state || !state.balances) return [];
+  
+  return state.balances.filter(b => parseFloat(b.total) > 0);
+}
+
 export async function getPositions(address: string): Promise<Position[]> {
   const state = await getAccountState(address);
   if (!state) return [];
