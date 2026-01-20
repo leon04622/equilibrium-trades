@@ -14,10 +14,12 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2 } from "lucide-react";
+import { useSubscription } from "@/hooks/use-subscription";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { Link } from "wouter";
 
 const timeframes = [
   { value: "1", label: "1m" },
@@ -46,6 +48,16 @@ export default function Trading({ visible = true }: TradingProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
+  const { hasAccess, isConnected } = useSubscription();
+  
+  const canUseAIPatterns = isConnected && hasAccess('ai_signals');
+  
+  // Reset AI chart if user loses access
+  useEffect(() => {
+    if (!canUseAIPatterns && showAIChart) {
+      setShowAIChart(false);
+    }
+  }, [canUseAIPatterns, showAIChart]);
 
   const tvSymbol = `BINANCE:${coin}USDT`;
 
@@ -243,15 +255,28 @@ export default function Trading({ visible = true }: TradingProps) {
             
             <div className="hidden md:flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                <Switch 
-                  checked={showAIChart} 
-                  onCheckedChange={setShowAIChart}
-                  id="ai-chart-toggle"
-                />
-                <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
-                  <Brain className="h-3 w-3" />
-                  AI Patterns
-                </label>
+                {canUseAIPatterns ? (
+                  <>
+                    <Switch 
+                      checked={showAIChart} 
+                      onCheckedChange={setShowAIChart}
+                      id="ai-chart-toggle"
+                    />
+                    <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                      <Brain className="h-3 w-3" />
+                      AI Patterns
+                    </label>
+                  </>
+                ) : (
+                  <Link href="/pricing">
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" data-testid="button-ai-patterns-locked">
+                      <Lock className="h-3 w-3 mr-1" />
+                      <Brain className="h-3 w-3 mr-1" />
+                      AI Patterns
+                      <span className="ml-1 text-[10px] text-primary">Pro</span>
+                    </Button>
+                  </Link>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
                 <Switch 
@@ -277,7 +302,7 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 min-h-0 relative">
-                  {showAIChart ? (
+                  {canUseAIPatterns && showAIChart ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
@@ -305,7 +330,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {/* Desktop: Chart with position overlay */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              {showAIChart ? (
+              {canUseAIPatterns && showAIChart ? (
                 <PatternChart 
                   symbol={coin} 
                   interval={
