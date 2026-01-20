@@ -94,7 +94,8 @@ export default function Settings() {
 
   const handleClearProgress = () => {
     if (address) {
-      const key = `equilibrium_progress_${address.toLowerCase()}`;
+      // Use the same key format as learn.tsx
+      const key = `equilibrium_learning_progress_${address.toLowerCase()}`;
       localStorage.removeItem(key);
       toast({
         title: "Progress cleared",

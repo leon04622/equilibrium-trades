@@ -73,7 +73,7 @@ function App() {
         <WalletProvider>
           <TradingProvider>
             <ChatProvider>
-            <TooltipProvider>
+            <TooltipProvider delayDuration={200}>
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex h-screen w-full overflow-hidden">
                   <AppSidebar />
