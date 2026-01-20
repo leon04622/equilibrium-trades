@@ -1,259 +1,45 @@
 # Equilibrium - Beginner-Friendly Trading Platform
 
 ## Overview
-Equilibrium is a beginner-friendly trading platform that teaches users a specific trading strategy using 21 SMA and 200 SMA crossovers. The platform features:
-- TradingView chart integration with all indicators
-- AI-powered pattern detection using OpenAI (via Replit AI Integrations)
-- Comprehensive pattern library with 18+ patterns and educational content
-- Subscription tiers with premium liquidity heatmap feature
-- Hyperliquid connection UI for trading
+Equilibrium is a beginner-friendly trading platform designed to educate users on a specific trading strategy utilizing 21 SMA and 200 SMA crossovers. The platform integrates TradingView charts with indicators, features AI-powered pattern detection, offers a comprehensive library of over 18 trading patterns with educational content, and provides subscription tiers including a premium liquidity heatmap. It supports non-custodial trading via Hyperliquid, enabling users to connect their wallets for direct order submission. The project aims to empower users with tools for learning, analysis, and execution in a secure, non-custodial environment.
 
-## Architecture
+## User Preferences
+None provided.
+
+## System Architecture
 
 ### Frontend (React + TypeScript)
 - **Framework**: Vite + React 18
-- **Styling**: Tailwind CSS with custom design system
+- **Styling**: Tailwind CSS with a custom design system
 - **State Management**: TanStack Query for server state
 - **Routing**: Wouter
-- **UI Components**: Shadcn/ui with custom components
+- **UI Components**: Shadcn/ui
 - **Charts**: TradingView embedded widget
-- **Wallet**: MetaMask/Browser wallet via ethers.js (non-custodial)
-- **Trading**: Client-side order signing with direct Hyperliquid API submission
+- **Wallet Integration**: MetaMask/Browser wallet via ethers.js for non-custodial operations
+- **Trading**: Client-side order signing and direct Hyperliquid API submission.
+- **Design System**: Primary blue theme, distinct green for bullish and red for bearish indicators, Inter, Plus Jakarta Sans, and JetBrains Mono fonts, with light and dark mode support.
+- **UI/UX**: Features a dashboard, dedicated trading interface, pattern library, learning modules, AI signals page, heatmap, Hyperliquid connection, pricing tiers, and user settings. Includes visual SL/TP order management directly on charts and a tabbed bottom trading panel for positions and orders.
 
 ### Backend (Express + TypeScript)
 - **Framework**: Express.js
-- **AI**: OpenAI via Replit AI Integrations (gpt-5.1)
-- **Storage**: In-memory storage (MemStorage) for most data, PostgreSQL for persistent data (tutorial videos)
-- **Streaming**: Server-Sent Events for pattern detection
-- **Database**: PostgreSQL (Neon) via @neondatabase/serverless for video metadata persistence
+- **AI**: OpenAI via Replit AI Integrations (gpt-5.1) for pattern detection.
+- **Storage**: In-memory storage (MemStorage) for transient data; PostgreSQL (Neon) for persistent data such as tutorial video metadata, user data, and chat messages.
+- **Streaming**: Server-Sent Events (SSE) for real-time pattern detection.
+- **Non-Custodial Architecture**: Ensures user private keys are never handled by the server, with all authentication and order signing occurring client-side.
+- **Real-time Data**: WebSocket server for real-time order book heatmap data.
+- **Admin Features**: Admin panel for user and subscription management, and an admin inbox for customer support.
+- **Authorization**: Server-side authorization for chat and video content, requiring wallet authentication and builder code approval for regular users, and hardcoded admin wallet verification for administrative functions.
 
-### Non-Custodial Trading Architecture
-This platform uses a **fully non-custodial** architecture:
-- Users connect their own wallet (MetaMask/browser extension)
-- All authentication and order signing happens **client-side** in the user's wallet
-- The app only requests message/order signatures from the wallet
-- Signed payloads are submitted directly to Hyperliquid's public API from the frontend
-- **No private keys** are ever stored, transmitted, or handled by the server
-- Works exactly like Hyperliquid's own UI, GMX, or Uniswap
+### Core Features
+- **Educational Pattern Scanner**: Scans for educational patterns to teach recognition, distinct from trade signals.
+- **Trading Strategy**: Guides users on a 21/200 SMA crossover strategy, including confirmation and continuation patterns.
+- **Trade Journal**: Automatic grading of closed trades based on entry, stop placement, R:R, leverage, and setup validity, providing detailed feedback.
+- **Live Chat Customer Support**: Real-time chat widget with server-side authorization, linking messages to wallet addresses, and an admin inbox for support staff.
+- **Video Learning System**: Supports uploading and in-app playback of educational videos with CRUD operations and categorization.
 
-## Project Structure
-```
-client/
-├── src/
-│   ├── components/           # Reusable UI components
-│   │   ├── trading-view-chart.tsx    # TradingView widget
-│   │   ├── pattern-card.tsx          # Pattern display cards
-│   │   ├── pattern-modal.tsx         # Educational modal
-│   │   ├── sma-indicator.tsx         # SMA analysis display
-│   │   ├── live-pattern-card.tsx     # Live detected patterns
-│   │   ├── liquidity-heatmap.tsx     # Premium heatmap feature
-│   │   └── app-sidebar.tsx           # Navigation sidebar
-│   ├── pages/                # Route pages
-│   │   ├── dashboard.tsx     # Main dashboard
-│   │   ├── trading.tsx       # Live trading with chart
-│   │   ├── patterns.tsx      # Pattern library
-│   │   ├── learn.tsx         # Educational modules
-│   │   ├── signals.tsx       # AI signals page
-│   │   ├── heatmap.tsx       # Liquidity heatmap (premium)
-│   │   ├── hyperliquid.tsx   # Exchange connection
-│   │   ├── pricing.tsx       # Subscription tiers
-│   │   └── settings.tsx      # User settings
-│   ├── lib/
-│   │   ├── patterns.ts       # Pattern definitions (18+ patterns)
-│   │   ├── theme.tsx         # Theme provider
-│   │   ├── wallet-context.tsx    # Wallet connection (MetaMask)
-│   │   ├── hyperliquid-client.ts # Client-side Hyperliquid SDK
-│   │   └── trading-context.tsx   # Trading state management
-│   └── App.tsx               # Main app with routing
-
-server/
-├── routes.ts                 # API endpoints
-├── storage.ts                # In-memory storage implementation
-├── pattern-detection.ts      # AI pattern analysis using OpenAI
-├── hyperliquid.ts            # Hyperliquid API client for market data
-├── heatmap-storage.ts        # Ring buffer for order book snapshots
-├── heatmap-ws.ts             # WebSocket server for real-time heatmap
-└── replit_integrations/
-    └── chat/                 # OpenAI chat integration
-
-shared/
-├── schema.ts                 # TypeScript types and schemas
-└── models/chat.ts            # Chat model schemas
-```
-
-## API Endpoints
-
-### Wallet User / Hyperliquid Onboarding
-- `GET /api/wallet-user/:walletAddress` - Get wallet user status and builder code approval
-- `POST /api/wallet-user/register` - Register new wallet user
-- `POST /api/wallet-user/approve-builder-code` - Approve builder code with signature verification
-- `PATCH /api/wallet-user/:walletAddress/email` - Update wallet user email
-
-### Patterns
-- `GET /api/patterns/active` - Get active detected patterns
-- `GET /api/patterns/symbol/:symbol` - Get patterns by symbol
-- `POST /api/detect-patterns` - AI pattern detection (SSE streaming)
-- `PATCH /api/patterns/:id/status` - Update pattern status
-
-### Market Data
-- `GET /api/market/:symbol` - Get market condition (SMA values, trend)
-
-### Educational Pattern Scanner (NEW)
-- `GET /api/signals/patterns` - Scan for educational patterns (no entry/SL/TP)
-  - Returns: pattern name, bias, SMA relationship, educational notes, what to watch
-  - Scans every 60 seconds for live market updates
-  - Focus: teaching pattern recognition, not providing trade signals
-
-### SMA Signals (Legacy)
-- `GET /api/signals/crossover` - Legacy crossover signals with entry/SL/TP
-
-### Subscriptions
-- `GET /api/subscriptions` - Get all subscription tiers
-- `GET /api/subscriptions/:id` - Get single tier
-
-### Hyperliquid API
-- `GET /api/hyperliquid/coins` - Get all available coins
-- `GET /api/hyperliquid/tickers` - Get all tickers with live prices
-- `GET /api/hyperliquid/orderbook/:coin` - Get order book for a coin
-- `GET /api/hyperliquid/trades/:coin` - Get recent trades
-- `GET /api/hyperliquid/candles/:coin` - Get candle data
-
-### WebSocket
-- `ws://host/ws/heatmap` - Real-time order book heatmap data
-
-## Trading Strategy (21/200 SMA Crossover)
-1. Watch for 21 SMA to cross 200 SMA on 1-minute chart
-2. Confirm price is above 200 SMA on 5-minute chart (for longs)
-3. Look for continuation patterns: bull flags, triangles, pennants
-4. For shorts: 21 SMA below 200 SMA, look for bear flags
-
-## Subscription Tiers
-- **Starter** ($0/mo): Pattern library, basic charts, 5 educational modules
-- **Pro** ($49/mo): AI pattern detection, real-time alerts, trade recommendations
-- **Elite** ($149/mo): Liquidity heatmap, order flow, 1-on-1 coaching
-
-## Pattern Library (22+ Patterns)
-### Continuation Patterns
-- Bull Flag, Bear Flag, Pennant
-- Ascending/Descending/Symmetrical Triangles
-- Cup and Handle
-- Hidden Bullish Divergence, Hidden Bearish Divergence
-
-### Reversal Patterns
-- Head and Shoulders, Inverse H&S
-- Double Top/Bottom, Triple Top/Bottom
-- Diamond, Rising/Falling Wedge
-- Engulfing patterns, Morning/Evening Star
-- Regular Bullish Divergence, Regular Bearish Divergence
-
-## Design System
-- **Primary**: Blue (#3b82f6)
-- **Bullish**: Green (hsl 142 76% 36%)
-- **Bearish**: Red (hsl 0 84% 60%)
-- **Fonts**: Inter (body), Plus Jakarta Sans (headings), JetBrains Mono (code)
-- **Theme**: Light and dark mode with toggle
-
-## Development Commands
-```bash
-npm run dev        # Start development server
-npm run db:push    # Push database schema (if using DB)
-```
-
-## Recent Changes
-- January 2026: Initial MVP build with full frontend and backend
-- AI pattern detection using OpenAI gpt-5.1
-- TradingView chart widget integration
-- 18+ trading patterns with educational content
-- Subscription tiers with pricing page
-- **January 2026**: Hyperliquid integration for real-time market data
-  - Live prices for 20+ crypto assets
-  - Order book visualization with depth display
-  - Recent trades with buy/sell coloring
-  - **Bookmap-style Liquidity Heatmap** (Elite feature):
-    - Canvas-based real-time visualization
-    - Order book depth over time as heatmap
-    - Large order (whale) detection
-    - Institutional level identification
-    - WebSocket streaming for real-time updates
-- **January 2026**: Non-custodial trading architecture
-  - MetaMask wallet connection in header
-  - Client-side order signing with ethers.js
-  - Direct submission to Hyperliquid API from frontend
-  - No private keys on server - fully non-custodial
-  - Works like Hyperliquid UI, GMX, or Uniswap
-- **January 2026**: Video Upload System with In-App Playback
-  - Upload videos from computer via drag-and-drop or file browser
-  - YouTube link support (paste URL or video ID)
-  - Videos stored in Replit Object Storage
-  - Categories: Strategy, Platform, Tips
-  - Full CRUD operations via UI (add, view, delete)
-  - **In-App Video Player**: Videos play in modal dialog within the platform
-    - YouTube videos embedded via iframe
-    - Uploaded videos play with HTML5 video player
-    - Keeps users engaged on the platform for revenue generation
-  - Duration field is optional for simplified upload flow
-  - API: GET /api/videos, POST /api/videos, DELETE /api/videos/:id
-- **January 2026**: Trade Journal with Auto-Grading
-  - Every trade automatically graded when position closed
-  - Scoring criteria (0-100 each):
-    - Entry quality (timing relative to breakout)
-    - Stop placement (proper distance, not too tight/wide)
-    - R:R adherence (2:1 minimum, 3:1 ideal)
-    - Leverage appropriateness (lower is safer)
-    - Setup validity (pattern identification)
-  - Overall trade score /100
-  - Letter grades: A-setup, B-execution style display
-  - Weekly discipline score on dashboard
-  - Expandable trade cards with detailed feedback
-  - API: GET /api/journal/trades/:wallet, GET /api/journal/weekly/:wallet, POST /api/journal/grade
-- **January 2026**: Visual SL/TP Order Management (Hyperliquid-style)
-  - BottomTradingPanel: Tabbed panel at bottom of screen (Positions, Open Orders, Trade History, Order History)
-  - ChartPositionOverlay: Shows entry, SL, TP, and liquidation price lines directly on the chart
-  - Auto-refresh every 10 seconds for live order status
-  - Cancel individual orders or cancel all from bottom panel
-  - Classification logic: Uses orderType from API, falls back to position entry price comparison
-  - Components: bottom-trading-panel.tsx, chart-position-overlay.tsx
-  - TP/SL placement: Click pencil icon on position row to set take profit and stop loss prices
-  - Uses placeTriggerOrder from Hyperliquid API to place TP/SL as trigger orders
-  - Positions table shows: Coin, Size, Position Value, Entry/Mark/Liq prices, PNL (ROE%), Margin, Close All, TP/SL
-  - **Position Close**: Click "Market" button to close position at market price
-    - Uses opposite reduceOnly market order via Hyperliquid API
-    - Shows loading state during close operation
-    - Auto-grades trade after position is closed
-- **January 2026**: Non-Custodial Wallet Connect + Builder Code Approval
-  - **One-Click Onboarding Flow**: Single "Create Hyperliquid Account" button
-    - Wallet connection (MetaMask/Rabby) happens client-side only
-    - Builder code approval via EIP-191 message signature
-    - Automatic redirect to trading dashboard after approval
-  - **Builder Code**: Users sign a message approving Equilibrium as their builder on Hyperliquid
-  - **User Data Storage**: 
-    - wallet_address (normalized to lowercase)
-    - email (optional)
-    - builder_code_approved (boolean)
-    - timestamps (createdAt, updatedAt)
-  - **Signature Verification**: Server-side verification using ethers.js verifyMessage
-  - **Security**: No private keys stored, all signing handled by wallet provider
-  - **Components**: OnboardingFlow (client/src/components/onboarding-flow.tsx)
-  - **Context**: WalletContext includes builderCodeApproved status
-  - API: GET /api/wallet-user/:address, POST /api/wallet-user/register, POST /api/wallet-user/approve-builder-code
-- **January 2026**: Live Chat Customer Support System with Server-Side Authorization
-  - **Real-time Chat Widget**: Floating chat button visible on all screens
-    - Users send messages linked to their wallet address as conversation ID
-    - Messages stored in PostgreSQL (support_messages table)
-    - 5-second polling interval for real-time updates
-  - **Admin Inbox**: Admin users see all conversations with unread counts
-    - Click conversation to view/reply to customer messages
-    - Back button to return to conversation list
-  - **Server-Side Authorization**: 
-    - All chat/video endpoints require x-wallet-address header
-    - Regular users must complete onboarding (builder code signature) before using chat
-    - Admin wallets are hardcoded in schema (adminWallets array in shared/schema.ts)
-    - Server verifies wallet ownership via builderCodeApproved status
-    - SenderType is server-determined based on verified admin status (prevents spoofing)
-    - Users can only access their own conversations; admins can access all
-  - **Admin Access Control**: 
-    - Video add/delete buttons hidden for non-admin users (frontend)
-    - Video POST/DELETE endpoints require admin wallet (backend)
-    - API: GET /api/admin/check/:walletAddress
-  - **Components**: live-chat.tsx (database-backed with auth)
-  - **API**: GET /api/support/messages/:conversationId, POST /api/support/messages, GET /api/support/conversations, POST /api/support/messages/:conversationId/read
+## External Dependencies
+- **TradingView**: For chart visualization and indicators.
+- **OpenAI**: Via Replit AI Integrations (gpt-5.1) for AI-powered pattern detection.
+- **Hyperliquid**: For non-custodial trading, market data (coins, tickers, order books, trades, candles), and order execution.
+- **MetaMask/Other Browser Wallets**: For client-side wallet connection and transaction signing using ethers.js.
+- **PostgreSQL (Neon)**: For persistent data storage, including video metadata, user information, and support chat messages.
