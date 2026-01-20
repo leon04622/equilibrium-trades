@@ -51,11 +51,17 @@ export default function Admin() {
 
   const { data: users = [], isLoading, refetch } = useQuery<WalletUser[]>({
     queryKey: ['/api/admin/users'],
-    enabled: isAdmin,
-    meta: {
-      headers: {
-        'x-wallet-address': address || ''
+    enabled: isAdmin && !!address,
+    queryFn: async () => {
+      const response = await fetch('/api/admin/users', {
+        headers: {
+          'x-wallet-address': address || ''
+        }
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch users');
       }
+      return response.json();
     }
   });
 
