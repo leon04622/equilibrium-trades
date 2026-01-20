@@ -79,6 +79,8 @@ function detectWallets(): DetectedWallet[] {
   return wallets;
 }
 
+const WALLET_DISCONNECTED_KEY = 'wallet_user_disconnected';
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
@@ -181,6 +183,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkConnection = async () => {
+      // Don't auto-reconnect if user explicitly disconnected
+      const wasDisconnected = localStorage.getItem(WALLET_DISCONNECTED_KEY) === 'true';
+      if (wasDisconnected) {
+        return;
+      }
+      
       if (window.ethereum) {
         try {
           const accounts = await window.ethereum.request({ method: "eth_accounts" });
@@ -232,6 +240,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Handle visibility change for mobile - reconnect when user returns to app
   useEffect(() => {
     const handleVisibilityChange = async () => {
+      // Don't auto-reconnect if user explicitly disconnected
+      const wasDisconnected = localStorage.getItem(WALLET_DISCONNECTED_KEY) === 'true';
+      if (wasDisconnected) {
+        return;
+      }
+      
       if (document.visibilityState === 'visible' && isMobile && window.ethereum && !address) {
         try {
           const accounts = await window.ethereum.request({ method: "eth_accounts" });
@@ -268,6 +282,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connect = useCallback(async (walletType?: WalletType) => {
+    // Clear disconnected flag since user is explicitly connecting
+    localStorage.removeItem(WALLET_DISCONNECTED_KEY);
+    
     // On mobile without any wallet provider, show deep link options
     if (!window.ethereum) {
       if (isMobile) {
@@ -317,6 +334,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [isMobile, openInWalletBrowser]);
 
   const disconnect = useCallback(() => {
+    // Set flag to prevent auto-reconnect on page refresh
+    localStorage.setItem(WALLET_DISCONNECTED_KEY, 'true');
     setAddress(null);
     setSigner(null);
     setProvider(null);
