@@ -53,9 +53,11 @@ export interface IStorage {
   
   // Wallet Users (Hyperliquid onboarding)
   getWalletUser(walletAddress: string): Promise<WalletUser | undefined>;
+  getAllWalletUsers(): Promise<WalletUser[]>;
   createWalletUser(user: InsertWalletUser): Promise<WalletUser>;
   updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined>;
   updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined>;
+  updateWalletUserSubscription(walletAddress: string, tier: 'free' | 'pro' | 'elite', active: boolean, expiresAt?: Date | null): Promise<WalletUser | undefined>;
   
   // Support Messages
   getMessages(conversationId: string): Promise<SupportMessage[]>;
@@ -361,6 +363,10 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getAllWalletUsers(): Promise<WalletUser[]> {
+    return Array.from(this.walletUsers.values());
+  }
+
   async createWalletUser(user: InsertWalletUser): Promise<WalletUser> {
     const id = randomUUID();
     const now = new Date();
@@ -369,6 +375,9 @@ export class MemStorage implements IStorage {
       walletAddress: user.walletAddress.toLowerCase(),
       email: user.email ?? null,
       builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: user.subscriptionTier ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -396,6 +405,26 @@ export class MemStorage implements IStorage {
     );
     if (user) {
       user.email = email;
+      user.updatedAt = new Date();
+      this.walletUsers.set(user.id, user);
+    }
+    return user;
+  }
+
+  async updateWalletUserSubscription(
+    walletAddress: string, 
+    tier: 'free' | 'pro' | 'elite', 
+    active: boolean, 
+    expiresAt?: Date | null
+  ): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const user = Array.from(this.walletUsers.values()).find(
+      u => u.walletAddress.toLowerCase() === normalizedAddress
+    );
+    if (user) {
+      user.subscriptionTier = tier;
+      user.subscriptionActive = active;
+      user.subscriptionExpiresAt = expiresAt ?? null;
       user.updatedAt = new Date();
       this.walletUsers.set(user.id, user);
     }

@@ -556,6 +556,64 @@ export async function registerRoutes(
     }
   });
 
+  // Admin: Get all wallet users
+  app.get("/api/admin/users", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const { isAdminWallet } = await import("@shared/schema");
+      
+      if (!walletAddress || !isAdminWallet(walletAddress)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const users = await storage.getAllWalletUsers();
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching all users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Admin: Update user subscription
+  app.patch("/api/admin/users/:walletAddress/subscription", async (req: Request, res: Response) => {
+    try {
+      const adminWallet = req.headers["x-wallet-address"] as string | undefined;
+      const { isAdminWallet, updateSubscriptionSchema } = await import("@shared/schema");
+      
+      if (!adminWallet || !isAdminWallet(adminWallet)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const validated = updateSubscriptionSchema.safeParse({
+        walletAddress: req.params.walletAddress,
+        ...req.body
+      });
+      
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+      }
+      
+      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt } = validated.data;
+      const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
+      
+      const user = await storage.updateWalletUserSubscription(
+        req.params.walletAddress,
+        subscriptionTier,
+        subscriptionActive,
+        expiresAt
+      );
+      
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("Error updating subscription:", error);
+      res.status(500).json({ error: "Failed to update subscription" });
+    }
+  });
+
   // Helper to verify wallet ownership for chat - allows any connected wallet to chat
   // For admin wallets, we trust them as they are hardcoded
   async function verifyWalletAccess(walletAddress: string | undefined, requireAdmin = false): Promise<{ valid: boolean; isAdmin: boolean; error?: string }> {

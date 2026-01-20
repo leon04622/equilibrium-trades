@@ -12,6 +12,7 @@ import {
   Wallet,
   Play,
   CandlestickChart,
+  Shield,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,6 +28,8 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
+import { useWallet } from "@/lib/wallet-context";
+import { isAdminWallet } from "@shared/schema";
 
 const mainNavItems = [
   {
@@ -105,6 +108,8 @@ const accountNavItems = [
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { address } = useWallet();
+  const isAdmin = address ? isAdminWallet(address) : false;
 
   return (
     <Sidebar>
@@ -210,6 +215,37 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {isAdmin && (
+          <>
+            <SidebarSeparator />
+            <SidebarGroup>
+              <SidebarGroupLabel>Admin</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location === "/admin"}
+                      data-testid="nav-admin"
+                    >
+                      <Link href="/admin">
+                        <Shield className="h-4 w-4" />
+                        <span>Admin Panel</span>
+                        <Badge 
+                          variant="destructive"
+                          className="ml-auto text-[10px] px-1.5 py-0"
+                        >
+                          Admin
+                        </Badge>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-4">

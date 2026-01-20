@@ -233,6 +233,9 @@ export interface WalletUser {
   walletAddress: string;
   email: string | null;
   builderCodeApproved: boolean;
+  subscriptionTier: 'free' | 'pro' | 'elite';
+  subscriptionActive: boolean;
+  subscriptionExpiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -241,15 +244,29 @@ export interface InsertWalletUser {
   walletAddress: string;
   email?: string | null;
   builderCodeApproved?: boolean;
+  subscriptionTier?: 'free' | 'pro' | 'elite';
+  subscriptionActive?: boolean;
 }
 
 export const insertWalletUserSchema = z.object({
   walletAddress: z.string().min(1, "Wallet address is required"),
   email: z.string().email().optional().nullable(),
   builderCodeApproved: z.boolean().optional().default(false),
+  subscriptionTier: z.enum(['free', 'pro', 'elite']).optional().default('free'),
+  subscriptionActive: z.boolean().optional().default(false),
 });
 
 export type InsertWalletUserType = z.infer<typeof insertWalletUserSchema>;
+
+// Subscription update schema for admin
+export const updateSubscriptionSchema = z.object({
+  walletAddress: z.string().min(1),
+  subscriptionTier: z.enum(['free', 'pro', 'elite']),
+  subscriptionActive: z.boolean(),
+  subscriptionExpiresAt: z.string().optional().nullable(),
+});
+
+export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
 
 // Builder Code Approval
 export interface BuilderCodeApproval {

@@ -26,6 +26,7 @@ import Settings from "@/pages/settings";
 import Portfolio from "@/pages/portfolio";
 import Videos from "@/pages/videos";
 import Candles from "@/pages/candles";
+import Admin from "@/pages/admin";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function Router() {
@@ -52,6 +53,7 @@ function Router() {
           <Route path="/settings" component={Settings} />
           <Route path="/portfolio" component={Portfolio} />
           <Route path="/videos" component={Videos} />
+          <Route path="/admin" component={Admin} />
           <Route component={NotFound} />
         </Switch>
       )}

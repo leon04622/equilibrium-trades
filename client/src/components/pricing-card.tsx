@@ -57,7 +57,7 @@ export function PricingCard({ tier, onSelect }: PricingCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <div>
-          <span className="text-4xl font-bold font-display">${tier.price}</span>
+          <span className="text-4xl font-bold font-display">£{tier.price}</span>
           <span className="text-muted-foreground ml-1">/{tier.period}</span>
         </div>
 
@@ -106,10 +106,10 @@ export const pricingTiers: PricingTier[] = [
   },
   {
     id: "pro",
-    name: "Pro",
-    price: 49,
+    name: "AI Pro",
+    price: 24.99,
     period: "month",
-    description: "For serious traders ready to level up",
+    description: "AI-powered pattern detection and alerts",
     icon: "pro",
     highlighted: true,
     badge: "Most Popular",
@@ -125,20 +125,20 @@ export const pricingTiers: PricingTier[] = [
   },
   {
     id: "elite",
-    name: "Elite",
-    price: 149,
+    name: "Elite Mentoring",
+    price: 500,
     period: "month",
-    description: "Maximum edge with liquidity insights",
+    description: "1-on-1 coaching with 40-minute weekly Zoom calls",
     icon: "elite",
     features: [
-      "Everything in Pro",
-      "Liquidity Heatmap (like Bookmap)",
+      "Everything in AI Pro",
+      "Weekly 40-minute 1-on-1 Zoom call",
+      "Personalized trading strategy review",
+      "Live trade analysis sessions",
+      "Liquidity Heatmap access",
       "Order flow analysis",
-      "Institutional level detection",
-      "Custom pattern alerts",
-      "1-on-1 trading coaching",
       "Private Discord access",
-      "Early access to new features",
+      "Direct messaging support",
     ],
   },
 ];
