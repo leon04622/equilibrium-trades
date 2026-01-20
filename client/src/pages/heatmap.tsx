@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { SubscriptionGate } from "@/components/subscription-gate";
 
 interface Ticker {
   coin: string;
@@ -20,9 +21,8 @@ interface Ticker {
   prevDayPx: string;
 }
 
-export default function Heatmap() {
+function HeatmapContent() {
   const [selectedCoin, setSelectedCoin] = useState("BTC");
-  const [isElite, setIsElite] = useState(true); // Demo: unlocked for testing
 
   // Fetch available coins
   const { data: tickers = [] } = useQuery<Ticker[]>({
@@ -99,7 +99,7 @@ export default function Heatmap() {
         <div className="flex-1 min-h-0">
           <LiquidityHeatmap 
             coin={selectedCoin} 
-            locked={!isElite}
+            locked={false}
             className="h-full"
           />
         </div>
@@ -173,5 +173,17 @@ export default function Heatmap() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Heatmap() {
+  return (
+    <SubscriptionGate 
+      feature="heatmap"
+      title="Liquidity Heatmap"
+      description="Upgrade to Elite Mentoring to access the real-time liquidity heatmap with order flow visualization."
+    >
+      <HeatmapContent />
+    </SubscriptionGate>
   );
 }

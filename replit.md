@@ -43,3 +43,16 @@ None provided.
 - **Hyperliquid**: For non-custodial trading, market data (coins, tickers, order books, trades, candles), and order execution.
 - **MetaMask/Other Browser Wallets**: For client-side wallet connection and transaction signing using ethers.js.
 - **PostgreSQL (Neon)**: For persistent data storage, including video metadata, user information, and support chat messages.
+- **Stripe**: For subscription payment processing and management using stripe-replit-sync package.
+
+## Subscription System
+- **Tiers**: Free (Starter), AI Pro (£24.99/month), Elite Mentoring (£500/month)
+- **Stripe Products**: AI Pro (prod_TpGvzRznydzDhy), Elite Mentoring (prod_TpGvGOpqOoE8xL)
+- **Subscription Gating**: Premium features gated by subscription tier using `useSubscription` hook and `SubscriptionGate` component
+  - AI Pattern Detection: Requires AI Pro or Elite
+  - Liquidity Heatmap: Requires Elite only
+  - Advanced Education: Requires AI Pro or Elite
+  - 1-on-1 Coaching: Requires Elite only
+- **Architecture**: Uses stripe-replit-sync package for webhook handling and data sync - NEVER insert directly into stripe schema
+- **Frontend Hook**: `client/src/hooks/use-subscription.ts` provides `hasAccess(feature)` function
+- **Frontend Gate**: `client/src/components/subscription-gate.tsx` wraps premium feature content

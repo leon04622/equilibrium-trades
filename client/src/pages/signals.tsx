@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
+import { SubscriptionGate } from "@/components/subscription-gate";
 
 interface PatternSignal {
   id: string;
@@ -176,7 +177,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function Signals() {
+function SignalsContent() {
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(["1m", "5m", "15m"]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
@@ -187,11 +188,10 @@ export default function Signals() {
       if (!response.ok) throw new Error("Failed to fetch patterns");
       return response.json();
     },
-    refetchInterval: 60000, // Scan every 60 seconds (1 minute)
+    refetchInterval: 60000,
     staleTime: 30000,
   });
 
-  // Track last update time
   useEffect(() => {
     if (!isFetching) {
       setLastUpdate(new Date());
@@ -513,5 +513,17 @@ export default function Signals() {
         </AlertDescription>
       </Alert>
     </div>
+  );
+}
+
+export default function Signals() {
+  return (
+    <SubscriptionGate 
+      feature="ai_signals"
+      title="AI Pattern Scanner"
+      description="Upgrade to AI Pro to access real-time AI-powered pattern detection across all timeframes."
+    >
+      <SignalsContent />
+    </SubscriptionGate>
   );
 }
