@@ -13,6 +13,8 @@ import {
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
 import { gradeTrade } from "./trade-grading";
+import { stripeService } from "./stripeService";
+import { getStripePublishableKey } from "./stripeClient";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -747,6 +749,160 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error checking admin status:", error);
       res.status(500).json({ error: "Failed to check admin status" });
+    }
+  });
+
+  // ============ STRIPE PAYMENT ROUTES ============
+
+  // Get Stripe publishable key for frontend
+  app.get("/api/stripe/config", async (req: Request, res: Response) => {
+    try {
+      const publishableKey = await getStripePublishableKey();
+      res.json({ publishableKey });
+    } catch (error) {
+      console.error("Error getting Stripe config:", error);
+      res.status(500).json({ error: "Failed to get Stripe configuration" });
+    }
+  });
+
+  // Get available Stripe products and prices
+  app.get("/api/stripe/products", async (req: Request, res: Response) => {
+    try {
+      const rows = await stripeService.listProductsWithPrices();
+      
+      const productsMap = new Map();
+      for (const row of rows as any[]) {
+        if (!productsMap.has(row.product_id)) {
+          productsMap.set(row.product_id, {
+            id: row.product_id,
+            name: row.product_name,
+            description: row.product_description,
+            active: row.product_active,
+            metadata: row.product_metadata,
+            prices: []
+          });
+        }
+        if (row.price_id) {
+          productsMap.get(row.product_id).prices.push({
+            id: row.price_id,
+            unit_amount: row.unit_amount,
+            currency: row.currency,
+            recurring: row.recurring,
+            active: row.price_active,
+            metadata: row.price_metadata
+          });
+        }
+      }
+
+      res.json({ data: Array.from(productsMap.values()) });
+    } catch (error) {
+      console.error("Error fetching Stripe products:", error);
+      res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  // Create checkout session for subscription
+  app.post("/api/stripe/checkout", async (req: Request, res: Response) => {
+    try {
+      const { priceId, walletAddress, email, tier } = req.body;
+      
+      if (!priceId || !walletAddress) {
+        return res.status(400).json({ error: "Price ID and wallet address are required" });
+      }
+
+      // Get or create wallet user
+      let walletUser = await storage.getWalletUser(walletAddress);
+      if (!walletUser) {
+        walletUser = await storage.createWalletUser({ walletAddress, email });
+      }
+
+      // Create or get Stripe customer
+      let customerId: string;
+      const existingCustomer = email ? await stripeService.getCustomerByEmail(email) : null;
+      
+      if (existingCustomer) {
+        customerId = (existingCustomer as any).id;
+      } else {
+        const customer = await stripeService.createCustomer(
+          email || `${walletAddress}@wallet.equilibrium`,
+          walletAddress
+        );
+        customerId = customer.id;
+      }
+
+      // Determine if this is a subscription or one-time payment
+      const price = await stripeService.getPrice(priceId);
+      const mode = (price as any)?.recurring ? 'subscription' : 'payment';
+
+      // Create checkout session
+      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+      const session = await stripeService.createCheckoutSession(
+        customerId,
+        priceId,
+        walletAddress,
+        `${baseUrl}/pricing?success=true&tier=${tier || 'pro'}`,
+        `${baseUrl}/pricing?canceled=true`,
+        mode
+      );
+
+      res.json({ url: session.url, sessionId: session.id });
+    } catch (error) {
+      console.error("Error creating checkout session:", error);
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  // Create customer portal session for managing subscription
+  app.post("/api/stripe/portal", async (req: Request, res: Response) => {
+    try {
+      const { walletAddress, email } = req.body;
+      
+      if (!walletAddress && !email) {
+        return res.status(400).json({ error: "Wallet address or email required" });
+      }
+
+      const customer = email ? await stripeService.getCustomerByEmail(email) : null;
+      
+      if (!customer) {
+        return res.status(404).json({ error: "No subscription found for this account" });
+      }
+
+      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+      const session = await stripeService.createCustomerPortalSession(
+        (customer as any).id,
+        `${baseUrl}/settings`
+      );
+
+      res.json({ url: session.url });
+    } catch (error) {
+      console.error("Error creating portal session:", error);
+      res.status(500).json({ error: "Failed to create portal session" });
+    }
+  });
+
+  // Check subscription status for a wallet
+  app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const { walletAddress } = req.params;
+      
+      const walletUser = await storage.getWalletUser(walletAddress);
+      if (!walletUser) {
+        return res.json({ 
+          hasSubscription: false, 
+          tier: 'free',
+          active: false 
+        });
+      }
+
+      res.json({
+        hasSubscription: walletUser.subscriptionTier !== 'free',
+        tier: walletUser.subscriptionTier,
+        active: walletUser.subscriptionActive,
+        expiresAt: walletUser.subscriptionExpiresAt
+      });
+    } catch (error) {
+      console.error("Error checking subscription:", error);
+      res.status(500).json({ error: "Failed to check subscription status" });
     }
   });
 
