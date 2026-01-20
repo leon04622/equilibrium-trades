@@ -8,7 +8,7 @@ import {
   type TutorialVideo, type InsertTutorialVideo,
   type WalletUser, type InsertWalletUser,
   type SupportMessage, type InsertSupportMessage,
-  tutorialVideos, supportMessages
+  tutorialVideos, supportMessages, walletUsers
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -73,7 +73,6 @@ export class MemStorage implements IStorage {
   private smaSignals: Map<string, SmaSignal>;
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
-  private walletUsers: Map<string, WalletUser>;
 
   constructor() {
     this.users = new Map();
@@ -82,7 +81,6 @@ export class MemStorage implements IStorage {
     this.smaSignals = new Map();
     this.subscriptionTiers = new Map();
     this.tradeGrades = new Map();
-    this.walletUsers = new Map();
     
     this.initializeSubscriptionTiers();
   }
@@ -355,61 +353,99 @@ export class MemStorage implements IStorage {
     return result.length > 0;
   }
 
-  // Wallet Users (Hyperliquid onboarding)
+  // Wallet Users (Hyperliquid onboarding) - Using database for persistence
   async getWalletUser(walletAddress: string): Promise<WalletUser | undefined> {
-    // Normalize address to lowercase for comparison
     const normalizedAddress = walletAddress.toLowerCase();
-    return Array.from(this.walletUsers.values()).find(
-      u => u.walletAddress.toLowerCase() === normalizedAddress
-    );
+    const [user] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
+    if (!user) return undefined;
+    return {
+      id: user.id,
+      walletAddress: user.walletAddress,
+      email: user.email,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      createdAt: user.createdAt ?? new Date(),
+      updatedAt: user.updatedAt ?? new Date(),
+    };
   }
 
   async getAllWalletUsers(): Promise<WalletUser[]> {
-    return Array.from(this.walletUsers.values());
+    const users = await db.select().from(walletUsers).orderBy(desc(walletUsers.createdAt));
+    return users.map(user => ({
+      id: user.id,
+      walletAddress: user.walletAddress,
+      email: user.email,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      createdAt: user.createdAt ?? new Date(),
+      updatedAt: user.updatedAt ?? new Date(),
+    }));
   }
 
   async createWalletUser(user: InsertWalletUser): Promise<WalletUser> {
-    const id = randomUUID();
-    const now = new Date();
-    const newUser: WalletUser = {
-      id,
-      walletAddress: user.walletAddress.toLowerCase(),
+    const normalizedAddress = user.walletAddress.toLowerCase();
+    const [newUser] = await db.insert(walletUsers).values({
+      walletAddress: normalizedAddress,
       email: user.email ?? null,
       builderCodeApproved: user.builderCodeApproved ?? false,
       subscriptionTier: user.subscriptionTier ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
-      subscriptionExpiresAt: null,
-      createdAt: now,
-      updatedAt: now,
+    }).returning();
+    return {
+      id: newUser.id,
+      walletAddress: newUser.walletAddress,
+      email: newUser.email,
+      builderCodeApproved: newUser.builderCodeApproved ?? false,
+      subscriptionTier: (newUser.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: newUser.subscriptionActive ?? false,
+      subscriptionExpiresAt: newUser.subscriptionExpiresAt,
+      createdAt: newUser.createdAt ?? new Date(),
+      updatedAt: newUser.updatedAt ?? new Date(),
     };
-    this.walletUsers.set(id, newUser);
-    return newUser;
   }
 
   async updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    const user = Array.from(this.walletUsers.values()).find(
-      u => u.walletAddress.toLowerCase() === normalizedAddress
-    );
-    if (user) {
-      user.builderCodeApproved = approved;
-      user.updatedAt = new Date();
-      this.walletUsers.set(user.id, user);
-    }
-    return user;
+    const [user] = await db.update(walletUsers)
+      .set({ builderCodeApproved: approved, updatedAt: new Date() })
+      .where(eq(walletUsers.walletAddress, normalizedAddress))
+      .returning();
+    if (!user) return undefined;
+    return {
+      id: user.id,
+      walletAddress: user.walletAddress,
+      email: user.email,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      createdAt: user.createdAt ?? new Date(),
+      updatedAt: user.updatedAt ?? new Date(),
+    };
   }
 
   async updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    const user = Array.from(this.walletUsers.values()).find(
-      u => u.walletAddress.toLowerCase() === normalizedAddress
-    );
-    if (user) {
-      user.email = email;
-      user.updatedAt = new Date();
-      this.walletUsers.set(user.id, user);
-    }
-    return user;
+    const [user] = await db.update(walletUsers)
+      .set({ email, updatedAt: new Date() })
+      .where(eq(walletUsers.walletAddress, normalizedAddress))
+      .returning();
+    if (!user) return undefined;
+    return {
+      id: user.id,
+      walletAddress: user.walletAddress,
+      email: user.email,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      createdAt: user.createdAt ?? new Date(),
+      updatedAt: user.updatedAt ?? new Date(),
+    };
   }
 
   async updateWalletUserSubscription(
@@ -419,17 +455,27 @@ export class MemStorage implements IStorage {
     expiresAt?: Date | null
   ): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    const user = Array.from(this.walletUsers.values()).find(
-      u => u.walletAddress.toLowerCase() === normalizedAddress
-    );
-    if (user) {
-      user.subscriptionTier = tier;
-      user.subscriptionActive = active;
-      user.subscriptionExpiresAt = expiresAt ?? null;
-      user.updatedAt = new Date();
-      this.walletUsers.set(user.id, user);
-    }
-    return user;
+    const [user] = await db.update(walletUsers)
+      .set({ 
+        subscriptionTier: tier, 
+        subscriptionActive: active, 
+        subscriptionExpiresAt: expiresAt ?? null,
+        updatedAt: new Date() 
+      })
+      .where(eq(walletUsers.walletAddress, normalizedAddress))
+      .returning();
+    if (!user) return undefined;
+    return {
+      id: user.id,
+      walletAddress: user.walletAddress,
+      email: user.email,
+      builderCodeApproved: user.builderCodeApproved ?? false,
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionActive: user.subscriptionActive ?? false,
+      subscriptionExpiresAt: user.subscriptionExpiresAt,
+      createdAt: user.createdAt ?? new Date(),
+      updatedAt: user.updatedAt ?? new Date(),
+    };
   }
 
   // Support Messages - Using database for persistence

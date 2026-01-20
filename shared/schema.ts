@@ -120,6 +120,19 @@ export const insertVideoSchema = z.object({
   message: "Either YouTube ID or uploaded video is required"
 });
 
+// Wallet Users - Database table for persistent storage
+export const walletUsers = pgTable("wallet_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletAddress: text("wallet_address").notNull().unique(),
+  email: text("email"),
+  builderCodeApproved: boolean("builder_code_approved").default(false),
+  subscriptionTier: text("subscription_tier").default("free"),
+  subscriptionActive: boolean("subscription_active").default(false),
+  subscriptionExpiresAt: timestamp("subscription_expires_at"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 // Frontend-only types for pattern definitions
 export interface PatternDefinition {
   id: string;

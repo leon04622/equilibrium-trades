@@ -23,7 +23,7 @@ None provided.
 ### Backend (Express + TypeScript)
 - **Framework**: Express.js
 - **AI**: OpenAI via Replit AI Integrations (gpt-5.1) for pattern detection.
-- **Storage**: In-memory storage (MemStorage) for transient data; PostgreSQL (Neon) for persistent data such as tutorial video metadata, user data, and chat messages.
+- **Storage**: In-memory storage (MemStorage) for transient data; PostgreSQL (Neon) for persistent data including wallet users, tutorial video metadata, and chat messages.
 - **Streaming**: Server-Sent Events (SSE) for real-time pattern detection.
 - **Non-Custodial Architecture**: Ensures user private keys are never handled by the server, with all authentication and order signing occurring client-side.
 - **Real-time Data**: WebSocket server for real-time order book heatmap data.
