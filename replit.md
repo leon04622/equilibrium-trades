@@ -56,3 +56,9 @@ None provided.
 - **Architecture**: Uses stripe-replit-sync package for webhook handling and data sync - NEVER insert directly into stripe schema
 - **Frontend Hook**: `client/src/hooks/use-subscription.ts` provides `hasAccess(feature)` function
 - **Frontend Gate**: `client/src/components/subscription-gate.tsx` wraps premium feature content
+
+## Caching Strategy
+- **HTML Pages**: Never cached (`no-cache, no-store, must-revalidate`) - ensures users always get the latest version
+- **Static Assets (JS, CSS, images)**: Cached for 1 year with content hashes for cache-busting
+- **Configuration**: `server/static.ts` handles production caching headers
+- **Development**: Vite adds unique query params to bust cache on main.tsx
