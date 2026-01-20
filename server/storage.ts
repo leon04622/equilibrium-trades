@@ -241,7 +241,8 @@ export class MemStorage implements IStorage {
     const newSignal: SmaSignal = { 
       ...signal, 
       id, 
-      createdAt: new Date()
+      createdAt: new Date(),
+      above5mSma200: signal.above5mSma200 ?? null
     };
     this.smaSignals.set(id, newSignal);
     return newSignal;

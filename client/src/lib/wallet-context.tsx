@@ -108,6 +108,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch(`/api/wallet-user/${address}`);
       const data = await response.json();
+      
+      // Auto-register user if they don't exist (ensures all connected wallets appear in admin panel)
+      if (!data.exists) {
+        try {
+          await fetch('/api/wallet-user/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walletAddress: address })
+          });
+        } catch (regError) {
+          console.error("Error auto-registering wallet user:", regError);
+        }
+      }
+      
       setBuilderCodeApproved(data.exists && data.builderCodeApproved);
     } catch (error) {
       console.error("Error checking approval status:", error);

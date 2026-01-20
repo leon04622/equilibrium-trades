@@ -296,7 +296,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
               <Label className="text-xs">Size</Label>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" />
+                  <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" data-testid="help-position-size" />
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
                   <p className="font-semibold">Position Size</p>
@@ -358,7 +358,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
               <Label className="text-xs">Leverage</Label>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" />
+                  <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" data-testid="help-leverage" />
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
                   <p className="font-semibold text-warning">Leverage (Risk Warning!)</p>
