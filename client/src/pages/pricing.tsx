@@ -111,6 +111,17 @@ export default function Pricing() {
       }
     }
     fetchProducts();
+    
+    // Add a small interval to re-fetch if products aren't loaded yet
+    const interval = setInterval(() => {
+      if (stripeProducts.length === 0) {
+        fetchProducts();
+      } else {
+        clearInterval(interval);
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const getPriceIdForTier = (tierId: string): string | null => {

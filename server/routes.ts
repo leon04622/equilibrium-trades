@@ -576,6 +576,41 @@ export async function registerRoutes(
     }
   });
 
+  // Get subscription status for a wallet
+  app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const { walletAddress } = req.params;
+      const { isAdminWallet } = await import("@shared/schema");
+      
+      // If it's an admin wallet, give them full access
+      if (isAdminWallet(walletAddress)) {
+        return res.json({
+          tier: 'elite',
+          active: true,
+          expiresAt: null
+        });
+      }
+
+      const user = await storage.getWalletUser(walletAddress);
+      if (!user) {
+        return res.json({
+          tier: 'free',
+          active: false,
+          expiresAt: null
+        });
+      }
+
+      res.json({
+        tier: user.subscriptionTier,
+        active: user.subscriptionActive,
+        expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null
+      });
+    } catch (error) {
+      console.error("Error fetching subscription status:", error);
+      res.status(500).json({ error: "Failed to fetch subscription status" });
+    }
+  });
+
   // Admin: Update user subscription
   app.patch("/api/admin/users/:walletAddress/subscription", async (req: Request, res: Response) => {
     try {
@@ -600,13 +635,19 @@ export async function registerRoutes(
       
       const user = await storage.updateWalletUserSubscription(
         req.params.walletAddress,
-        subscriptionTier,
+        subscriptionTier as 'free' | 'pro' | 'elite',
         subscriptionActive,
         expiresAt
       );
       
       if (!user) {
-        return res.status(404).json({ error: "User not found" });
+        // Create user if they don't exist yet so we can grant them a subscription
+        const newUser = await storage.createWalletUser({
+          walletAddress: req.params.walletAddress,
+          subscriptionTier: subscriptionTier as 'free' | 'pro' | 'elite',
+          subscriptionActive: subscriptionActive,
+        });
+        return res.json({ success: true, user: newUser });
       }
       
       res.json({ success: true, user });
