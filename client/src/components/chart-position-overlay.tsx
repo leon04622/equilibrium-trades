@@ -15,7 +15,21 @@ interface DragState {
   startPrice: number;
 }
 
-const VISIBLE_RANGE_PCT = 0.08; // ±8% visible range on chart overlay
+const VISIBLE_RANGE_PCT = 0.08;
+
+// P&L calculation for a leveraged position
+function calcPnl(size: number, entryPrice: number, targetPrice: number, isLong: boolean): number {
+  return isLong
+    ? size * (targetPrice - entryPrice)
+    : size * (entryPrice - targetPrice);
+}
+
+function formatPnl(pnl: number): string {
+  const abs = Math.abs(pnl);
+  const sign = pnl >= 0 ? "+" : "-";
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}K`;
+  return `${sign}$${abs.toFixed(2)}`;
+}
 
 export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverlayProps) {
   const { positions, openOrders, connected, placeTPSL, cancelHLOrder } = useTrading();
@@ -25,6 +39,7 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
 
   const position = positions.find(p => p.coin === coin);
   const coinOrders = openOrders.filter(o => o.coin === coin);
+  const isLong = position?.side === "long";
 
   const getOrderType = (order: HLOpenOrder): "tp" | "sl" | "order" => {
     if (order.orderType === "stop_loss") return "sl";
@@ -46,14 +61,25 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   const tpOid = tpOrders.length > 0 ? tpOrders[0].oid : null;
   const slOid = slOrders.length > 0 ? slOrders[0].oid : null;
 
+  // Ghost SL: default suggested price when no SL is set (-2% for long, +2% for short)
+  const ghostSlPrice = position
+    ? isLong
+      ? position.entryPrice * 0.98
+      : position.entryPrice * 1.02
+    : null;
+
   const [dragTpPrice, setDragTpPrice] = useState<number | null>(null);
   const [dragSlPrice, setDragSlPrice] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Display prices: real order > dragging > ghost (for SL only)
   const displayTp = dragTpPrice ?? tpPrice;
-  const displaySl = dragSlPrice ?? slPrice;
+  // SL shows real price, drag price, OR ghost placeholder when no SL set
+  const displaySlReal = dragSlPrice ?? slPrice;
+  const isGhostSl = !displaySlReal && !!position && !isDragging;
+  const displaySl = displaySlReal ?? (isGhostSl ? ghostSlPrice : null);
 
-  // Price scale helpers
+  // Price scale
   const getVisibleMinMax = useCallback(() => {
     const ref = position?.entryPrice ?? currentPrice;
     const range = ref * VISIBLE_RANGE_PCT;
@@ -89,15 +115,21 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     return s.toFixed(2);
   };
 
-  // Drag handlers
+  // Drag
   const startDrag = useCallback((e: React.MouseEvent | React.TouchEvent, type: "tp" | "sl") => {
     e.preventDefault();
     e.stopPropagation();
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const price = type === "tp" ? (tpPrice ?? currentPrice) : (slPrice ?? currentPrice);
+    // For ghost SL, start from ghost price; for real TP/SL start from their prices
+    const price = type === "tp"
+      ? (tpPrice ?? currentPrice)
+      : (slPrice ?? ghostSlPrice ?? currentPrice);
     dragRef.current = { type, startY: clientY, startPrice: price };
+    if (type === "sl" && !slPrice && ghostSlPrice) {
+      setDragSlPrice(ghostSlPrice); // initialize drag from ghost position
+    }
     setIsDragging(true);
-  }, [tpPrice, slPrice, currentPrice]);
+  }, [tpPrice, slPrice, ghostSlPrice, currentPrice]);
 
   const onMouseMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!dragRef.current || !containerRef.current) return;
@@ -117,6 +149,8 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     if (!dragRef.current || !position) {
       dragRef.current = null;
       setIsDragging(false);
+      setDragTpPrice(null);
+      setDragSlPrice(null);
       return;
     }
     const type = dragRef.current.type;
@@ -129,10 +163,10 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     const MIN_MOVE_PCT = 0.0005;
     const tpMoved = newTp !== null && tpPrice !== null
       ? Math.abs(newTp - tpPrice) / tpPrice > MIN_MOVE_PCT
-      : newTp !== null && tpPrice === null;
+      : newTp !== null;
     const slMoved = newSl !== null && slPrice !== null
       ? Math.abs(newSl - slPrice) / slPrice > MIN_MOVE_PCT
-      : newSl !== null && slPrice === null;
+      : newSl !== null; // always "moved" if dragging from ghost (no existing SL)
 
     if (!tpMoved && !slMoved) {
       setDragTpPrice(null);
@@ -153,15 +187,13 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       );
       if (result.success) {
         toast({
-          title: `${type === "tp" ? "Take Profit" : "Stop Loss"} Updated`,
-          description: `${type === "tp" ? "Take Profit" : "Stop Loss"} set to $${formatPrice(type === "tp" ? finalTp : finalSl)}`,
+          title: `${type === "tp" ? "Take Profit" : "Stop Loss"} ${slPrice === null && type === "sl" ? "Added" : "Updated"}`,
+          description: `Set to $${formatPrice(type === "tp" ? finalTp : finalSl)}`,
         });
       } else {
         toast({ title: "Update Failed", description: result.error, variant: "destructive" });
-        setDragTpPrice(null);
-        setDragSlPrice(null);
       }
-    } catch {
+    } finally {
       setDragTpPrice(null);
       setDragSlPrice(null);
     }
@@ -182,7 +214,6 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     }
   }, [isDragging, onMouseMove, onMouseUp]);
 
-  // Reset drag prices when real orders change (but not while actively dragging)
   useEffect(() => {
     if (!isDragging) {
       setDragTpPrice(null);
@@ -190,33 +221,30 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     }
   }, [tpPrice, slPrice]);
 
-  // Cancel a single TP or SL order
   const handleCancelTP = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!tpOid || !position) return;
     const result = await cancelHLOrder(coin, tpOid);
-    if (result.success) {
-      toast({ title: "Take Profit Cancelled" });
-    } else {
-      toast({ title: "Cancel Failed", description: result.error, variant: "destructive" });
-    }
+    toast(result.success ? { title: "Take Profit Cancelled" } : { title: "Cancel Failed", description: result.error, variant: "destructive" });
   }, [tpOid, coin, position, cancelHLOrder, toast]);
 
   const handleCancelSL = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!slOid || !position) return;
     const result = await cancelHLOrder(coin, slOid);
-    if (result.success) {
-      toast({ title: "Stop Loss Cancelled" });
-    } else {
-      toast({ title: "Cancel Failed", description: result.error, variant: "destructive" });
-    }
+    toast(result.success ? { title: "Stop Loss Cancelled" } : { title: "Cancel Failed", description: result.error, variant: "destructive" });
   }, [slOid, coin, position, cancelHLOrder, toast]);
 
   if (!connected) return null;
   if (!position && coinOrders.length === 0) return null;
 
-  const isLong = position?.side === "long";
+  // Expected P&L calculations
+  const tpPnl = displayTp && position
+    ? calcPnl(position.size, position.entryPrice, displayTp, isLong!)
+    : null;
+  const slPnl = displaySl && position
+    ? calcPnl(position.size, position.entryPrice, displaySl, isLong!)
+    : null;
 
   return (
     <div
@@ -228,7 +256,9 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       {position && position.entryPrice > 0 && (
         <HLPriceLine
           label={`Entry: $${formatPrice(position.entryPrice)}`}
-          subLabel={position.unrealizedPnl !== undefined ? `PNL ${position.unrealizedPnl >= 0 ? "+" : ""}$${Math.abs(position.unrealizedPnl).toFixed(2)}` : undefined}
+          subLabel={position.unrealizedPnl !== undefined
+            ? `PNL ${position.unrealizedPnl >= 0 ? "+" : ""}$${Math.abs(position.unrealizedPnl).toFixed(2)}`
+            : undefined}
           size={formatSize(position.size)}
           price={position.entryPrice}
           color="blue"
@@ -257,6 +287,8 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       {displayTp !== null && (
         <HLPriceLine
           label={`TP Price ${isLong ? ">" : "<"} ${formatPrice(displayTp)}`}
+          pnlLabel={tpPnl !== null ? formatPnl(tpPnl) : undefined}
+          pnlPositive={tpPnl !== null ? tpPnl >= 0 : undefined}
           size={position ? formatSize(position.size) : ""}
           price={displayTp}
           color="green"
@@ -270,15 +302,20 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
         />
       )}
 
-      {/* Stop Loss line */}
+      {/* Stop Loss line — shows ghost placeholder when no SL exists */}
       {displaySl !== null && (
         <HLPriceLine
-          label={`SL Price ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`}
-          size={position ? formatSize(position.size) : ""}
+          label={isGhostSl
+            ? `Add SL ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`
+            : `SL Price ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`}
+          pnlLabel={slPnl !== null && !isGhostSl ? formatPnl(slPnl) : undefined}
+          pnlPositive={slPnl !== null ? slPnl >= 0 : undefined}
+          size={position && !isGhostSl ? formatSize(position.size) : ""}
           price={displaySl}
           color="red"
           lineStyle="dashed"
           draggable={!!position}
+          ghost={isGhostSl}
           isDragging={isDragging && dragRef.current?.type === "sl"}
           onDragStart={(e) => startDrag(e, "sl")}
           onCancel={slOid ? handleCancelSL : undefined}
@@ -299,16 +336,19 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   );
 }
 
-// ─── HLPriceLine: matches Hyperliquid's line style ───────────────────────────
+// ─── HLPriceLine ─────────────────────────────────────────────────────────────
 
 interface HLPriceLineProps {
   label: string;
   subLabel?: string;
+  pnlLabel?: string;
+  pnlPositive?: boolean;
   size: string;
   price: number;
   color: "blue" | "green" | "red" | "orange";
   lineStyle: "solid" | "dashed";
   draggable: boolean;
+  ghost?: boolean;
   isDragging?: boolean;
   onDragStart?: (e: React.MouseEvent | React.TouchEvent) => void;
   onCancel?: (e: React.MouseEvent) => void;
@@ -324,8 +364,8 @@ const hlColors = {
 };
 
 function HLPriceLine({
-  label, subLabel, size, price, color, lineStyle, draggable,
-  isDragging, onDragStart, onCancel, containerRef, priceToY
+  label, subLabel, pnlLabel, pnlPositive, size, price, color, lineStyle,
+  draggable, ghost, isDragging, onDragStart, onCancel, containerRef, priceToY
 }: HLPriceLineProps) {
   const [height, setHeight] = useState(400);
   const c = hlColors[color];
@@ -344,6 +384,9 @@ function HLPriceLine({
   const yPct = (priceToY(price, height) / height) * 100;
   if (yPct < 1 || yPct > 99) return null;
 
+  const lineOpacity = ghost ? 0.35 : isDragging ? 1 : 0.8;
+  const labelOpacity = ghost ? 0.55 : isDragging ? 1 : 0.93;
+
   return (
     <div
       className="absolute left-0 right-0"
@@ -354,20 +397,22 @@ function HLPriceLine({
         className="absolute left-0 right-0 h-0"
         style={{
           borderTop: `1.5px ${lineStyle === "dashed" ? "dashed" : "solid"} ${c.line}`,
-          opacity: isDragging ? 1 : 0.75,
+          opacity: lineOpacity,
         }}
       />
 
-      {/* Center label group — Hyperliquid style */}
-      <div className="absolute left-1/2 flex items-center gap-1 pointer-events-auto"
-           style={{ transform: "translateX(-50%)" }}>
+      {/* Center label group */}
+      <div
+        className="absolute left-1/2 flex items-center gap-1 pointer-events-auto"
+        style={{ transform: "translateX(-50%)", opacity: labelOpacity }}
+      >
         {/* Drag handle */}
         {draggable && (
           <div
             className={cn(
-              "flex items-center justify-center w-5 h-6 rounded cursor-ns-resize z-20",
-              c.bg, c.border, "border",
-              isDragging && "opacity-100"
+              "flex items-center justify-center w-5 h-6 rounded cursor-ns-resize z-20 border",
+              c.bg, c.border,
+              ghost && "border-dashed"
             )}
             onMouseDown={onDragStart}
             onTouchStart={onDragStart}
@@ -377,26 +422,37 @@ function HLPriceLine({
           </div>
         )}
 
-        {/* Main label box */}
+        {/* Main label */}
         <div
           className={cn(
             "flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-semibold border",
             c.bg, c.border, c.text,
             draggable && "cursor-ns-resize",
-            isDragging && "opacity-100"
+            ghost && "border-dashed"
           )}
           onMouseDown={draggable ? onDragStart : undefined}
           onTouchStart={draggable ? onDragStart : undefined}
-          style={{ opacity: isDragging ? 1 : 0.9 }}
         >
           {subLabel && (
             <>
               <span>{subLabel}</span>
-              <span className="opacity-50">|</span>
+              <span className="opacity-40">|</span>
             </>
           )}
           <span>{label}</span>
         </div>
+
+        {/* Expected P&L badge */}
+        {pnlLabel && (
+          <div className={cn(
+            "px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border",
+            pnlPositive
+              ? "bg-green-500/15 border-green-500/40 text-green-400"
+              : "bg-red-500/15 border-red-500/40 text-red-400"
+          )}>
+            {pnlLabel}
+          </div>
+        )}
 
         {/* Size badge */}
         {size && (
@@ -419,14 +475,18 @@ function HLPriceLine({
             <X className="h-2.5 w-2.5" />
           </button>
         )}
+
+        {/* Ghost hint */}
+        {ghost && !isDragging && (
+          <span className={cn("text-[9px] font-mono italic", c.text, "opacity-70")}>
+            drag to set
+          </span>
+        )}
       </div>
 
       {/* Right-side price tick */}
-      <div className="absolute right-0 flex items-center pointer-events-none">
-        <div
-          className={cn("px-1.5 py-0.5 text-[10px] font-mono rounded-l-sm", c.badge)}
-          style={{ opacity: 0.85 }}
-        >
+      <div className="absolute right-0 flex items-center pointer-events-none" style={{ opacity: ghost ? 0.4 : 0.85 }}>
+        <div className={cn("px-1.5 py-0.5 text-[10px] font-mono rounded-l-sm", c.badge)}>
           {price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </div>
       </div>
