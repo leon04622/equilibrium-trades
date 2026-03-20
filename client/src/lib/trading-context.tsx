@@ -591,10 +591,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
     
     try {
-      // Cancel any existing TP/SL trigger orders for this coin before placing new ones
+      // Cancel only the specific trigger order types that are being replaced.
+      // If updating only TP, the existing SL is preserved (and vice-versa).
       const existingOrders = openOrders.filter(o => o.coin === coin && o.triggerPx);
       for (const order of existingOrders) {
-        await hlCancelOrder(signer, coin, order.oid);
+        const orderType = (() => {
+          if (order.orderType === "stop_loss") return "sl";
+          if (order.orderType === "take_profit") return "tp";
+          if (!pos || pos.entryPrice === 0) return "tp";
+          const trigPx = parseFloat(order.triggerPx || order.limitPx);
+          return pos.side === "long"
+            ? trigPx > pos.entryPrice ? "tp" : "sl"
+            : trigPx < pos.entryPrice ? "tp" : "sl";
+        })();
+        const shouldCancel =
+          (orderType === "tp" && tpPrice !== undefined) ||
+          (orderType === "sl" && slPrice !== undefined);
+        if (shouldCancel) {
+          await hlCancelOrder(signer, coin, order.oid);
+        }
       }
 
       const results: Array<{ success: boolean; error?: string }> = [];

@@ -27,11 +27,11 @@ type DragTarget = "tp" | "sl";
 
 interface DragState {
   target: DragTarget;
-  // Frozen scale captured at drag-start so price↔visual always use same coords
+  // Frozen scale captured at drag-start so price↔visual always use same coords.
+  // Container bounds are NOT frozen — they are read live in onMove so that
+  // any layout shift (toast notification, scroll) doesn't drift the mapping.
   rMin: number;
   rMax: number;
-  containerTop: number;
-  containerHeight: number;
 }
 
 export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
@@ -39,6 +39,10 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const { toast } = useToast();
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // Always-present capture layer — toggled synchronously via ref (no React re-render)
+  // This prevents the TradingView iframe from stealing mouse events between
+  // mousedown and the next React render tick.
+  const fixedCaptureRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   // Always-current price ref so the submitted price is never stale
   const dragPriceRef = useRef(0);
@@ -46,6 +50,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const [dragging, setDragging] = useState(false);
   const [dragPrice, setDragPrice] = useState(0);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
+  const [dragInvalid, setDragInvalid] = useState(false);
   const [isPlacing, setIsPlacing] = useState(false);
 
   const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
@@ -96,7 +101,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     const rMax = maxP + pad;
 
     const toY = (price: number) => ((rMax - price) / (rMax - rMin)) * 100;
-    // Inverse: given Y% (0=top), return price
     const fromY = (yPct: number) => rMax - (rMax - rMin) * (yPct / 100);
 
     return { toY, fromY, rMin, rMax };
@@ -108,27 +112,26 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const startDrag = useCallback((e: React.MouseEvent, target: DragTarget) => {
     e.preventDefault();
     e.stopPropagation();
-    const container = containerRef.current;
-    if (!container) return;
+    if (!containerRef.current) return;
+
+    // ── CRITICAL: activate the capture layer SYNCHRONOUSLY before React re-renders ──
+    // Without this, there is a timing gap between mousedown and the next render tick
+    // during which the TradingView iframe grabs all subsequent mouse events.
+    if (fixedCaptureRef.current) {
+      fixedCaptureRef.current.style.pointerEvents = "all";
+    }
 
     const startPrice = target === "tp"
       ? (activeTpPrice ?? ghostTpPrice ?? currentPrice * 1.02)
       : (activeSlPrice ?? ghostSlPrice ?? currentPrice * 0.98);
 
-    const rect = container.getBoundingClientRect();
-
-    // Freeze the scale at drag-start. Visual Y and price will both use this
-    // throughout the drag, so they are guaranteed to be in sync.
-    dragRef.current = {
-      target,
-      rMin,
-      rMax,
-      containerTop: rect.top,
-      containerHeight: rect.height,
-    };
+    // Only freeze the price scale — container bounds are read live in onMove
+    // so layout shifts (toasts, scrolls) don't drift the price mapping.
+    dragRef.current = { target, rMin, rMax };
     dragPriceRef.current = startPrice;
     setDragTarget(target);
     setDragPrice(startPrice);
+    setDragInvalid(false);
     setDragging(true);
   }, [activeTpPrice, ghostTpPrice, activeSlPrice, ghostSlPrice, currentPrice, rMin, rMax]);
 
@@ -137,29 +140,40 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
     const onMove = (e: MouseEvent) => {
       const state = dragRef.current;
-      if (!state) return;
+      const container = containerRef.current;
+      if (!state || !container) return;
 
-      // Cursor Y as a percentage of the container height (clamped 0–100)
+      // Read bounds live so the mapping stays accurate after any layout shift
+      const rect = container.getBoundingClientRect();
       const yPct = Math.max(0, Math.min(100,
-        ((e.clientY - state.containerTop) / state.containerHeight) * 100
+        ((e.clientY - rect.top) / rect.height) * 100
       ));
 
-      // Convert cursor position → price using the FROZEN scale from drag-start.
-      // This is the exact inverse of toY, so visual line position will match
-      // cursor pixel-for-pixel within our overlay.
       const newPrice = Math.max(state.rMin, Math.min(state.rMax,
         state.rMax - (state.rMax - state.rMin) * (yPct / 100)
       ));
 
+      // Validate against entry boundary — TP must be on the profit side, SL on loss side
+      const invalid = state.target === "tp"
+        ? (isLong ? newPrice <= entry : newPrice >= entry)
+        : (isLong ? newPrice >= entry : newPrice <= entry);
+
+      setDragInvalid(invalid);
       dragPriceRef.current = newPrice;
       setDragPrice(newPrice);
     };
 
     const onUp = async () => {
+      // Release the capture layer immediately and synchronously
+      if (fixedCaptureRef.current) {
+        fixedCaptureRef.current.style.pointerEvents = "none";
+      }
+
       const state = dragRef.current;
       if (!position || !state) {
         setDragging(false);
         setDragTarget(null);
+        setDragInvalid(false);
         return;
       }
       const target = state.target;
@@ -167,6 +181,24 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       dragRef.current = null;
       setDragging(false);
       setDragTarget(null);
+      setDragInvalid(false);
+
+      // Final validation — reject if the drop lands in the wrong zone
+      const invalid = target === "tp"
+        ? (isLong ? finalPrice <= entry : finalPrice >= entry)
+        : (isLong ? finalPrice >= entry : finalPrice <= entry);
+
+      if (invalid) {
+        toast({
+          title: "Invalid price",
+          description: target === "tp"
+            ? `Take Profit must be ${isLong ? "above" : "below"} entry ($${fmt(entry)})`
+            : `Stop Loss must be ${isLong ? "below" : "above"} entry ($${fmt(entry)})`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       setIsPlacing(true);
 
       const currentTp = target === "tp" ? finalPrice : (activeTpPrice ?? 0);
@@ -182,7 +214,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
       setIsPlacing(false);
       toast(result.success
-        ? { title: `${target === "tp" ? "Take Profit" : "Stop Loss"} set at ${fmt(finalPrice)}` }
+        ? { title: `${target === "tp" ? "Take Profit" : "Stop Loss"} set at $${fmt(finalPrice)}` }
         : { title: "Failed to set order", description: result.error, variant: "destructive" });
     };
 
@@ -192,7 +224,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [dragging, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
+  }, [dragging, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast, isLong, entry]);
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
     const order = type === "tp" ? tpOrder : slOrder;
@@ -231,8 +263,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   if (displayTpPrice && displayTpPrice > 0) {
     const isDraggingThis = dragging && dragTarget === "tp";
     const isGhost = !activeTpPrice && !isDraggingThis;
-    // ALWAYS derive visual position from price through toY — never from raw cursor Y
     const visualY = toY(displayTpPrice);
+    const invalid = isDraggingThis && dragInvalid;
 
     lines.push({
       key: "tp",
@@ -243,9 +275,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         : `TP Price ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
       pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displayTpPrice)),
       sizeLabel: isGhost ? undefined : fmt(size),
-      lineColor: "#22c55e",
-      pillBg: "bg-[#22c55e]/20",
-      textColor: "text-[#22c55e]",
+      lineColor: invalid ? "#f97316" : "#22c55e",
+      pillBg: invalid ? "bg-orange-500/20" : "bg-[#22c55e]/20",
+      textColor: invalid ? "text-orange-400" : "text-[#22c55e]",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
@@ -279,6 +311,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     const isDraggingThis = dragging && dragTarget === "sl";
     const isGhost = !activeSlPrice && !isDraggingThis;
     const visualY = toY(displaySlPrice);
+    const invalid = isDraggingThis && dragInvalid;
 
     lines.push({
       key: "sl",
@@ -289,9 +322,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         : `SL Price ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
       pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displaySlPrice)),
       sizeLabel: isGhost ? undefined : fmt(size),
-      lineColor: "#ef4444",
-      pillBg: "bg-[#ef4444]/20",
-      textColor: "text-[#ef4444]",
+      lineColor: invalid ? "#f97316" : "#ef4444",
+      pillBg: invalid ? "bg-orange-500/20" : "bg-[#ef4444]/20",
+      textColor: invalid ? "text-orange-400" : "text-[#ef4444]",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
@@ -320,10 +353,15 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   return (
     <>
-      {/* Full-screen capture layer prevents TradingView iframe from stealing mouse during drag */}
-      {dragging && (
-        <div className="fixed inset-0 z-[999] cursor-ns-resize" style={{ pointerEvents: "all" }} />
-      )}
+      {/* Always-present capture layer — pointer events activated synchronously
+          in startDrag() and deactivated in onUp() via fixedCaptureRef.
+          This eliminates the React render-cycle timing gap that previously allowed
+          the TradingView iframe to steal mouse events during drag. */}
+      <div
+        ref={fixedCaptureRef}
+        className="fixed inset-0 z-[999] cursor-ns-resize"
+        style={{ pointerEvents: "none" }}
+      />
 
       <div
         ref={containerRef}
@@ -348,22 +386,24 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 pointerEvents: "none",
               }}
             >
-              {/* Full-width invisible hit strip — lets users grab anywhere on the line */}
+              {/* Full-width invisible hit strip — lets users grab anywhere on the line.
+                  Subtle hover background provides visual affordance that the strip is draggable. */}
               {line.draggable && line.draggableAs && (
                 <div
-                  className="absolute left-0 right-0 cursor-ns-resize"
+                  className="absolute left-0 right-0 cursor-ns-resize hover:bg-white/5 transition-colors"
                   style={{ height: "28px", top: "-14px", pointerEvents: "auto", zIndex: 25 }}
                   onMouseDown={(e) => startDrag(e, line.draggableAs!)}
+                  title="Drag to move"
                   data-testid={`drag-line-${line.key}`}
                 />
               )}
 
               {/* Horizontal line */}
               <div
-                className="absolute left-0 right-0"
+                className="absolute left-0 right-0 transition-opacity"
                 style={{
                   borderTop: `${line.dashed ? "1.5px dashed" : "2px solid"} ${line.lineColor}`,
-                  opacity: line.ghost ? 0.45 : isDraggingThis ? 1 : 0.9,
+                  opacity: line.ghost ? 0.7 : isDraggingThis ? 1 : 0.9,
                 }}
               />
 
@@ -385,7 +425,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                     "border border-white/15 shadow-lg select-none whitespace-nowrap backdrop-blur-sm",
                     line.pillBg,
                     line.textColor,
-                    line.ghost && "opacity-60",
+                    line.ghost && "opacity-80",
                     line.draggable && "cursor-ns-resize",
                   )}
                 >
@@ -437,7 +477,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 className={cn(
                   "absolute right-0 px-1.5 py-[3px] text-[10px] font-mono font-semibold rounded-l",
                   "border-l border-t border-b border-white/15",
-                  line.ghost ? "opacity-35" : "opacity-95",
+                  line.ghost ? "opacity-55" : "opacity-95",
                 )}
                 style={{
                   pointerEvents: "none",
