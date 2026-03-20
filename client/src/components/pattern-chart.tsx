@@ -160,8 +160,8 @@ function PatternChartComponent({
         textColor: isDark ? "#c9d1d9" : "#24292f",
       },
       grid: {
-        vertLines: { color: isDark ? "#21262d" : "#e1e4e8" },
-        horzLines: { color: isDark ? "#21262d" : "#e1e4e8" },
+        vertLines: { color: isDark ? "#21262d" : "#e1e4e8", style: LineStyle.Solid },
+        horzLines: { color: isDark ? "#21262d" : "#e1e4e8", style: LineStyle.Solid },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -204,14 +204,20 @@ function PatternChartComponent({
     const sma21Series = chart.addSeries(LineSeries, {
       color: "#f7931a",
       lineWidth: 2,
+      lineStyle: LineStyle.Solid,
       title: "21 SMA",
+      priceLineVisible: false,
+      lastValueVisible: true,
     });
     sma21SeriesRef.current = sma21Series;
 
     const sma200Series = chart.addSeries(LineSeries, {
       color: "#3b82f6",
       lineWidth: 2,
+      lineStyle: LineStyle.Solid,
       title: "200 SMA",
+      priceLineVisible: false,
+      lastValueVisible: true,
     });
     sma200SeriesRef.current = sma200Series;
 
