@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
-import { GripHorizontal } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChartPositionOverlayProps {
@@ -15,10 +15,10 @@ interface DragState {
   startPrice: number;
 }
 
-const VISIBLE_RANGE_PCT = 0.06; // ±6% visible range on chart
+const VISIBLE_RANGE_PCT = 0.08; // ±8% visible range on chart overlay
 
 export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverlayProps) {
-  const { positions, openOrders, connected, placeTPSL } = useTrading();
+  const { positions, openOrders, connected, placeTPSL, cancelHLOrder } = useTrading();
   const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -41,14 +41,11 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   const tpOrders = coinOrders.filter(o => getOrderType(o) === "tp");
   const slOrders = coinOrders.filter(o => getOrderType(o) === "sl");
 
-  const tpPrice = tpOrders.length > 0
-    ? parseFloat(tpOrders[0].triggerPx || tpOrders[0].limitPx)
-    : null;
-  const slPrice = slOrders.length > 0
-    ? parseFloat(slOrders[0].triggerPx || slOrders[0].limitPx)
-    : null;
+  const tpPrice = tpOrders.length > 0 ? parseFloat(tpOrders[0].triggerPx || tpOrders[0].limitPx) : null;
+  const slPrice = slOrders.length > 0 ? parseFloat(slOrders[0].triggerPx || slOrders[0].limitPx) : null;
+  const tpOid = tpOrders.length > 0 ? tpOrders[0].oid : null;
+  const slOid = slOrders.length > 0 ? slOrders[0].oid : null;
 
-  // Local drag prices
   const [dragTpPrice, setDragTpPrice] = useState<number | null>(null);
   const [dragSlPrice, setDragSlPrice] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -56,18 +53,16 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   const displayTp = dragTpPrice ?? tpPrice;
   const displaySl = dragSlPrice ?? slPrice;
 
-  // Price scale: map price → Y%, where lower = higher price (chart convention)
+  // Price scale helpers
   const getVisibleMinMax = useCallback(() => {
     const ref = position?.entryPrice ?? currentPrice;
     const range = ref * VISIBLE_RANGE_PCT;
     let min = ref - range;
     let max = ref + range;
-
-    // Expand range to include SL/TP prices
     const prices = [displayTp, displaySl, position?.liquidationPrice].filter(Boolean) as number[];
     for (const p of prices) {
-      if (p < min) min = p - range * 0.3;
-      if (p > max) max = p + range * 0.3;
+      if (p < min) min = p - range * 0.2;
+      if (p > max) max = p + range * 0.2;
     }
     return { min, max };
   }, [currentPrice, position, displayTp, displaySl]);
@@ -88,7 +83,13 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     return p.toFixed(4);
   };
 
-  // Dragging handlers
+  const formatSize = (s: number) => {
+    if (s < 0.001) return s.toFixed(6);
+    if (s < 1) return s.toFixed(4);
+    return s.toFixed(2);
+  };
+
+  // Drag handlers
   const startDrag = useCallback((e: React.MouseEvent | React.TouchEvent, type: "tp" | "sl") => {
     e.preventDefault();
     e.stopPropagation();
@@ -105,7 +106,6 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     const clientY = "touches" in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
     const relY = clientY - rect.top;
     const newPrice = yToPrice(relY, height);
-
     if (dragRef.current.type === "tp") {
       setDragTpPrice(Math.max(newPrice, currentPrice * 0.001));
     } else {
@@ -123,27 +123,23 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     dragRef.current = null;
     setIsDragging(false);
 
-    // Determine what was dragged vs what stays the same
     const newTp = type === "tp" ? dragTpPrice : null;
     const newSl = type === "sl" ? dragSlPrice : null;
 
-    // Check for minimum meaningful movement (>0.05% change) to avoid accidental submissions
     const MIN_MOVE_PCT = 0.0005;
     const tpMoved = newTp !== null && tpPrice !== null
       ? Math.abs(newTp - tpPrice) / tpPrice > MIN_MOVE_PCT
-      : newTp !== null && tpPrice === null; // Setting a new TP
+      : newTp !== null && tpPrice === null;
     const slMoved = newSl !== null && slPrice !== null
       ? Math.abs(newSl - slPrice) / slPrice > MIN_MOVE_PCT
-      : newSl !== null && slPrice === null; // Setting a new SL
+      : newSl !== null && slPrice === null;
 
     if (!tpMoved && !slMoved) {
-      // No meaningful change — cancel the drag silently
       setDragTpPrice(null);
       setDragSlPrice(null);
       return;
     }
 
-    // Build final prices: use dragged value for the changed line, existing for the other
     const finalTp = type === "tp" ? (newTp ?? tpPrice ?? 0) : (tpPrice ?? 0);
     const finalSl = type === "sl" ? (newSl ?? slPrice ?? 0) : (slPrice ?? 0);
 
@@ -194,8 +190,33 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     }
   }, [tpPrice, slPrice]);
 
+  // Cancel a single TP or SL order
+  const handleCancelTP = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!tpOid || !position) return;
+    const result = await cancelHLOrder(coin, tpOid);
+    if (result.success) {
+      toast({ title: "Take Profit Cancelled" });
+    } else {
+      toast({ title: "Cancel Failed", description: result.error, variant: "destructive" });
+    }
+  }, [tpOid, coin, position, cancelHLOrder, toast]);
+
+  const handleCancelSL = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!slOid || !position) return;
+    const result = await cancelHLOrder(coin, slOid);
+    if (result.success) {
+      toast({ title: "Stop Loss Cancelled" });
+    } else {
+      toast({ title: "Cancel Failed", description: result.error, variant: "destructive" });
+    }
+  }, [slOid, coin, position, cancelHLOrder, toast]);
+
   if (!connected) return null;
   if (!position && coinOrders.length === 0) return null;
+
+  const isLong = position?.side === "long";
 
   return (
     <div
@@ -203,60 +224,70 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       className="absolute inset-0 pointer-events-none z-10 select-none"
       data-testid="chart-position-overlay"
     >
-      <PriceLine
-        label="Entry"
-        price={position?.entryPrice ?? 0}
-        color="blue"
-        containerRef={containerRef}
-        priceToY={priceToY}
-        formatPrice={formatPrice}
-        draggable={false}
-        visible={!!position}
-      />
+      {/* Entry line */}
+      {position && position.entryPrice > 0 && (
+        <HLPriceLine
+          label={`Entry: $${formatPrice(position.entryPrice)}`}
+          subLabel={position.unrealizedPnl !== undefined ? `PNL ${position.unrealizedPnl >= 0 ? "+" : ""}$${Math.abs(position.unrealizedPnl).toFixed(2)}` : undefined}
+          size={formatSize(position.size)}
+          price={position.entryPrice}
+          color="blue"
+          lineStyle="solid"
+          draggable={false}
+          containerRef={containerRef}
+          priceToY={priceToY}
+        />
+      )}
 
+      {/* Liquidation line */}
       {position?.liquidationPrice && position.liquidationPrice > 0 && (
-        <PriceLine
-          label="Liq"
+        <HLPriceLine
+          label="Liq. Price"
+          size={formatSize(position.size)}
           price={position.liquidationPrice}
           color="orange"
+          lineStyle="dashed"
+          draggable={false}
           containerRef={containerRef}
           priceToY={priceToY}
-          formatPrice={formatPrice}
-          draggable={false}
-          visible
         />
       )}
 
+      {/* Take Profit line */}
       {displayTp !== null && (
-        <PriceLine
-          label="TP"
+        <HLPriceLine
+          label={`TP Price ${isLong ? ">" : "<"} ${formatPrice(displayTp)}`}
+          size={position ? formatSize(position.size) : ""}
           price={displayTp}
           color="green"
+          lineStyle="dashed"
+          draggable={!!position}
+          isDragging={isDragging && dragRef.current?.type === "tp"}
+          onDragStart={(e) => startDrag(e, "tp")}
+          onCancel={tpOid ? handleCancelTP : undefined}
           containerRef={containerRef}
           priceToY={priceToY}
-          formatPrice={formatPrice}
-          draggable={!!position}
-          onDragStart={(e) => startDrag(e, "tp")}
-          visible
-          isDragging={isDragging && dragRef.current?.type === "tp"}
         />
       )}
 
+      {/* Stop Loss line */}
       {displaySl !== null && (
-        <PriceLine
-          label="SL"
+        <HLPriceLine
+          label={`SL Price ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`}
+          size={position ? formatSize(position.size) : ""}
           price={displaySl}
           color="red"
+          lineStyle="dashed"
+          draggable={!!position}
+          isDragging={isDragging && dragRef.current?.type === "sl"}
+          onDragStart={(e) => startDrag(e, "sl")}
+          onCancel={slOid ? handleCancelSL : undefined}
           containerRef={containerRef}
           priceToY={priceToY}
-          formatPrice={formatPrice}
-          draggable={!!position}
-          onDragStart={(e) => startDrag(e, "sl")}
-          visible
-          isDragging={isDragging && dragRef.current?.type === "sl"}
         />
       )}
 
+      {/* Pending orders badge (no position) */}
       {!position && coinOrders.length > 0 && (
         <div className="absolute top-2 right-2 pointer-events-none">
           <div className="bg-background/80 backdrop-blur-sm border border-border/50 rounded-md px-2 py-1 text-[10px] text-muted-foreground">
@@ -268,52 +299,36 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   );
 }
 
-interface PriceLineProps {
+// ─── HLPriceLine: matches Hyperliquid's line style ───────────────────────────
+
+interface HLPriceLineProps {
   label: string;
+  subLabel?: string;
+  size: string;
   price: number;
   color: "blue" | "green" | "red" | "orange";
+  lineStyle: "solid" | "dashed";
+  draggable: boolean;
+  isDragging?: boolean;
+  onDragStart?: (e: React.MouseEvent | React.TouchEvent) => void;
+  onCancel?: (e: React.MouseEvent) => void;
   containerRef: React.RefObject<HTMLDivElement>;
   priceToY: (price: number, height: number) => number;
-  formatPrice: (p: number) => string;
-  draggable: boolean;
-  onDragStart?: (e: React.MouseEvent | React.TouchEvent) => void;
-  visible: boolean;
-  isDragging?: boolean;
 }
 
-const colorMap = {
-  blue: {
-    line: "border-blue-400",
-    bg: "bg-blue-400",
-    text: "text-blue-400",
-    label: "text-white bg-blue-500",
-  },
-  green: {
-    line: "border-green-400",
-    bg: "bg-green-400",
-    text: "text-green-400",
-    label: "text-white bg-green-600",
-  },
-  red: {
-    line: "border-red-400",
-    bg: "bg-red-400",
-    text: "text-red-400",
-    label: "text-white bg-red-600",
-  },
-  orange: {
-    line: "border-orange-400",
-    bg: "bg-orange-400",
-    text: "text-orange-400",
-    label: "text-white bg-orange-500",
-  },
+const hlColors = {
+  blue:   { line: "#3b82f6", border: "border-blue-500",   bg: "bg-blue-500/10",   text: "text-blue-400",   badge: "bg-blue-500 text-white" },
+  green:  { line: "#22c55e", border: "border-green-500",  bg: "bg-green-500/10",  text: "text-green-400",  badge: "bg-green-600 text-white" },
+  red:    { line: "#ef4444", border: "border-red-500",    bg: "bg-red-500/10",    text: "text-red-400",    badge: "bg-red-600 text-white" },
+  orange: { line: "#f97316", border: "border-orange-500", bg: "bg-orange-500/10", text: "text-orange-400", badge: "bg-orange-500 text-white" },
 };
 
-function PriceLine({
-  label, price, color, containerRef, priceToY, formatPrice,
-  draggable, onDragStart, visible, isDragging
-}: PriceLineProps) {
+function HLPriceLine({
+  label, subLabel, size, price, color, lineStyle, draggable,
+  isDragging, onDragStart, onCancel, containerRef, priceToY
+}: HLPriceLineProps) {
   const [height, setHeight] = useState(400);
-  const colors = colorMap[color];
+  const c = hlColors[color];
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -324,56 +339,97 @@ function PriceLine({
     return () => ro.disconnect();
   }, [containerRef]);
 
-  if (!visible || price <= 0) return null;
+  if (price <= 0) return null;
 
   const yPct = (priceToY(price, height) / height) * 100;
-  // Clamp line to visible area with some padding
-  if (yPct < 2 || yPct > 98) return null;
-
-  const isDashed = color === "green" || color === "red";
+  if (yPct < 1 || yPct > 99) return null;
 
   return (
     <div
       className="absolute left-0 right-0"
       style={{ top: `${yPct}%`, transform: "translateY(-50%)" }}
     >
-      {/* Line */}
+      {/* Horizontal line */}
       <div
-        className={cn(
-          "absolute left-0 right-0 h-0 border-t",
-          isDashed ? "border-dashed" : "border-solid",
-          colors.line,
-          isDragging ? "opacity-100" : "opacity-70"
-        )}
+        className="absolute left-0 right-0 h-0"
+        style={{
+          borderTop: `1.5px ${lineStyle === "dashed" ? "dashed" : "solid"} ${c.line}`,
+          opacity: isDragging ? 1 : 0.75,
+        }}
       />
 
-      {/* Price label on right side */}
-      <div className="absolute right-0 flex items-center gap-1 pointer-events-none">
-        <div className={cn(
-          "flex items-center gap-1 rounded-l-md px-2 py-0.5 text-[10px] font-mono font-semibold",
-          colors.label
-        )}>
-          <span>{label}</span>
-          <span>{formatPrice(price)}</span>
-        </div>
-      </div>
+      {/* Center label group — Hyperliquid style */}
+      <div className="absolute left-1/2 flex items-center gap-1 pointer-events-auto"
+           style={{ transform: "translateX(-50%)" }}>
+        {/* Drag handle */}
+        {draggable && (
+          <div
+            className={cn(
+              "flex items-center justify-center w-5 h-6 rounded cursor-ns-resize z-20",
+              c.bg, c.border, "border",
+              isDragging && "opacity-100"
+            )}
+            onMouseDown={onDragStart}
+            onTouchStart={onDragStart}
+            data-testid={`drag-handle-${color}`}
+          >
+            <GripVertical className={cn("h-3 w-3", c.text)} />
+          </div>
+        )}
 
-      {/* Drag handle - left side, only for TP/SL */}
-      {draggable && (
+        {/* Main label box */}
         <div
           className={cn(
-            "absolute left-2 flex items-center justify-center w-6 h-5 rounded cursor-ns-resize pointer-events-auto z-20",
-            colors.bg, "opacity-80 hover:opacity-100",
-            isDragging && "opacity-100 scale-110"
+            "flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-semibold border",
+            c.bg, c.border, c.text,
+            draggable && "cursor-ns-resize",
+            isDragging && "opacity-100"
           )}
-          style={{ transform: "translateY(-50%)", top: "50%" }}
-          onMouseDown={onDragStart}
-          onTouchStart={onDragStart}
-          data-testid={`drag-handle-${label.toLowerCase()}`}
+          onMouseDown={draggable ? onDragStart : undefined}
+          onTouchStart={draggable ? onDragStart : undefined}
+          style={{ opacity: isDragging ? 1 : 0.9 }}
         >
-          <GripHorizontal className="h-3 w-3 text-white" />
+          {subLabel && (
+            <>
+              <span>{subLabel}</span>
+              <span className="opacity-50">|</span>
+            </>
+          )}
+          <span>{label}</span>
         </div>
-      )}
+
+        {/* Size badge */}
+        {size && (
+          <div className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono font-medium", c.badge)}>
+            {size}
+          </div>
+        )}
+
+        {/* Cancel X button */}
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className={cn(
+              "flex items-center justify-center w-5 h-5 rounded border pointer-events-auto",
+              c.bg, c.border, c.text,
+              "hover:opacity-100 opacity-80"
+            )}
+            data-testid={`cancel-${color}-order`}
+          >
+            <X className="h-2.5 w-2.5" />
+          </button>
+        )}
+      </div>
+
+      {/* Right-side price tick */}
+      <div className="absolute right-0 flex items-center pointer-events-none">
+        <div
+          className={cn("px-1.5 py-0.5 text-[10px] font-mono rounded-l-sm", c.badge)}
+          style={{ opacity: 0.85 }}
+        >
+          {price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        </div>
+      </div>
     </div>
   );
 }

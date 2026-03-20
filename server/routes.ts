@@ -582,22 +582,31 @@ export async function registerRoutes(
       const { walletAddress } = req.params;
       const { isAdminWallet } = await import("@shared/schema");
       
-      // If it's an admin wallet, give them full access
+      // Admin wallet always gets elite access
       if (isAdminWallet(walletAddress)) {
-        return res.json({
-          tier: 'elite',
-          active: true,
-          expiresAt: null
-        });
+        return res.json({ tier: 'elite', active: true, expiresAt: null });
       }
 
+      // Check Stripe directly for real-time subscription status
+      const stripeSubscription = await stripeService.getActiveSubscriptionByWalletAddress(walletAddress);
+      if (stripeSubscription) {
+        // Keep walletUsers table in sync
+        const user = await storage.getWalletUser(walletAddress);
+        if (user && (user.subscriptionTier !== stripeSubscription.tier || !user.subscriptionActive)) {
+          await storage.updateWalletUserSubscription(
+            walletAddress,
+            stripeSubscription.tier,
+            true,
+            stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null
+          );
+        }
+        return res.json(stripeSubscription);
+      }
+
+      // Fall back to walletUsers table (admin-granted subscriptions)
       const user = await storage.getWalletUser(walletAddress);
       if (!user) {
-        return res.json({
-          tier: 'free',
-          active: false,
-          expiresAt: null
-        });
+        return res.json({ tier: 'free', active: false, expiresAt: null });
       }
 
       res.json({

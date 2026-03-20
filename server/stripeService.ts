@@ -3,6 +3,12 @@ import { getUncachableStripeClient } from './stripeClient';
 import { db } from './db';
 import { sql } from 'drizzle-orm';
 
+// Product ID → tier mapping (from replit.md)
+const PRODUCT_TIER_MAP: Record<string, 'pro' | 'elite'> = {
+  'prod_TpGvzRznydzDhy': 'pro',   // AI Pro
+  'prod_TpGvGOpqOoE8xL': 'elite', // Elite Mentoring
+};
+
 export class StripeService {
   async createCustomer(email: string, walletAddress: string) {
     const stripe = await getUncachableStripeClient();
@@ -112,6 +118,70 @@ export class StripeService {
     );
     return result.rows;
   }
+
+  /**
+   * Look up active subscription details by wallet address.
+   * Checks stripe.customers (metadata->walletAddress), finds active subscriptions,
+   * and maps product to tier.
+   * Returns null if no active subscription found.
+   */
+  async getActiveSubscriptionByWalletAddress(walletAddress: string): Promise<{
+    tier: 'pro' | 'elite';
+    active: true;
+    expiresAt: string | null;
+  } | null> {
+    try {
+      // Find customer by walletAddress in metadata (case-insensitive match)
+      const customerResult = await db.execute(
+        sql`
+          SELECT id FROM stripe.customers 
+          WHERE LOWER(metadata->>'walletAddress') = LOWER(${walletAddress})
+          LIMIT 1
+        `
+      );
+      
+      if (customerResult.rows.length === 0) return null;
+      
+      const customerId = (customerResult.rows[0] as any).id as string;
+
+      // Get active subscriptions with their product info via items
+      const subResult = await db.execute(
+        sql`
+          SELECT 
+            s.id as sub_id,
+            s.status,
+            s.current_period_end,
+            si.price as price_id,
+            p.product as product_id
+          FROM stripe.subscriptions s
+          JOIN stripe.subscription_items si ON si.subscription = s.id
+          JOIN stripe.prices p ON p.id = si.price
+          WHERE s.customer = ${customerId}
+            AND s.status IN ('active', 'trialing')
+          ORDER BY s.created DESC
+          LIMIT 1
+        `
+      );
+
+      if (subResult.rows.length === 0) return null;
+
+      const row = subResult.rows[0] as any;
+      const productId = row.product_id as string;
+      const tier = PRODUCT_TIER_MAP[productId];
+      
+      if (!tier) return null;
+
+      const expiresAt = row.current_period_end
+        ? new Date(Number(row.current_period_end) * 1000).toISOString()
+        : null;
+
+      return { tier, active: true, expiresAt };
+    } catch (err) {
+      console.error('[stripeService] getActiveSubscriptionByWalletAddress error:', err);
+      return null;
+    }
+  }
 }
 
 export const stripeService = new StripeService();
+export { PRODUCT_TIER_MAP };
