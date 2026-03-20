@@ -202,7 +202,7 @@ function PatternChartComponent({
     candleSeriesRef.current = candleSeries;
 
     const sma21Series = chart.addSeries(LineSeries, {
-      color: "#f7931a",
+      color: "#ffffff",
       lineWidth: 2,
       lineStyle: LineStyle.Solid,
       title: "21 SMA",
@@ -212,7 +212,7 @@ function PatternChartComponent({
     sma21SeriesRef.current = sma21Series;
 
     const sma200Series = chart.addSeries(LineSeries, {
-      color: "#3b82f6",
+      color: "#f5e642",
       lineWidth: 2,
       lineStyle: LineStyle.Solid,
       title: "200 SMA",
@@ -373,12 +373,12 @@ function PatternChartComponent({
           
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-orange-500" />
+              <div className="w-2 h-2 rounded-full bg-white" />
               <span className="text-muted-foreground">21 SMA:</span>
               <span className="font-mono">${activeSignal.sma21.toFixed(2)}</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#f5e642" }} />
               <span className="text-muted-foreground">200 SMA:</span>
               <span className="font-mono">${activeSignal.sma200.toFixed(2)}</span>
             </div>
@@ -405,7 +405,7 @@ function PatternChartComponent({
       {!activeSignal && (
         <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-3 h-0.5 bg-orange-500" />
+            <div className="w-3 h-0.5 bg-white" />
             <span className="text-sm">21 SMA</span>
             {smaStatus && (
               <span className="font-mono text-xs text-muted-foreground">
@@ -414,7 +414,7 @@ function PatternChartComponent({
             )}
           </div>
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-3 h-0.5 bg-blue-500" />
+            <div className="w-3 h-0.5" style={{ backgroundColor: "#f5e642" }} />
             <span className="text-sm">200 SMA</span>
             {smaStatus && smaStatus.sma200 > 0 && (
               <span className="font-mono text-xs text-muted-foreground">
