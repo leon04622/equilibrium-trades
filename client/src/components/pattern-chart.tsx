@@ -262,7 +262,7 @@ function PatternChartComponent({
     const rsiChart = createChart(rsiContainerRef.current, {
       ...chartOpts(isDark, false),
       timeScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, visible: false, rightOffset: 5, barSpacing: 8 },
-      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: false, scaleMargins: { top: 0.05, bottom: 0.05 } },
+      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
     rsiChartRef.current = rsiChart;
 
@@ -278,7 +278,7 @@ function PatternChartComponent({
     // ── Stoch RSI chart ──
     const stochChart = createChart(stochContainerRef.current, {
       ...chartOpts(isDark, true),
-      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: false, scaleMargins: { top: 0.05, bottom: 0.05 } },
+      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
     stochChartRef.current = stochChart;
 
@@ -367,10 +367,6 @@ function PatternChartComponent({
       if (k.length > 0) stochKSeriesRef.current.setData(k);
       if (d.length > 0) stochDSeriesRef.current.setData(d);
     }
-
-    // Set RSI and Stoch RSI y-axis range
-    rsiSeriesRef.current.priceScale().applyOptions({ autoScale: false });
-    rsiChartRef.current?.applyOptions({ rightPriceScale: { autoScale: false } });
 
     if (mainChartRef.current && isInitialLoadRef.current) {
       mainChartRef.current.timeScale().fitContent();
