@@ -123,27 +123,45 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     dragRef.current = null;
     setIsDragging(false);
 
-    const finalTp = displayTp;
-    const finalSl = displaySl;
+    // Determine what was dragged vs what stays the same
+    const newTp = type === "tp" ? dragTpPrice : null;
+    const newSl = type === "sl" ? dragSlPrice : null;
 
-    if (!finalTp && !finalSl) return;
+    // Check for minimum meaningful movement (>0.05% change) to avoid accidental submissions
+    const MIN_MOVE_PCT = 0.0005;
+    const tpMoved = newTp !== null && tpPrice !== null
+      ? Math.abs(newTp - tpPrice) / tpPrice > MIN_MOVE_PCT
+      : newTp !== null && tpPrice === null; // Setting a new TP
+    const slMoved = newSl !== null && slPrice !== null
+      ? Math.abs(newSl - slPrice) / slPrice > MIN_MOVE_PCT
+      : newSl !== null && slPrice === null; // Setting a new SL
+
+    if (!tpMoved && !slMoved) {
+      // No meaningful change — cancel the drag silently
+      setDragTpPrice(null);
+      setDragSlPrice(null);
+      return;
+    }
+
+    // Build final prices: use dragged value for the changed line, existing for the other
+    const finalTp = type === "tp" ? (newTp ?? tpPrice ?? 0) : (tpPrice ?? 0);
+    const finalSl = type === "sl" ? (newSl ?? slPrice ?? 0) : (slPrice ?? 0);
 
     try {
       const result = await placeTPSL(
         position.coin,
         position.size,
         position.side === "long",
-        finalTp ?? 0,
-        finalSl ?? 0
+        finalTp > 0 ? finalTp : undefined,
+        finalSl > 0 ? finalSl : undefined,
       );
       if (result.success) {
         toast({
-          title: `${type.toUpperCase()} Updated`,
-          description: `${type === "tp" ? "Take Profit" : "Stop Loss"} set to $${formatPrice(type === "tp" ? (finalTp ?? 0) : (finalSl ?? 0))}`,
+          title: `${type === "tp" ? "Take Profit" : "Stop Loss"} Updated`,
+          description: `${type === "tp" ? "Take Profit" : "Stop Loss"} set to $${formatPrice(type === "tp" ? finalTp : finalSl)}`,
         });
       } else {
         toast({ title: "Update Failed", description: result.error, variant: "destructive" });
-        // Reset drag prices on failure
         setDragTpPrice(null);
         setDragSlPrice(null);
       }
@@ -151,7 +169,7 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       setDragTpPrice(null);
       setDragSlPrice(null);
     }
-  }, [position, displayTp, displaySl, placeTPSL, toast]);
+  }, [position, dragTpPrice, dragSlPrice, tpPrice, slPrice, placeTPSL, toast]);
 
   useEffect(() => {
     if (isDragging) {

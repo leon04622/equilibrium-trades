@@ -567,6 +567,28 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
     }
+
+    // Validate TP/SL direction against position entry price
+    const pos = positions.find(p => p.coin === coin);
+    if (pos && pos.entryPrice > 0) {
+      const entry = pos.entryPrice;
+      if (tpPrice && tpPrice > 0) {
+        if (isLong && tpPrice <= entry) {
+          return { success: false, error: `Take Profit must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long position. Got: $${tpPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        }
+        if (!isLong && tpPrice >= entry) {
+          return { success: false, error: `Take Profit must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short position. Got: $${tpPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        }
+      }
+      if (slPrice && slPrice > 0) {
+        if (isLong && slPrice >= entry) {
+          return { success: false, error: `Stop Loss must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long position. Got: $${slPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        }
+        if (!isLong && slPrice <= entry) {
+          return { success: false, error: `Stop Loss must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short position. Got: $${slPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        }
+      }
+    }
     
     try {
       // Cancel any existing TP/SL trigger orders for this coin before placing new ones
@@ -613,7 +635,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       console.error("Error placing TP/SL:", error);
       return { success: false, error: error.message || "Failed to place TP/SL" };
     }
-  }, [signer, openOrders, refreshAccount]);
+  }, [signer, openOrders, positions, refreshAccount]);
 
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);

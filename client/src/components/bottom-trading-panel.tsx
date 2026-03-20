@@ -118,11 +118,35 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       toast({ title: "No TP/SL Set", description: "Please enter at least one price", variant: "destructive" });
       return;
     }
+
+    const entry = tpslDialog.entryPrice;
+    const isLong = tpslDialog.side === "long";
+
+    if (tp && entry > 0) {
+      if (isLong && tp <= entry) {
+        toast({ title: "Invalid Take Profit", description: `TP must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long. Set a higher price.`, variant: "destructive" });
+        return;
+      }
+      if (!isLong && tp >= entry) {
+        toast({ title: "Invalid Take Profit", description: `TP must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short. Set a lower price.`, variant: "destructive" });
+        return;
+      }
+    }
+    if (sl && entry > 0) {
+      if (isLong && sl >= entry) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long. Set a lower price.`, variant: "destructive" });
+        return;
+      }
+      if (!isLong && sl <= entry) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short. Set a higher price.`, variant: "destructive" });
+        return;
+      }
+    }
     
     const result = await placeTPSL(
       tpslDialog.coin,
       tpslDialog.size,
-      tpslDialog.side === "long",
+      isLong,
       tp,
       sl
     );
@@ -335,61 +359,99 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             <DialogTitle className="text-lg">TP/SL for Position</DialogTitle>
           </DialogHeader>
           
-          <div className="space-y-4">
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Coin</span>
-              <span className="font-medium">{tpslDialog.coin}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Position</span>
-              <span className={cn(
-                "font-medium",
-                tpslDialog.side === "long" ? "text-bullish" : "text-bearish"
-              )}>
-                {formatSize(tpslDialog.size)} {tpslDialog.coin}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Entry Price</span>
-              <span className="font-mono">{formatPrice(tpslDialog.entryPrice)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Mark Price</span>
-              <span className="font-mono">{formatPrice(tpslDialog.markPrice)}</span>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div className="space-y-2">
-                <Input
-                  type="number"
-                  placeholder="TP Price"
-                  value={tpPrice}
-                  onChange={(e) => setTpPrice(e.target.value)}
-                  className="font-mono bg-muted/50"
-                  data-testid="input-tp-price"
-                />
+          <div className="space-y-3">
+            {/* Position summary */}
+            <div className="bg-muted/40 rounded-lg px-3 py-2 grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center">
+                <div className="text-muted-foreground mb-0.5">Coin</div>
+                <div className="font-medium">{tpslDialog.coin}</div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-bullish text-sm font-medium">Gain</span>
-                <Badge variant="outline" className="text-xs">%</Badge>
+              <div className="text-center">
+                <div className="text-muted-foreground mb-0.5">Side</div>
+                <div className={cn("font-medium capitalize", tpslDialog.side === "long" ? "text-bullish" : "text-bearish")}>
+                  {tpslDialog.side}
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-muted-foreground mb-0.5">Entry</div>
+                <div className="font-mono font-medium">${formatPrice(tpslDialog.entryPrice)}</div>
               </div>
             </div>
-            
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Input
-                  type="number"
-                  placeholder="SL Price"
-                  value={slPrice}
-                  onChange={(e) => setSlPrice(e.target.value)}
-                  className="font-mono bg-muted/50"
-                  data-testid="input-sl-price"
-                />
+
+            {/* Take Profit */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-bullish">
+                  Take Profit {tpslDialog.side === "long" ? "↑ (above entry)" : "↓ (below entry)"}
+                </label>
+                <div className="flex gap-1">
+                  {[1, 2, 5].map(pct => {
+                    const mult = tpslDialog.side === "long" ? (1 + pct / 100) : (1 - pct / 100);
+                    const price = (tpslDialog.entryPrice * mult).toFixed(0);
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => setTpPrice(price)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-bullish/10 text-bullish hover:bg-bullish/20"
+                        data-testid={`button-tp-pct-${pct}`}
+                      >
+                        +{pct}%
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-bearish text-sm font-medium">Loss</span>
-                <Badge variant="outline" className="text-xs">%</Badge>
+              <Input
+                type="number"
+                placeholder={tpslDialog.side === "long" ? `Above ${formatPrice(tpslDialog.entryPrice)}` : `Below ${formatPrice(tpslDialog.entryPrice)}`}
+                value={tpPrice}
+                onChange={(e) => setTpPrice(e.target.value)}
+                className="font-mono bg-muted/50"
+                data-testid="input-tp-price"
+              />
+              {tpPrice && tpslDialog.entryPrice > 0 && (
+                <div className="text-[10px] text-bullish font-mono pl-1">
+                  {((parseFloat(tpPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100).toFixed(2)}% from entry
+                </div>
+              )}
+            </div>
+
+            {/* Stop Loss */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-bearish">
+                  Stop Loss {tpslDialog.side === "long" ? "↓ (below entry)" : "↑ (above entry)"}
+                </label>
+                <div className="flex gap-1">
+                  {[1, 2, 5].map(pct => {
+                    const mult = tpslDialog.side === "long" ? (1 - pct / 100) : (1 + pct / 100);
+                    const price = (tpslDialog.entryPrice * mult).toFixed(0);
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => setSlPrice(price)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-bearish/10 text-bearish hover:bg-bearish/20"
+                        data-testid={`button-sl-pct-${pct}`}
+                      >
+                        -{pct}%
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+              <Input
+                type="number"
+                placeholder={tpslDialog.side === "long" ? `Below ${formatPrice(tpslDialog.entryPrice)}` : `Above ${formatPrice(tpslDialog.entryPrice)}`}
+                value={slPrice}
+                onChange={(e) => setSlPrice(e.target.value)}
+                className="font-mono bg-muted/50"
+                data-testid="input-sl-price"
+              />
+              {slPrice && tpslDialog.entryPrice > 0 && (
+                <div className="text-[10px] text-bearish font-mono pl-1">
+                  {((parseFloat(slPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100).toFixed(2)}% from entry
+                </div>
+              )}
             </div>
             
             <Button 
@@ -397,12 +459,11 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
               className="w-full bg-primary hover:bg-primary/90"
               data-testid="button-confirm-tpsl"
             >
-              Confirm
+              Confirm TP/SL
             </Button>
             
             <p className="text-xs text-muted-foreground text-center">
-              By default take-profit and stop-loss orders apply to the entire position. 
-              They automatically cancel after closing the position.
+              TP/SL orders are reduce-only and apply to the full position size.
             </p>
           </div>
         </DialogContent>

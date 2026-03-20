@@ -37,7 +37,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [reduceOnly, setReduceOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { balance, refreshAccount } = useTrading();
+  const { balance, positions, refreshAccount, placeTPSL } = useTrading();
   const { isConnected, signer, connect } = useWallet();
   const { toast } = useToast();
 
@@ -161,8 +161,41 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         description: `${qty} ${coin} at $${formatPrice(result.avgPrice || orderPrice)} with ${leverageValue[0]}x leverage`,
       });
 
-      // Refresh positions after successful order
+      // Refresh positions so TP/SL validation has the real entry price
       await refreshAccount();
+
+      // Place TP/SL if set in the form
+      if (showSLTP && (takeProfit || stopLoss)) {
+        const tp = takeProfit ? parseFloat(takeProfit) : undefined;
+        const sl = stopLoss ? parseFloat(stopLoss) : undefined;
+        const isLong = side === "buy";
+        const fillPrice = result.avgPrice || orderPrice;
+
+        // Client-side direction validation before submitting
+        let tpSlError = "";
+        if (tp && tp > 0) {
+          if (isLong && tp <= fillPrice) tpSlError = `TP (${formatPrice(tp)}) must be above fill price (${formatPrice(fillPrice)}) for a Long`;
+          if (!isLong && tp >= fillPrice) tpSlError = `TP (${formatPrice(tp)}) must be below fill price (${formatPrice(fillPrice)}) for a Short`;
+        }
+        if (sl && sl > 0) {
+          if (isLong && sl >= fillPrice) tpSlError = `SL (${formatPrice(sl)}) must be below fill price (${formatPrice(fillPrice)}) for a Long`;
+          if (!isLong && sl <= fillPrice) tpSlError = `SL (${formatPrice(sl)}) must be above fill price (${formatPrice(fillPrice)}) for a Short`;
+        }
+
+        if (tpSlError) {
+          toast({ title: "TP/SL Skipped", description: tpSlError, variant: "destructive" });
+        } else {
+          const tpslResult = await placeTPSL(coin, qty, isLong, tp, sl);
+          if (tpslResult.success) {
+            toast({
+              title: "TP/SL Set",
+              description: `${tp ? `TP: $${formatPrice(tp)}` : ""}${tp && sl ? " | " : ""}${sl ? `SL: $${formatPrice(sl)}` : ""}`,
+            });
+          } else {
+            toast({ title: "TP/SL Failed", description: tpslResult.error, variant: "destructive" });
+          }
+        }
+      }
 
       setQuantity("");
       setPrice("");
