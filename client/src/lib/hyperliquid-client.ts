@@ -541,6 +541,34 @@ async function signL1ActionWithAgent(
   return signature;
 }
 
+// Referral code for this platform. Set to your Hyperliquid referral code.
+const PLATFORM_REFERRAL_CODE = import.meta.env.VITE_HL_REFERRAL_CODE || "";
+
+// Attempt to register the platform referral code for a new user.
+// Silently no-ops if already done this session, or if no referral code is set.
+const referralSetForSession = new Set<string>();
+
+export async function trySetReferrer(signer: JsonRpcSigner): Promise<void> {
+  if (!PLATFORM_REFERRAL_CODE) return;
+  try {
+    const address = (await signer.getAddress()).toLowerCase();
+    if (referralSetForSession.has(address)) return;
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) return;
+    const nonce = getUniqueNonce();
+    const action = { type: "setReferrer", code: PLATFORM_REFERRAL_CODE };
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
+    await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, nonce, signature, vaultAddress: null }),
+    });
+    referralSetForSession.add(address);
+  } catch {
+    // Referral is best-effort — never block order placement.
+  }
+}
+
 export async function placeOrder(
   signer: JsonRpcSigner,
   order: OrderRequest

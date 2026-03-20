@@ -9,7 +9,6 @@ import { OrderEntry } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
 import { BottomTradingPanel } from "@/components/bottom-trading-panel";
 import { ActivePositionPanel } from "@/components/active-position-panel";
-import { ChartOrderLines } from "@/components/chart-order-lines";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -314,7 +313,6 @@ export default function Trading({ visible = true }: TradingProps) {
                   ) : (
                     <TradingViewChart symbol={tvSymbol} interval={timeframe} className="absolute inset-0" />
                   )}
-                  <ChartOrderLines coin={coin} currentPrice={price} />
                 </div>
               )}
               {!isFullscreen && mobileTab === "orderbook" && (
@@ -342,7 +340,6 @@ export default function Trading({ visible = true }: TradingProps) {
               ) : (
                 <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
               )}
-              <ChartOrderLines coin={coin} currentPrice={price} />
             </div>
             
             {/* Optional Order Book Panel - Desktop only */}
