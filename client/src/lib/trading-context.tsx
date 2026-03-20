@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { useWallet } from "./wallet-context";
 import { 
   getAccountState, 
@@ -225,6 +225,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
   const [isClosingPosition, setIsClosingPosition] = useState(false);
+  const isPlacingTPSLRef = useRef(false);
 
   const connected = walletConnected;
   const address = walletAddress || "";
@@ -274,14 +275,26 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setPositions(convertedPositions);
       
       // Store open orders from Hyperliquid (includes SL/TP trigger orders via frontendOpenOrders)
+      const triggerOrds = (hlOrders || []).filter((o: any) => o.isTrigger || o.triggerPx);
+      if (triggerOrds.length > 0) {
+        console.log("[openOrders] trigger orders raw:", JSON.stringify(triggerOrds.map((o: any) => ({
+          coin: o.coin, orderType: o.orderType, triggerCondition: o.triggerCondition, tpsl: o.tpsl,
+          triggerPx: o.triggerPx, limitPx: o.limitPx, isTrigger: o.isTrigger,
+        }))));
+      }
       const convertedOrders: HLOpenOrder[] = (hlOrders || []).map((ord: any) => {
         let orderType: "limit" | "stop_loss" | "take_profit" = "limit";
-        if (ord.tpsl === "tp") {
+        // Use Hyperliquid's orderType string first (most reliable)
+        const ot = (ord.orderType || "").toLowerCase();
+        const tc = (ord.triggerCondition || ord.tpsl || "").toLowerCase();
+        if (ot.includes("take profit")) {
           orderType = "take_profit";
-        } else if (ord.tpsl === "sl") {
+        } else if (ot.includes("stop")) {
           orderType = "stop_loss";
-        } else if (ord.isTrigger && ord.triggerPx) {
-          orderType = parseFloat(ord.triggerPx) < parseFloat(ord.limitPx) ? "stop_loss" : "take_profit";
+        } else if (tc === "tp" || tc.includes("above")) {
+          orderType = "take_profit";
+        } else if (tc === "sl" || tc.includes("below")) {
+          orderType = "stop_loss";
         }
         return {
           coin: ord.coin,
@@ -568,6 +581,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
     }
+    if (isPlacingTPSLRef.current) {
+      console.warn("[placeTPSL] Already placing TP/SL, ignoring duplicate call");
+      return { success: false, error: "TP/SL placement already in progress" };
+    }
+    isPlacingTPSLRef.current = true;
 
     // Validate TP/SL against the entry price of the position (or mark price if no
     // position found yet). Using entry price prevents false rejections when the
@@ -654,6 +672,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       console.error("Error placing TP/SL:", error);
       return { success: false, error: error.message || "Failed to place TP/SL" };
+    } finally {
+      isPlacingTPSLRef.current = false;
     }
   }, [signer, openOrders, positions, refreshAccount]);
 
