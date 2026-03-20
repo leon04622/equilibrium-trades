@@ -822,14 +822,15 @@ export async function analyzeForEducationalPatterns(
       timeframe === "5m" ? Promise.resolve(currentSMA) : getSMAForTimeframe(coin, "5m"),
     ]);
     
-    if (sma1m && sma5m) {
-      // For bullish continuation patterns: BOTH timeframes must have 21 > 200
-      const is1mBullish = sma1m.sma21 > sma1m.sma200;
-      const is5mBullish = sma5m.sma21 > sma5m.sma200;
-      
-      multiTimeframeBullish = is1mBullish && is5mBullish;
-      multiTimeframeBearish = !is1mBullish && !is5mBullish;
-    }
+    // For continuation patterns: prefer BOTH timeframes aligned, but allow EITHER if one is unavailable
+    const is1mBullish = sma1m ? sma1m.sma21 > sma1m.sma200 : isBullish;
+    const is5mBullish = sma5m ? sma5m.sma21 > sma5m.sma200 : isBullish;
+    const is1mBearish = sma1m ? sma1m.sma21 < sma1m.sma200 : !isBullish;
+    const is5mBearish = sma5m ? sma5m.sma21 < sma5m.sma200 : !isBullish;
+
+    // Strong: both aligned; Weak: at least one aligned + current TF aligned
+    multiTimeframeBullish = is1mBullish || is5mBullish; // At least one bullish TF
+    multiTimeframeBearish = is1mBearish || is5mBearish; // At least one bearish TF
     
     // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);

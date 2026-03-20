@@ -961,31 +961,5 @@ export async function registerRoutes(
     }
   });
 
-  // Check subscription status for a wallet
-  app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
-    try {
-      const { walletAddress } = req.params;
-      
-      const walletUser = await storage.getWalletUser(walletAddress);
-      if (!walletUser) {
-        return res.json({ 
-          hasSubscription: false, 
-          tier: 'free',
-          active: false 
-        });
-      }
-
-      res.json({
-        hasSubscription: walletUser.subscriptionTier !== 'free',
-        tier: walletUser.subscriptionTier,
-        active: walletUser.subscriptionActive,
-        expiresAt: walletUser.subscriptionExpiresAt
-      });
-    } catch (error) {
-      console.error("Error checking subscription:", error);
-      res.status(500).json({ error: "Failed to check subscription status" });
-    }
-  });
-
   return httpServer;
 }
