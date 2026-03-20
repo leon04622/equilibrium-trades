@@ -94,6 +94,13 @@ export default function Portfolio() {
     }
   }, [connected, address]);
 
+  // Auto-refresh spot balances every 15 seconds when connected
+  useEffect(() => {
+    if (!connected || !address) return;
+    const interval = setInterval(fetchSpotBalances, 15000);
+    return () => clearInterval(interval);
+  }, [connected, address]);
+
   const handleRefresh = () => {
     refreshAccount();
     fetchSpotBalances();
@@ -195,7 +202,11 @@ export default function Portfolio() {
         setTimeout(() => {
           setTransferOpen(false);
           handleRefresh();
-        }, 2500);
+        }, 2000);
+        // Second refresh after 5s to catch slower API propagation
+        setTimeout(() => handleRefresh(), 5000);
+        // Third refresh after 10s for final confirmation
+        setTimeout(() => handleRefresh(), 10000);
       } else {
         const errMsg = result.error || "Transfer failed";
         console.error("[Transfer] API error:", errMsg);

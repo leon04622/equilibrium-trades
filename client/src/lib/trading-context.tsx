@@ -273,18 +273,28 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }));
       setPositions(convertedPositions);
       
-      // Store open orders from Hyperliquid (includes SL/TP trigger orders)
-      const convertedOrders: HLOpenOrder[] = (hlOrders || []).map((ord: any) => ({
-        coin: ord.coin,
-        oid: ord.oid,
-        side: ord.side,
-        sz: ord.sz,
-        limitPx: ord.limitPx,
-        timestamp: ord.timestamp,
-        origSz: ord.origSz,
-        orderType: ord.orderType || (ord.triggerPx ? (ord.isTrigger ? (parseFloat(ord.triggerPx) < parseFloat(ord.limitPx) ? "stop_loss" : "take_profit") : "limit") : "limit"),
-        triggerPx: ord.triggerPx,
-      }));
+      // Store open orders from Hyperliquid (includes SL/TP trigger orders via frontendOpenOrders)
+      const convertedOrders: HLOpenOrder[] = (hlOrders || []).map((ord: any) => {
+        let orderType: "limit" | "stop_loss" | "take_profit" = "limit";
+        if (ord.tpsl === "tp") {
+          orderType = "take_profit";
+        } else if (ord.tpsl === "sl") {
+          orderType = "stop_loss";
+        } else if (ord.isTrigger && ord.triggerPx) {
+          orderType = parseFloat(ord.triggerPx) < parseFloat(ord.limitPx) ? "stop_loss" : "take_profit";
+        }
+        return {
+          coin: ord.coin,
+          oid: ord.oid,
+          side: ord.side,
+          sz: ord.sz,
+          limitPx: ord.limitPx,
+          timestamp: ord.timestamp,
+          origSz: ord.origSz,
+          orderType,
+          triggerPx: ord.triggerPx,
+        };
+      });
       setOpenOrders(convertedOrders);
 
     } catch (error) {
@@ -559,6 +569,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
     
     try {
+      // Cancel any existing TP/SL trigger orders for this coin before placing new ones
+      const existingOrders = openOrders.filter(o => o.coin === coin && o.triggerPx);
+      for (const order of existingOrders) {
+        await hlCancelOrder(signer, coin, order.oid);
+      }
+
       const results: Array<{ success: boolean; error?: string }> = [];
       
       if (tpPrice && tpPrice > 0) {
@@ -597,7 +613,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       console.error("Error placing TP/SL:", error);
       return { success: false, error: error.message || "Failed to place TP/SL" };
     }
-  }, [signer, refreshAccount]);
+  }, [signer, openOrders, refreshAccount]);
 
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);

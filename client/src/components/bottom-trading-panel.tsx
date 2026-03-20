@@ -143,16 +143,17 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   };
 
   const getTPSLDisplay = (pos: any) => {
-    const posOrders = openOrders.filter(o => o.coin === pos.coin);
+    const posOrders = openOrders.filter(o => o.coin === pos.coin && o.triggerPx);
     let tp = "--";
     let sl = "--";
     
     posOrders.forEach(o => {
-      if (!o.triggerPx) return;
-      const trigger = parseFloat(o.triggerPx);
-      const isTP = o.orderType === "take_profit" || 
-        (pos.side === "long" && trigger > pos.entryPrice) ||
-        (pos.side === "short" && trigger < pos.entryPrice);
+      const trigger = parseFloat(o.triggerPx!);
+      const isTP = o.orderType === "take_profit" ||
+        (o.orderType !== "stop_loss" && (
+          (pos.side === "long" && trigger > pos.entryPrice) ||
+          (pos.side === "short" && trigger < pos.entryPrice)
+        ));
       if (isTP) {
         tp = formatPrice(trigger);
       } else {

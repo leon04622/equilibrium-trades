@@ -429,13 +429,37 @@ export async function getPositions(address: string): Promise<Position[]> {
     }));
 }
 
+let cachedMeta: { universe: Array<{ name: string; maxLeverage: number; szDecimals: number }> } | null = null;
+let metaFetchTime = 0;
+
+export async function getCoinMaxLeverage(coin: string): Promise<number> {
+  const now = Date.now();
+  if (!cachedMeta || now - metaFetchTime > 5 * 60 * 1000) {
+    try {
+      const response = await fetch(INFO_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "meta" }),
+      });
+      if (response.ok) {
+        cachedMeta = await response.json();
+        metaFetchTime = now;
+      }
+    } catch {
+      return 50;
+    }
+  }
+  const coinInfo = cachedMeta?.universe.find(u => u.name === coin);
+  return coinInfo?.maxLeverage ?? 50;
+}
+
 export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
   try {
     const response = await fetch(INFO_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        type: "openOrders",
+        type: "frontendOpenOrders",
         user: address,
       }),
     });

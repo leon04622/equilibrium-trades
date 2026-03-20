@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { ShieldCheck, Target, AlertTriangle, Loader2, Info, HelpCircle } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { placeOrder as placeHyperliquidOrder, setLeverage } from "@/lib/hyperliquid-client";
+import { placeOrder as placeHyperliquidOrder, setLeverage, getCoinMaxLeverage } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
 
 interface OrderEntryProps {
@@ -33,12 +33,20 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [leverageValue, setLeverageValue] = useState([10]);
+  const [maxLeverage, setMaxLeverage] = useState(50);
   const [reduceOnly, setReduceOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { balance, refreshAccount } = useTrading();
   const { isConnected, signer, connect } = useWallet();
   const { toast } = useToast();
+
+  useEffect(() => {
+    getCoinMaxLeverage(coin).then(max => {
+      setMaxLeverage(max);
+      setLeverageValue(prev => [Math.min(prev[0], max)]);
+    });
+  }, [coin]);
 
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -372,7 +380,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
                 value={leverageValue[0]}
                 onChange={(e) => {
                   const val = parseInt(e.target.value);
-                  if (!isNaN(val) && val >= 1 && val <= 50) {
+                  if (!isNaN(val) && val >= 1 && val <= maxLeverage) {
                     setLeverageValue([val]);
                   }
                 }}
@@ -385,16 +393,16 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
             value={leverageValue}
             onValueChange={setLeverageValue}
             min={1}
-            max={50}
+            max={maxLeverage}
             step={1}
             className="py-1"
             data-testid="slider-leverage"
           />
           <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
             <span>1x</span>
-            <span>10x</span>
-            <span>25x</span>
-            <span>50x</span>
+            <span>{Math.round(maxLeverage * 0.25)}x</span>
+            <span>{Math.round(maxLeverage * 0.5)}x</span>
+            <span>{maxLeverage}x</span>
           </div>
         </div>
 

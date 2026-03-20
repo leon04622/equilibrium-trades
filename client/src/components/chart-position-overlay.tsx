@@ -168,10 +168,12 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     }
   }, [isDragging, onMouseMove, onMouseUp]);
 
-  // Reset drag prices when real orders change
+  // Reset drag prices when real orders change (but not while actively dragging)
   useEffect(() => {
-    setDragTpPrice(null);
-    setDragSlPrice(null);
+    if (!isDragging) {
+      setDragTpPrice(null);
+      setDragSlPrice(null);
+    }
   }, [tpPrice, slPrice]);
 
   if (!connected) return null;
