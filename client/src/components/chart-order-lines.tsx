@@ -30,11 +30,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const { toast } = useToast();
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{
-    target: DragTarget;
-    startY: number;
-    startPrice: number;
-  } | null>(null);
+  // Stable ref for toPrice so mousemove never uses a stale closure
+  const toPriceRef = useRef<(yPct: number) => number>(() => 0);
 
   const [dragging, setDragging] = useState(false);
   const [dragPrice, setDragPrice] = useState(0);
@@ -60,44 +57,48 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const activeTpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
   const activeSlPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
 
-  // Ghost prices when no order exists yet (±2% from entry)
+  const isLong = position?.side === "long";
+  const entry = position?.entryPrice ?? 0;
+
+  // Ghost prices when no real order exists
   const ghostTpPrice = position && !activeTpPrice
-    ? position.side === "long"
-      ? position.entryPrice * 1.02
-      : position.entryPrice * 0.98
+    ? isLong ? entry * 1.02 : entry * 0.98
     : null;
   const ghostSlPrice = position && !activeSlPrice
-    ? position.side === "long"
-      ? position.entryPrice * 0.98
-      : position.entryPrice * 1.02
+    ? isLong ? entry * 0.98 : entry * 1.02
     : null;
 
-  // The displayed prices (drag overrides active/ghost)
-  const displayTpPrice = dragging && dragTarget === "tp" ? dragPrice : (activeTpPrice ?? ghostTpPrice);
-  const displaySlPrice = dragging && dragTarget === "sl" ? dragPrice : (activeSlPrice ?? ghostSlPrice);
-
-  // Auto-compute visible range to include all relevant prices
+  // ── STABLE range: only real prices (not drag state) so mapping never shifts during drag ──
   const { rangeMin, rangeMax, toY, toPrice } = useMemo(() => {
     const allPrices = [
       currentPrice,
       position?.entryPrice,
-      displayTpPrice,
-      displaySlPrice,
+      activeTpPrice ?? ghostTpPrice,
+      activeSlPrice ?? ghostSlPrice,
       position?.liquidationPrice,
     ].filter((p): p is number => typeof p === "number" && p > 0);
 
     const minP = Math.min(...allPrices);
     const maxP = Math.max(...allPrices);
     const span = maxP - minP || currentPrice * 0.04;
-    const pad = span * 0.35;
+    const pad = span * 0.4;
     const rangeMin = minP - pad;
     const rangeMax = maxP + pad;
 
     const toY = (price: number) => ((rangeMax - price) / (rangeMax - rangeMin)) * 100;
-    const toPrice = (yPct: number) => rangeMax - yPct * (rangeMax - rangeMin) / 100;
+    const toPrice = (yPct: number) => rangeMax - (yPct / 100) * (rangeMax - rangeMin);
 
     return { rangeMin, rangeMax, toY, toPrice };
-  }, [currentPrice, position, displayTpPrice, displaySlPrice]);
+  // Deliberately excludes dragPrice — keeps mapping stable during drag
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
+
+  // Keep ref current so event handlers always use latest mapping
+  useEffect(() => { toPriceRef.current = toPrice; }, [toPrice]);
+
+  // Displayed prices: drag overrides when actively dragging that target
+  const displayTpPrice = dragging && dragTarget === "tp" ? dragPrice : (activeTpPrice ?? ghostTpPrice);
+  const displaySlPrice = dragging && dragTarget === "sl" ? dragPrice : (activeSlPrice ?? ghostSlPrice);
 
   // ── Drag logic ──────────────────────────────────────────────────
   const startDrag = useCallback((e: React.MouseEvent, target: DragTarget) => {
@@ -107,34 +108,32 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-    const startPrice = toPrice(yPct);
-
-    dragRef.current = { target, startY: e.clientY, startPrice };
+    const startPrice = toPriceRef.current(yPct);
     setDragTarget(target);
     setDragPrice(startPrice);
     setDragging(true);
-  }, [toPrice]);
+  }, []);
 
   useEffect(() => {
     if (!dragging) return;
 
     const onMove = (e: MouseEvent) => {
       const container = containerRef.current;
-      if (!container || !dragRef.current) return;
+      if (!container) return;
       const rect = container.getBoundingClientRect();
       const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-      setDragPrice(toPrice(yPct));
+      // Always use the ref — never a stale closure
+      setDragPrice(toPriceRef.current(yPct));
     };
 
     const onUp = async () => {
-      if (!position || !dragRef.current) {
+      if (!position || !dragTarget) {
         setDragging(false);
         setDragTarget(null);
         return;
       }
-      const target = dragRef.current.target;
+      const target = dragTarget;
       const finalPrice = dragPrice;
-      dragRef.current = null;
       setDragging(false);
       setDragTarget(null);
       setIsPlacing(true);
@@ -162,7 +161,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [dragging, dragPrice, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
+  }, [dragging, dragTarget, dragPrice, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
     const order = type === "tp" ? tpOrder : slOrder;
@@ -175,8 +174,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   if (!position) return null;
 
-  const isLong = position.side === "long";
-  const entry = position.entryPrice;
   const size = position.size;
   const calcPnl = (p: number) => isLong ? size * (p - entry) : size * (entry - p);
   const unrealizedPnl = position.unrealizedPnl;
@@ -184,7 +181,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   // ── Line definitions ────────────────────────────────────────────
   interface LineConfig {
-    key: DragTarget | "entry" | "liq" | "current";
+    key: string;
     price: number;
     label: string;
     sublabel?: string;
@@ -193,6 +190,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     dashed: boolean;
     ghost: boolean;
     draggable: boolean;
+    draggableAs?: DragTarget;
     canCancel: boolean;
     cancelType?: DragTarget;
   }
@@ -206,13 +204,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     lines.push({
       key: "tp",
       price: displayTpPrice,
-      label: isGhost ? `Drag to set TP  ${fmt(displayTpPrice)}` : `TP ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
-      sublabel: isGhost ? undefined : `${fmtPnl(calcPnl(displayTpPrice))}`,
+      label: isGhost
+        ? `Drag to set TP  ${fmt(displayTpPrice)}`
+        : `TP ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
+      sublabel: isGhost ? undefined : fmtPnl(calcPnl(displayTpPrice)),
       lineColor: isDraggingThis ? "#22c55e" : "hsl(var(--bullish))",
       pillBg: "bg-bullish",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
+      draggableAs: "tp",
       canCancel: !!activeTpPrice && !isDraggingThis,
       cancelType: "tp",
     });
@@ -221,14 +222,14 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   // Entry
   {
     const y = toY(entry);
-    if (y >= -10 && y <= 110) {
+    if (y >= -15 && y <= 115) {
       lines.push({
         key: "entry",
         price: entry,
         label: `Entry  ${fmt(entry)}`,
         sublabel: `${isLong ? "Long" : "Short"} ${fmt(size)} ${coin}`,
-        lineColor: "rgba(255,255,255,0.45)",
-        pillBg: "bg-muted-foreground/70",
+        lineColor: "rgba(255,255,255,0.4)",
+        pillBg: "bg-muted-foreground/60",
         dashed: true,
         ghost: false,
         draggable: false,
@@ -244,13 +245,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     lines.push({
       key: "sl",
       price: displaySlPrice,
-      label: isGhost ? `Drag to set SL  ${fmt(displaySlPrice)}` : `SL ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
-      sublabel: isGhost ? undefined : `${fmtPnl(calcPnl(displaySlPrice))}`,
+      label: isGhost
+        ? `Drag to set SL  ${fmt(displaySlPrice)}`
+        : `SL ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
+      sublabel: isGhost ? undefined : fmtPnl(calcPnl(displaySlPrice)),
       lineColor: isDraggingThis ? "#ef4444" : "hsl(var(--bearish))",
       pillBg: "bg-bearish",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
+      draggableAs: "sl",
       canCancel: !!activeSlPrice && !isDraggingThis,
       cancelType: "sl",
     });
@@ -259,7 +263,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   // Liquidation
   if (position.liquidationPrice && position.liquidationPrice > 0) {
     const y = toY(position.liquidationPrice);
-    if (y >= -10 && y <= 110) {
+    if (y >= -15 && y <= 115) {
       lines.push({
         key: "liq",
         price: position.liquidationPrice,
@@ -276,12 +280,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   return (
     <>
-      {/* Drag capture overlay — blocks iframe from stealing pointer events during drag */}
+      {/* Capture overlay — prevents iframe from stealing mouse during drag */}
       {dragging && (
-        <div
-          className="fixed inset-0 z-50 cursor-ns-resize"
-          style={{ pointerEvents: "all" }}
-        />
+        <div className="fixed inset-0 z-[999] cursor-ns-resize" style={{ pointerEvents: "all" }} />
       )}
 
       <div
@@ -290,7 +291,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         style={{ pointerEvents: "none" }}
         data-testid="chart-order-lines"
       >
-        {/* Lines */}
+        {/* Price lines */}
         {lines.map(line => {
           const y = toY(line.price);
           if (y < -15 || y > 115) return null;
@@ -299,23 +300,18 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
             <div
               key={line.key}
               className="absolute left-0 right-0"
-              style={{
-                top: `${y}%`,
-                transform: "translateY(-50%)",
-                zIndex: line.draggable ? 20 : 10,
-                pointerEvents: "none",
-              }}
+              style={{ top: `${y}%`, transform: "translateY(-50%)", zIndex: line.draggable ? 20 : 10, pointerEvents: "none" }}
             >
-              {/* The line itself */}
+              {/* Horizontal line */}
               <div
                 className="absolute left-0 right-0"
                 style={{
                   borderTop: `${line.dashed ? "1.5px dashed" : "1.5px solid"} ${line.lineColor}`,
-                  opacity: line.ghost ? 0.5 : 0.8,
+                  opacity: line.ghost ? 0.5 : 0.85,
                 }}
               />
 
-              {/* Center label pill */}
+              {/* Center pill label */}
               <div
                 className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
                 style={{ pointerEvents: line.draggable ? "auto" : "none" }}
@@ -323,25 +319,21 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 <div
                   className={cn(
                     "flex items-center gap-1.5 px-2 py-0.5 rounded text-white text-[11px] font-mono font-semibold",
-                    "border border-white/20 shadow-lg select-none",
+                    "border border-white/20 shadow-lg select-none whitespace-nowrap",
                     line.pillBg,
                     line.ghost && "opacity-60",
                     line.draggable && "cursor-ns-resize",
                   )}
-                  onMouseDown={line.draggable
-                    ? (e) => startDrag(e, line.key as DragTarget)
+                  onMouseDown={line.draggable && line.draggableAs
+                    ? (e) => startDrag(e, line.draggableAs!)
                     : undefined}
                 >
-                  {line.draggable && (
-                    <GripHorizontal className="h-3 w-3 opacity-70 flex-shrink-0" />
-                  )}
+                  {line.draggable && <GripHorizontal className="h-3 w-3 opacity-70 flex-shrink-0" />}
                   <span>{line.label}</span>
-                  {line.sublabel && (
-                    <span className="opacity-75 text-[10px]">{line.sublabel}</span>
-                  )}
+                  {line.sublabel && <span className="opacity-75 text-[10px]">{line.sublabel}</span>}
                   {line.canCancel && (
                     <button
-                      className="opacity-70 hover:opacity-100 transition-opacity ml-0.5"
+                      className="opacity-70 hover:opacity-100 ml-0.5"
                       style={{ pointerEvents: "auto" }}
                       onMouseDown={e => e.stopPropagation()}
                       onClick={() => line.cancelType && handleCancel(line.cancelType)}
@@ -355,10 +347,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
               {/* Right-edge price tag */}
               <div
                 className={cn(
-                  "absolute right-0 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-white rounded-l pointer-events-none",
+                  "absolute right-0 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-white rounded-l",
                   line.pillBg,
-                  line.ghost && "opacity-40",
+                  line.ghost ? "opacity-40" : "opacity-90",
                 )}
+                style={{ pointerEvents: "none" }}
               >
                 {fmt(line.price)}
               </div>
@@ -366,7 +359,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
           );
         })}
 
-        {/* Current price line */}
+        {/* Current price marker */}
         {(() => {
           const y = toY(currentPrice);
           if (y < -15 || y > 115) return null;
@@ -375,10 +368,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
               className="absolute left-0 right-0"
               style={{ top: `${y}%`, transform: "translateY(-50%)", pointerEvents: "none" }}
             >
-              <div
-                className="absolute left-0 right-0"
-                style={{ borderTop: "1px dashed rgba(255,255,255,0.25)" }}
-              />
+              <div className="absolute left-0 right-0" style={{ borderTop: "1px dashed rgba(255,255,255,0.2)" }} />
               <div className="absolute right-0 bg-foreground/80 text-background px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded-l">
                 {fmt(currentPrice)}
               </div>
@@ -386,7 +376,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
           );
         })()}
 
-        {/* P&L badge */}
+        {/* PNL badge */}
         <div className="absolute top-2 left-2" style={{ pointerEvents: "none" }}>
           <div className={cn(
             "text-[11px] font-mono font-semibold px-2 py-0.5 rounded border",
@@ -398,9 +388,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
           </div>
         </div>
 
-        {/* Placing indicator */}
         {isPlacing && (
-          <div className="absolute top-2 right-2 text-[10px] font-mono text-muted-foreground bg-background/80 px-2 py-0.5 rounded border border-border">
+          <div className="absolute top-2 right-2 text-[10px] font-mono text-muted-foreground bg-background/80 px-2 py-0.5 rounded border border-border" style={{ pointerEvents: "none" }}>
             Placing…
           </div>
         )}
