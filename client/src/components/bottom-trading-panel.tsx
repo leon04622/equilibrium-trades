@@ -403,7 +403,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-bullish">
-                  Take Profit {tpslDialog.side === "long" ? "↑ (above current price)" : "↓ (below current price)"}
+                  Take Profit {tpslDialog.side === "long" ? "↑ (above entry price)" : "↓ (below entry price)"}
                 </label>
                 <div className="flex gap-1">
                   {[1, 2, 5].map(pct => {
@@ -430,18 +430,22 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
                 className="font-mono bg-muted/50"
                 data-testid="input-tp-price"
               />
-              {tpPrice && tpslDialog.entryPrice > 0 && (
-                <div className="text-[10px] text-bullish font-mono pl-1">
-                  {((parseFloat(tpPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100).toFixed(2)}% from entry
-                </div>
-              )}
+              {tpPrice && tpslDialog.entryPrice > 0 && (() => {
+                const pct = (parseFloat(tpPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100;
+                const isValid = tpslDialog.side === "long" ? pct > 0 : pct < 0;
+                return (
+                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-bullish" : "text-destructive"}`}>
+                    {pct.toFixed(2)}% from entry{!isValid && " ⚠ must be " + (tpslDialog.side === "long" ? "above" : "below") + " entry"}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Stop Loss */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-bearish">
-                  Stop Loss {tpslDialog.side === "long" ? "↓ (below current price)" : "↑ (above current price)"}
+                  Stop Loss {tpslDialog.side === "long" ? "↓ (below entry price)" : "↑ (above entry price)"}
                 </label>
                 <div className="flex gap-1">
                   {[1, 2, 5].map(pct => {
@@ -468,11 +472,15 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
                 className="font-mono bg-muted/50"
                 data-testid="input-sl-price"
               />
-              {slPrice && tpslDialog.entryPrice > 0 && (
-                <div className="text-[10px] text-bearish font-mono pl-1">
-                  {((parseFloat(slPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100).toFixed(2)}% from entry
-                </div>
-              )}
+              {slPrice && tpslDialog.entryPrice > 0 && (() => {
+                const pct = (parseFloat(slPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100;
+                const isValid = tpslDialog.side === "long" ? pct < 0 : pct > 0;
+                return (
+                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-bearish" : "text-destructive"}`}>
+                    {pct.toFixed(2)}% from entry{!isValid && " ⚠ must be " + (tpslDialog.side === "long" ? "below" : "above") + " entry"}
+                  </div>
+                );
+              })()}
             </div>
             
             <Button 
