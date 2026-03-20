@@ -53,6 +53,7 @@ interface CandleData {
 }
 
 const BG = "#131722";
+const BG_IND = "#1b2035";
 const GRID = "#1e2535";
 const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
@@ -273,6 +274,8 @@ function PatternChartComponent({
     // ── RSI ──
     const rsiChart = createChart(rsiContainerRef.current, {
       ...chartBase(theme === "dark"),
+      layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
+      grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
       timeScale: { borderColor: BORDER, visible: false, rightOffset: 5, barSpacing: 8 },
       rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
@@ -282,13 +285,15 @@ function PatternChartComponent({
       color: "#7b5ea7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
     });
     rsiSeriesRef.current = rsiSeries;
-    rsiSeries.createPriceLine({ price: 70, color: "#ef444480", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 50, color: "#4b556380", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 30, color: "#22c55e80", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 70, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 50, color: "rgba(255,255,255,0.20)", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 30, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
     // ── Stoch RSI ──
     const stochChart = createChart(stochContainerRef.current, {
       ...chartBase(theme === "dark"),
+      layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
+      grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
       timeScale: { borderColor: BORDER, timeVisible: true, rightOffset: 5, barSpacing: 8 },
       rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
@@ -304,8 +309,8 @@ function PatternChartComponent({
     });
     stochDSeriesRef.current = dSeries;
 
-    kSeries.createPriceLine({ price: 80, color: "#ef444470", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-    kSeries.createPriceLine({ price: 20, color: "#22c55e70", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    kSeries.createPriceLine({ price: 80, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    kSeries.createPriceLine({ price: 20, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
     // ── Time sync ──
     const sync = (src: IChartApi, targets: IChartApi[]) => {
@@ -494,7 +499,7 @@ function PatternChartComponent({
       </div>
 
       {/* ── RSI pane ── */}
-      <div style={{ flexGrow: weights[1], minHeight: 50 }} className="relative overflow-hidden">
+      <div style={{ flexGrow: weights[1], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
         <div ref={rsiContainerRef} className="absolute inset-0" />
         <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
           <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
@@ -513,7 +518,7 @@ function PatternChartComponent({
       </div>
 
       {/* ── Stoch RSI pane ── */}
-      <div style={{ flexGrow: weights[2], minHeight: 50 }} className="relative overflow-hidden">
+      <div style={{ flexGrow: weights[2], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
         <div ref={stochContainerRef} className="absolute inset-0" />
         <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
           <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
