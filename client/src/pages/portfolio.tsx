@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,7 @@ export default function Portfolio() {
     refreshAccount,
   } = useTrading();
   const { address, signer, provider } = useWallet();
+  const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
   const [isLoadingSpot, setIsLoadingSpot] = useState(false);
@@ -59,6 +61,7 @@ export default function Portfolio() {
   const [transferAmount, setTransferAmount] = useState("");
   const [transferToPerp, setTransferToPerp] = useState(true);
   const [transferring, setTransferring] = useState(false);
+  const [transferStep, setTransferStep] = useState<string>("");
   const [transferResult, setTransferResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const totalEquity = accountValue || 0;
@@ -118,64 +121,92 @@ export default function Portfolio() {
       toPerp = true; // No perp balance, but has spot USDC — switch to Spot→Perp
     }
     const max = toPerp ? usdcSpotAvailable : withdrawablePerp;
+    // Floor to 2 decimal places so the amount never exceeds the actual available balance
+    const safeMax = Math.floor(max * 100) / 100;
     setTransferToPerp(toPerp);
-    setTransferAmount(max > 0 ? max.toFixed(2) : "");
+    setTransferAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
     setTransferResult(null);
+    setTransferStep("");
     setTransferOpen(true);
   };
 
   const handleTransfer = async () => {
-    console.log("[Transfer] handleTransfer called, signer:", !!signer, "address:", address, "provider:", !!provider);
+    console.log("[Transfer] handleTransfer called — signer:", !!signer, "address:", address, "provider:", !!provider);
+    setTransferStep("Checking wallet connection...");
+    setTransferResult(null);
 
-    // Try to recover a fresh signer if stored one is null (can happen after account switch)
+    // Step 1: Get a valid signer — recover from provider if stored signer is null
     let activeSigner = signer;
     if (!activeSigner) {
-      console.warn("[Transfer] signer is null, attempting to recover from provider...");
+      console.warn("[Transfer] signer is null, attempting to recover...");
+      setTransferStep("Reconnecting wallet signer...");
       try {
         if (provider) {
           activeSigner = await provider.getSigner();
-          console.log("[Transfer] Recovered signer from provider:", !!activeSigner);
+          console.log("[Transfer] Recovered signer from provider");
         } else if (window.ethereum) {
           const { BrowserProvider } = await import("ethers");
           const freshProvider = new BrowserProvider(window.ethereum);
           activeSigner = await freshProvider.getSigner();
-          console.log("[Transfer] Recovered signer from window.ethereum:", !!activeSigner);
+          console.log("[Transfer] Recovered signer from window.ethereum");
         }
-      } catch (err) {
-        console.error("[Transfer] Failed to recover signer:", err);
+      } catch (err: any) {
+        console.error("[Transfer] Signer recovery failed:", err);
       }
     }
 
     if (!activeSigner) {
-      console.error("[Transfer] No signer available — cannot proceed");
-      setTransferResult({ success: false, error: "Wallet not connected. Please reconnect your wallet on the Hyperliquid page and try again." });
+      const msg = "Wallet signer not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.";
+      console.error("[Transfer]", msg);
+      setTransferStep("");
+      setTransferResult({ success: false, error: msg });
+      toast({ title: "Transfer Failed", description: msg, variant: "destructive" });
       return;
     }
 
+    // Step 2: Validate amount
     const amount = parseFloat(transferAmount);
     if (isNaN(amount) || amount <= 0) {
-      setTransferResult({ success: false, error: "Please enter a valid amount greater than 0." });
+      const msg = "Please enter a valid amount greater than 0.";
+      setTransferStep("");
+      setTransferResult({ success: false, error: msg });
       return;
     }
     if (amount > maxTransferAmount) {
-      setTransferResult({ success: false, error: `Amount exceeds available balance of ${maxTransferAmount.toFixed(2)} USDC.` });
+      const msg = `Amount exceeds available balance of ${maxTransferAmount.toFixed(2)} USDC.`;
+      setTransferStep("");
+      setTransferResult({ success: false, error: msg });
       return;
     }
+
+    // Step 3: Execute transfer
     setTransferring(true);
-    setTransferResult(null);
-    console.log(`[Transfer] Initiating USDC transfer: ${amount} USDC, toPerp=${transferToPerp}`);
+    setTransferStep("Requesting signature from your wallet — check MetaMask/your wallet app...");
+    console.log(`[Transfer] Calling transferUsdcBetweenAccounts: ${amount} USDC, toPerp=${transferToPerp}`);
+
     try {
       const result = await transferUsdcBetweenAccounts(activeSigner, amount, transferToPerp);
+      console.log("[Transfer] Result:", result);
+      setTransferStep("");
       setTransferResult(result);
+
       if (result.success) {
+        toast({ title: "Transfer Successful", description: `${amount} USDC moved to ${transferToPerp ? "Perp" : "Spot"} account.` });
         setTimeout(() => {
           setTransferOpen(false);
           handleRefresh();
-        }, 2000);
+        }, 2500);
+      } else {
+        const errMsg = result.error || "Transfer failed";
+        console.error("[Transfer] API error:", errMsg);
+        toast({ title: "Transfer Failed", description: errMsg, variant: "destructive" });
       }
     } catch (err: any) {
-      console.error("Transfer caught error:", err);
-      setTransferResult({ success: false, error: err.message || "Transfer failed" });
+      const errMsg = err?.message || String(err) || "Transfer failed unexpectedly";
+      console.error("[Transfer] Exception:", errMsg);
+      setTransferStep("");
+      setTransferResult({ success: false, error: errMsg });
+      toast({ title: "Transfer Failed", description: errMsg, variant: "destructive" });
     } finally {
       setTransferring(false);
     }
@@ -554,6 +585,13 @@ export default function Portfolio() {
             </DialogDescription>
           </DialogHeader>
 
+          {!signer && (
+            <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Wallet signing not available. Please go to the Hyperliquid page, disconnect and reconnect your wallet, then return here to transfer.</span>
+            </div>
+          )}
+
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50 text-sm">
               <div className="flex-1 text-center">
@@ -581,7 +619,8 @@ export default function Portfolio() {
                 )}
                 onClick={() => {
                   setTransferToPerp(true);
-                  setTransferAmount(usdcSpotAvailable > 0 ? usdcSpotAvailable.toFixed(2) : "");
+                  const safeAmt = Math.floor(usdcSpotAvailable * 100) / 100;
+                  setTransferAmount(safeAmt > 0 ? safeAmt.toFixed(2) : "");
                   setTransferResult(null);
                 }}
                 data-testid="button-direction-to-perp"
@@ -597,7 +636,8 @@ export default function Portfolio() {
                 )}
                 onClick={() => {
                   setTransferToPerp(false);
-                  setTransferAmount(withdrawablePerp > 0 ? withdrawablePerp.toFixed(2) : "");
+                  const safeAmt = Math.floor(withdrawablePerp * 100) / 100;
+                  setTransferAmount(safeAmt > 0 ? safeAmt.toFixed(2) : "");
                   setTransferResult(null);
                 }}
                 data-testid="button-direction-to-spot"
@@ -623,7 +663,7 @@ export default function Portfolio() {
                   variant="outline"
                   size="sm"
                   className="shrink-0"
-                  onClick={() => setTransferAmount(maxTransferAmount.toFixed(2))}
+                  onClick={() => setTransferAmount((Math.floor(maxTransferAmount * 100) / 100).toFixed(2))}
                   data-testid="button-transfer-max"
                 >
                   Max
@@ -641,19 +681,26 @@ export default function Portfolio() {
               )}
             </div>
 
+            {transferStep && (
+              <div className="flex items-center gap-2 p-3 rounded-lg text-sm bg-primary/10 text-primary border border-primary/20">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                <span>{transferStep}</span>
+              </div>
+            )}
+
             {transferResult && (
               <div className={cn(
-                "flex items-center gap-2 p-3 rounded-lg text-sm",
+                "flex items-start gap-2 p-3 rounded-lg text-sm font-medium",
                 transferResult.success
                   ? "bg-bullish/10 text-bullish border border-bullish/20"
-                  : "bg-bearish/10 text-bearish border border-bearish/20"
+                  : "bg-destructive/15 text-destructive border border-destructive/30"
               )}>
                 {transferResult.success ? (
-                  <CheckCircle className="h-4 w-4 shrink-0" />
+                  <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 ) : (
-                  <XCircle className="h-4 w-4 shrink-0" />
+                  <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 )}
-                <span>
+                <span className="break-all">
                   {transferResult.success
                     ? `Successfully transferred ${transferAmount} USDC to ${transferToPerp ? "Perp" : "Spot"} account!`
                     : transferResult.error || "Transfer failed"}
