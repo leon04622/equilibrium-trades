@@ -23,17 +23,21 @@ None provided.
 ### Backend (Express + TypeScript)
 - **Framework**: Express.js
 - **AI**: OpenAI via Replit AI Integrations (gpt-5.1) for pattern detection.
-- **Storage**: In-memory storage (MemStorage) for transient data; PostgreSQL (Neon) for persistent data including wallet users, tutorial video metadata, and chat messages.
+- **Storage**: In-memory storage (MemStorage) for transient data; PostgreSQL (Neon) for persistent data including wallet users, tutorial video metadata, chat messages, and email leads.
 - **Streaming**: Server-Sent Events (SSE) for real-time pattern detection.
 - **Non-Custodial Architecture**: Ensures user private keys are never handled by the server, with all authentication and order signing occurring client-side.
 - **Real-time Data**: WebSocket server for real-time order book heatmap data.
-- **Admin Features**: Admin panel for user and subscription management, and an admin inbox for customer support.
+- **Admin Features**: Admin panel for user and subscription management, an admin inbox for customer support, and email leads management with CSV export.
+- **Wallet Gate**: Full-screen wallet connection gate blocks all app content until user connects their wallet. Includes email lead capture form for non-connected visitors.
 - **Authorization**: Server-side authorization for chat and video content, requiring wallet authentication and builder code approval for regular users, and hardcoded admin wallet verification for administrative functions.
 
 ### Core Features
 - **Educational Pattern Scanner**: Scans for educational patterns to teach recognition, distinct from trade signals.
 - **Trading Strategy**: Guides users on a 21/200 SMA crossover strategy, including confirmation and continuation patterns.
 - **Trade Journal**: Automatic grading of closed trades based on entry, stop placement, R:R, leverage, and setup validity, providing detailed feedback.
+- **Draggable SL/TP Lines**: Visual horizontal price lines (Entry, SL, TP, Liquidation) overlaid on the chart with drag handles. Users can drag SL/TP lines to new prices; releasing triggers a live Hyperliquid order update.
+- **Email Lead Capture**: Non-connected visitors on the wallet gate can submit their email. Leads stored in the `leads` DB table, visible in admin with CSV export.
+- **Hyperliquid Data Fix**: `prevDayPx` now uses the real value from the Hyperliquid `metaAndAssetCtxs` API instead of an estimated calculation.
 - **Live Chat Customer Support**: Real-time chat widget with server-side authorization, linking messages to wallet addresses, and an admin inbox for support staff.
 - **Video Learning System**: Supports uploading and in-app playback of educational videos with CRUD operations and categorization.
 

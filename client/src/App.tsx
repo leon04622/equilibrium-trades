@@ -13,6 +13,7 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { WalletGate } from "@/components/wallet-gate";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
@@ -74,6 +75,7 @@ function App() {
           <TradingProvider>
             <ChatProvider>
             <TooltipProvider delayDuration={200}>
+              <WalletGate>
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex h-screen w-full overflow-hidden">
                   <AppSidebar />
@@ -102,6 +104,7 @@ function App() {
               </SidebarProvider>
               <LiveChat />
               <Toaster />
+              </WalletGate>
             </TooltipProvider>
             </ChatProvider>
           </TradingProvider>

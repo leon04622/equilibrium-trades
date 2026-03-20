@@ -119,16 +119,11 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
       const currentPrice = parseFloat(mids[coin.name] || "0");
       const assetCtx = assetCtxs[index] || {};
       
-      // Calculate prev day price from 24h change
-      const dayChange = parseFloat(assetCtx.dayNtlVlm || "0") > 0 
-        ? (currentPrice / 1.01) // Estimate if no direct prev day available
-        : currentPrice;
-      
       return {
         coin: coin.name,
         markPx: mids[coin.name] || "0",
         midPx: mids[coin.name] || "0",
-        prevDayPx: assetCtx.prevDayPx || String(dayChange * 0.99), // Use real or estimate
+        prevDayPx: assetCtx.prevDayPx || String(currentPrice), // Use real prevDayPx from API
         dayNtlVlm: assetCtx.dayNtlVlm || "0",
         premium: assetCtx.premium || "0",
         openInterest: assetCtx.openInterest || "0",

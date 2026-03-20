@@ -657,6 +657,46 @@ export async function registerRoutes(
     }
   });
 
+  // ============ LEADS / EMAIL CAPTURE ============
+
+  // Capture email lead (no auth required - public)
+  app.post("/api/leads", async (req: Request, res: Response) => {
+    try {
+      const { z } = await import("zod");
+      const leadSchema = z.object({
+        email: z.string().email("Valid email required"),
+        name: z.string().optional(),
+        source: z.string().optional().default("landing"),
+        walletAddress: z.string().optional(),
+      });
+      const validated = leadSchema.safeParse(req.body);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const lead = await storage.createLead(validated.data);
+      res.json({ success: true, lead });
+    } catch (error) {
+      console.error("Error capturing lead:", error);
+      res.status(500).json({ error: "Failed to capture lead" });
+    }
+  });
+
+  // Get all leads - admin only
+  app.get("/api/leads", async (req: Request, res: Response) => {
+    try {
+      const adminWallet = req.headers["x-wallet-address"] as string | undefined;
+      const { isAdminWallet } = await import("@shared/schema");
+      if (!adminWallet || !isAdminWallet(adminWallet)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const allLeads = await storage.getAllLeads();
+      res.json(allLeads);
+    } catch (error) {
+      console.error("Error fetching leads:", error);
+      res.status(500).json({ error: "Failed to fetch leads" });
+    }
+  });
+
   // Helper to verify wallet ownership for chat - allows any connected wallet to chat
   // For admin wallets, we trust them as they are hardcoded
   async function verifyWalletAccess(walletAddress: string | undefined, requireAdmin = false): Promise<{ valid: boolean; isAdmin: boolean; error?: string }> {

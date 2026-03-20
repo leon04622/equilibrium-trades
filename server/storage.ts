@@ -8,7 +8,8 @@ import {
   type TutorialVideo, type InsertTutorialVideo,
   type WalletUser, type InsertWalletUser,
   type SupportMessage, type InsertSupportMessage,
-  tutorialVideos, supportMessages, walletUsers
+  type Lead, type InsertLead,
+  tutorialVideos, supportMessages, walletUsers, leads
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -64,6 +65,10 @@ export interface IStorage {
   getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]>;
   createMessage(message: InsertSupportMessage): Promise<SupportMessage>;
   markMessagesAsRead(conversationId: string): Promise<void>;
+
+  // Leads
+  createLead(lead: InsertLead): Promise<Lead>;
+  getAllLeads(): Promise<Lead[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -521,6 +526,20 @@ export class MemStorage implements IStorage {
     await db.update(supportMessages)
       .set({ isRead: true })
       .where(eq(supportMessages.conversationId, conversationId.toLowerCase()));
+  }
+
+  async createLead(lead: InsertLead): Promise<Lead> {
+    const [newLead] = await db.insert(leads).values({
+      email: lead.email,
+      name: lead.name || null,
+      source: lead.source || "landing",
+      walletAddress: lead.walletAddress || null,
+    }).returning();
+    return newLead;
+  }
+
+  async getAllLeads(): Promise<Lead[]> {
+    return await db.select().from(leads).orderBy(desc(leads.createdAt));
   }
 }
 

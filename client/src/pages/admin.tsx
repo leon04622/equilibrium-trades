@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Users, Shield, Crown, Zap, Sparkles, Check, X, 
-  RefreshCw, Search, Calendar
+  RefreshCw, Search, Calendar, Mail, Download
 } from "lucide-react";
+import type { Lead } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,18 @@ export default function Admin() {
   const [editActive, setEditActive] = useState(false);
 
   const isAdmin = address ? isAdminWallet(address) : false;
+
+  const { data: leads = [], isLoading: leadsLoading, refetch: refetchLeads } = useQuery<Lead[]>({
+    queryKey: ['/api/leads'],
+    enabled: isAdmin && !!address,
+    queryFn: async () => {
+      const response = await fetch('/api/leads', {
+        headers: { 'x-wallet-address': address || '' }
+      });
+      if (!response.ok) throw new Error('Failed to fetch leads');
+      return response.json();
+    }
+  });
 
   const { data: users = [], isLoading, refetch } = useQuery<WalletUser[]>({
     queryKey: ['/api/admin/users'],
@@ -184,7 +197,7 @@ export default function Admin() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-5">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -239,6 +252,19 @@ export default function Admin() {
                   {users.filter(u => u.builderCodeApproved).length}
                 </p>
                 <p className="text-xs text-muted-foreground">Onboarded Users</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/15">
+                <Mail className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{leads.length}</p>
+                <p className="text-xs text-muted-foreground">Email Leads</p>
               </div>
             </div>
           </CardContent>
@@ -331,6 +357,98 @@ export default function Admin() {
                         >
                           Edit
                         </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Email Leads Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-blue-500" />
+                Email Leads
+              </CardTitle>
+              <CardDescription>Captured email addresses from the wallet gate</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const csv = [
+                    ["Email", "Name", "Source", "Wallet", "Date"].join(","),
+                    ...leads.map(l => [
+                      l.email,
+                      l.name || "",
+                      l.source || "",
+                      l.walletAddress || "",
+                      l.createdAt ? new Date(l.createdAt).toLocaleDateString() : ""
+                    ].join(","))
+                  ].join("\n");
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "equilibrium-leads.csv";
+                  a.click();
+                }}
+                data-testid="button-export-leads"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => refetchLeads()}
+                disabled={leadsLoading}
+                data-testid="button-refresh-leads"
+              >
+                <RefreshCw className={cn("h-4 w-4", leadsLoading && "animate-spin")} />
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {leadsLoading ? (
+            <div className="text-center py-8 text-muted-foreground">Loading leads...</div>
+          ) : leads.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No email leads captured yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Wallet</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {leads.map((lead) => (
+                    <TableRow key={lead.id} data-testid={`row-lead-${lead.id}`}>
+                      <TableCell className="font-medium">{lead.email}</TableCell>
+                      <TableCell className="text-muted-foreground">{lead.name || "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="capitalize text-xs">
+                          {lead.source || "landing"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {lead.walletAddress ? `${lead.walletAddress.slice(0, 6)}...${lead.walletAddress.slice(-4)}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : "—"}
                       </TableCell>
                     </TableRow>
                   ))}

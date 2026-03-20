@@ -313,6 +313,20 @@ export const insertSupportMessageSchema = createInsertSchema(supportMessages).om
 export type InsertSupportMessage = z.infer<typeof insertSupportMessageSchema>;
 export type SupportMessage = typeof supportMessages.$inferSelect;
 
+// Email leads capture
+export const leads = pgTable("leads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  name: text("name"),
+  source: text("source").default("landing"),
+  walletAddress: text("wallet_address"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertLeadSchema = createInsertSchema(leads).omit({ id: true, createdAt: true });
+export type InsertLead = z.infer<typeof insertLeadSchema>;
+export type Lead = typeof leads.$inferSelect;
+
 // Admin users for video management and chat
 export const adminWallets = [
   "0x115560812df8e7515eecc957b6796531e936edd9",
