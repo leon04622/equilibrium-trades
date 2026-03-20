@@ -109,7 +109,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
 
       if (!result.success) {
         let msg = result.error || "Unable to place order";
-        if (msg.includes("does not exist")) msg = "Please deposit funds on Hyperliquid first at app.hyperliquid.xyz";
+        if (msg.includes("does not exist")) msg = "Account not found. Please deposit funds via the Portfolio page first.";
         else if (msg.includes("Insufficient")) msg = "Insufficient margin. Please deposit more funds.";
         toast({ title: "Order Failed", description: msg, variant: "destructive" });
         return;

@@ -587,7 +587,7 @@ export async function placeOrder(
     if (!accountState || !accountState.marginSummary) {
       return { 
         success: false, 
-        error: `Wallet ${signerAddress} not found on Hyperliquid. Please deposit funds at app.hyperliquid.xyz first.` 
+        error: `Wallet ${signerAddress} not found on Hyperliquid. Please deposit funds via the Portfolio page first.` 
       };
     }
     

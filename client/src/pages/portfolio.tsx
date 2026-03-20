@@ -25,14 +25,13 @@ import {
   Percent,
   BarChart3,
   RefreshCw,
-  ExternalLink,
   AlertCircle,
   Coins,
   ArrowRightLeft,
   ArrowRight,
   CheckCircle,
   XCircle,
-  Loader2
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
@@ -273,12 +272,6 @@ export default function Portfolio() {
             <ArrowRightLeft className="h-4 w-4 mr-2" />
             Transfer Funds
           </Button>
-          <a href="https://app.hyperliquid.xyz/trade" target="_blank" rel="noopener noreferrer">
-            <Button size="sm" data-testid="button-deposit">
-              <DollarSign className="h-4 w-4 mr-2" />
-              Deposit on HL
-            </Button>
-          </a>
         </div>
       </div>
 
@@ -489,12 +482,10 @@ export default function Portfolio() {
                 <div className="text-center py-8 text-muted-foreground">
                   <Coins className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No spot holdings</p>
-                  <p className="text-sm">Deposit tokens to see your spot balances here</p>
-                  <a href="https://app.hyperliquid.xyz/trade" target="_blank" rel="noopener noreferrer">
-                    <Button variant="outline" className="mt-4" data-testid="button-deposit-spot">
-                      Deposit on Hyperliquid
-                    </Button>
-                  </a>
+                  <p className="text-sm">Transfer USDC from your perp account to see spot balances here</p>
+                  <Button variant="outline" className="mt-4" data-testid="button-deposit-spot" onClick={() => openTransferDialog(false)}>
+                    Transfer to Spot
+                  </Button>
                 </div>
               ) : (
                 <ScrollArea className="h-[400px]">
@@ -575,12 +566,6 @@ export default function Portfolio() {
               Connected to Hyperliquid Mainnet
             </span>
           </div>
-          <a href="https://app.hyperliquid.xyz/portfolio" target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="sm" data-testid="button-view-on-hl">
-              <ExternalLink className="h-4 w-4 mr-2" />
-              View on Hyperliquid
-            </Button>
-          </a>
         </CardContent>
       </Card>
 
