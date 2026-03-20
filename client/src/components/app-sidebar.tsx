@@ -115,17 +115,10 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary">
-            <TrendingUp className="h-5 w-5 text-primary-foreground" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20">
+            <TrendingUp className="h-4 w-4 text-primary" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-display font-bold text-lg tracking-tight">
-              Equilibrium
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Trading Platform
-            </span>
-          </div>
+          <span className="font-semibold text-sm text-foreground">Trading Platform</span>
         </Link>
       </SidebarHeader>
 
@@ -248,15 +241,10 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="p-4">
-        <div className="rounded-md bg-primary/10 p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-            <span className="text-xs font-medium text-foreground">Market Open</span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            24/7 crypto markets are live
-          </p>
+      <SidebarFooter className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          <span className="text-xs text-muted-foreground">Market Open</span>
         </div>
       </SidebarFooter>
     </Sidebar>
