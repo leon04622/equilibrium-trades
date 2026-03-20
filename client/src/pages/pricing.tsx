@@ -1,54 +1,33 @@
-import { useEffect, useState } from "react";
-import { Check, Sparkles, Flame, ArrowRight, Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { Check, Sparkles, Crown, Loader2, ArrowRight } from "lucide-react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { PricingCard, pricingTiers } from "@/components/pricing-card";
 import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
-import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 
-const faqs = [
-  {
-    question: "What is the Liquidity Heatmap?",
-    answer: "The Liquidity Heatmap visualizes where large buy and sell orders are placed in the order book. This helps you identify key support and resistance levels, spot institutional activity, and make more informed trading decisions. It's similar to tools like Bookmap but integrated directly into the Equilibrium platform."
-  },
-  {
-    question: "How does AI Pattern Detection work?",
-    answer: "Our AI continuously scans price action across multiple timeframes to identify chart patterns as they form. It calculates a confidence score for each pattern and provides trade setup recommendations including entry, stop loss, and take profit levels."
-  },
-  {
-    question: "Can I connect my Hyperliquid account with any plan?",
-    answer: "Yes! You can connect your Hyperliquid account with any plan, including the free Starter plan. However, AI-powered trade recommendations and advanced features are only available on Pro and Elite plans."
-  },
-  {
-    question: "What's included in 1-on-1 trading coaching?",
-    answer: "Elite members get access to weekly 40-minute 1-on-1 video calls with experienced traders who can review your trades, help you improve your strategy, and answer any questions about using the platform or trading in general."
-  },
-  {
-    question: "Is there a free trial?",
-    answer: "The Starter plan is completely free and includes access to the pattern library, basic charts, and educational content. You can upgrade anytime to access advanced features."
-  },
-  {
-    question: "Can I cancel my subscription anytime?",
-    answer: "Yes, you can cancel your subscription at any time. You'll continue to have access to your paid features until the end of your billing period."
-  },
+const MENTORING_STRIPE_LINK = "https://buy.stripe.com/28E7sK3Pr9UUgci95P0oM03";
+
+const proFeatures = [
+  "AI-powered pattern detection",
+  "Real-time pattern alerts",
+  "Full TradingView trading charts",
+  "Hyperliquid exchange connection",
+  "Portfolio management & analytics",
+  "Trade setup recommendations (entry, SL, TP)",
+  "RSI, Stoch RSI & SMA indicators",
+  "Full educational content library",
+  "Priority support",
+];
+
+const mentoringFeatures = [
+  "Everything in the Pro plan",
+  "1-on-1 personalised mentoring sessions",
+  "Personalised trading strategy review",
+  "Live trade analysis with your mentor",
+  "Direct access & messaging support",
 ];
 
 interface StripePrice {
@@ -69,29 +48,24 @@ interface StripeProduct {
 export default function Pricing() {
   const { toast } = useToast();
   const { address, isConnected, connect } = useWallet();
-  const [, setLocation] = useLocation();
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedTier, setSelectedTier] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
-  const [showEmailDialog, setShowEmailDialog] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [stripeProducts, setStripeProducts] = useState<StripeProduct[]>([]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get("success");
     const canceled = urlParams.get("canceled");
-    const tier = urlParams.get("tier");
 
     if (success === "true") {
       toast({
-        title: "Subscription Successful!",
-        description: `Welcome to ${tier === "elite" ? "Elite Mentoring" : "AI Pro"}! Your subscription is now active.`,
+        title: "Subscription Active!",
+        description: "Welcome! You now have access to all Pro tools.",
       });
       window.history.replaceState({}, "", "/pricing");
     } else if (canceled === "true") {
       toast({
-        title: "Checkout Canceled",
-        description: "Your subscription was not completed. Feel free to try again when ready.",
+        title: "Checkout Cancelled",
+        description: "Your payment was not completed. Try again whenever you're ready.",
         variant: "destructive",
       });
       window.history.replaceState({}, "", "/pricing");
@@ -111,47 +85,21 @@ export default function Pricing() {
       }
     }
     fetchProducts();
-    
-    // Add a small interval to re-fetch if products aren't loaded yet
-    const interval = setInterval(() => {
-      if (stripeProducts.length === 0) {
-        fetchProducts();
-      } else {
-        clearInterval(interval);
-      }
-    }, 2000);
-    
-    return () => clearInterval(interval);
   }, []);
 
-  const getPriceIdForTier = (tierId: string): string | null => {
-    const tierMap: Record<string, string> = {
-      pro: "AI Pro",
-      elite: "Elite Mentoring",
-    };
-
-    const productName = tierMap[tierId];
-    if (!productName) return null;
-
-    const product = stripeProducts.find((p) => p.name === productName);
+  const getProPriceId = (): string | null => {
+    const product = stripeProducts.find(
+      (p) => p.name === "AI Pro" || p.metadata?.tier === "pro"
+    );
     if (!product || product.prices.length === 0) return null;
-
     return product.prices[0].id;
   };
 
-  const handleSelect = async (tierId: string) => {
-    if (tierId === "starter") {
-      toast({
-        title: "Free Plan",
-        description: "You're already on the Starter plan! Connect your wallet to get started.",
-      });
-      return;
-    }
-
+  const handleProCheckout = async () => {
     if (!isConnected) {
       try {
         await connect();
-      } catch (error) {
+      } catch {
         toast({
           title: "Wallet Required",
           description: "Please connect your wallet to subscribe.",
@@ -161,34 +109,24 @@ export default function Pricing() {
       }
     }
 
-    setSelectedTier(tierId);
-    setShowEmailDialog(true);
-  };
-
-  const handleCheckout = async () => {
-    if (!selectedTier || !address) return;
-
-    const priceId = getPriceIdForTier(selectedTier);
+    const priceId = getProPriceId();
     if (!priceId) {
       toast({
-        title: "Products Not Ready",
-        description: "Subscription products are being set up. Please try again in a moment.",
+        title: "Not Ready Yet",
+        description: "Payment is being set up. Please try again in a moment.",
         variant: "destructive",
       });
       return;
     }
 
-    setIsLoading(true);
+    setIsCheckingOut(true);
     try {
       const response = await apiRequest("POST", "/api/stripe/checkout", {
         priceId,
         walletAddress: address,
-        email: email || undefined,
-        tier: selectedTier,
+        tier: "pro",
       });
-
       const data = await response.json();
-
       if (data.url) {
         window.location.href = data.url;
       } else {
@@ -202,218 +140,184 @@ export default function Pricing() {
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
-      setShowEmailDialog(false);
+      setIsCheckingOut(false);
     }
   };
 
+  const handleMentoringCheckout = () => {
+    window.location.href = MENTORING_STRIPE_LINK;
+  };
+
   return (
-    <div className="p-6 space-y-8">
-      <div className="text-center max-w-2xl mx-auto">
-        <Badge className="mb-4">
+    <div className="p-6 space-y-10 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="text-center space-y-3">
+        <Badge className="mb-2">
           <Sparkles className="h-3 w-3 mr-1" />
-          Pricing Plans
+          Simple Pricing
         </Badge>
-        <h1 className="text-4xl font-display font-bold mb-4">
+        <h1 className="text-4xl font-display font-bold">
           Choose Your Trading Edge
         </h1>
-        <p className="text-muted-foreground text-lg">
-          From learning the basics to gaining institutional-level insights, 
-          we have a plan for every trader.
+        <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+          One plan for the full platform. One plan for those who want personalised coaching on top.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-        {pricingTiers.map((tier) => (
-          <PricingCard
-            key={tier.id}
-            tier={tier}
-            onSelect={() => handleSelect(tier.id)}
-          />
-        ))}
-      </div>
-
-      <Card className="max-w-5xl mx-auto bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-primary/20">
-        <CardContent className="p-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-warning/15">
-                <Flame className="h-8 w-8 text-warning" />
-              </div>
-              <div>
-                <h3 className="text-xl font-display font-bold">Liquidity Heatmap</h3>
-                <p className="text-muted-foreground">
-                  See where institutional orders are hiding
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-sm text-muted-foreground">Available on</p>
-                <p className="font-semibold">Elite Plan</p>
-              </div>
-              <Button className="gap-2" onClick={() => handleSelect("elite")} data-testid="button-get-elite-access">
-                Get Access
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+      {/* Two pricing cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Pro Plan — £50/month */}
+        <Card
+          className="relative overflow-hidden border-primary shadow-lg shadow-primary/10 flex flex-col"
+          data-testid="pricing-card-pro"
+        >
+          <div className="absolute top-0 right-0">
+            <Badge className="rounded-none rounded-bl-lg bg-primary text-primary-foreground">
+              Most Popular
+            </Badge>
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="max-w-5xl mx-auto">
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-display text-center">Compare Plans</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-4 px-4 font-medium">Feature</th>
-                    <th className="text-center py-4 px-4 font-medium">Starter</th>
-                    <th className="text-center py-4 px-4 font-medium">AI Pro</th>
-                    <th className="text-center py-4 px-4 font-medium">Elite</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  <tr>
-                    <td className="py-3 px-4">Pattern Library Access</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">TradingView Charts</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">SMA Indicators</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Hyperliquid Connection</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">AI Pattern Detection</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Trade Setup Recommendations</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Real-time Pattern Alerts</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr className="bg-warning/5">
-                    <td className="py-3 px-4 font-medium">Liquidity Heatmap</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Order Flow Analysis</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Weekly 1-on-1 Zoom Coaching</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Private Discord Access</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4 text-muted-foreground">-</td>
-                    <td className="text-center py-3 px-4"><Check className="h-4 w-4 mx-auto text-success" /></td>
-                  </tr>
-                </tbody>
-              </table>
+          <CardHeader className="pb-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground mb-4">
+              <Sparkles className="h-6 w-6" />
             </div>
+            <h2 className="text-2xl font-display font-bold">Pro Access</h2>
+            <p className="text-sm text-muted-foreground">
+              Full access to every tool on the platform
+            </p>
+          </CardHeader>
+
+          <CardContent className="space-y-6 flex flex-col flex-1">
+            <div>
+              <span className="text-5xl font-bold font-display">£50</span>
+              <span className="text-muted-foreground ml-1">/month</span>
+            </div>
+
+            <ul className="space-y-3 flex-1">
+              {proFeatures.map((feature, i) => (
+                <li key={i} className="flex items-start gap-3">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary mt-0.5">
+                    <Check className="h-3 w-3" />
+                  </div>
+                  <span className="text-sm">{feature}</span>
+                </li>
+              ))}
+            </ul>
+
+            <Button
+              className="w-full"
+              size="lg"
+              onClick={handleProCheckout}
+              disabled={isCheckingOut}
+              data-testid="button-subscribe-pro"
+            >
+              {isCheckingOut ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Redirecting...
+                </>
+              ) : (
+                <>
+                  Get Pro Access
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-center text-muted-foreground">
+              Cancel anytime. No lock-in.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Mentoring Plan — £500 one-time */}
+        <Card
+          className="relative overflow-hidden flex flex-col"
+          data-testid="pricing-card-mentoring"
+        >
+          <CardHeader className="pb-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mb-4">
+              <Crown className="h-6 w-6" />
+            </div>
+            <h2 className="text-2xl font-display font-bold">1-on-1 Mentoring</h2>
+            <p className="text-sm text-muted-foreground">
+              Personal coaching plus full Pro access included
+            </p>
+          </CardHeader>
+
+          <CardContent className="space-y-6 flex flex-col flex-1">
+            <div>
+              <span className="text-5xl font-bold font-display">£500</span>
+              <span className="text-muted-foreground ml-1">/one-time</span>
+            </div>
+
+            <ul className="space-y-3 flex-1">
+              {mentoringFeatures.map((feature, i) => (
+                <li key={i} className="flex items-start gap-3">
+                  <div className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full mt-0.5",
+                    i === 0
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  )}>
+                    <Check className="h-3 w-3" />
+                  </div>
+                  <span className="text-sm">{feature}</span>
+                </li>
+              ))}
+            </ul>
+
+            <Button
+              className="w-full"
+              size="lg"
+              variant="outline"
+              onClick={handleMentoringCheckout}
+              data-testid="button-subscribe-mentoring"
+            >
+              Book Mentoring
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+            <p className="text-xs text-center text-muted-foreground">
+              One-time payment. Pro platform access granted after payment.
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="max-w-3xl mx-auto">
-        <h2 className="text-2xl font-display font-bold text-center mb-6">
-          Frequently Asked Questions
-        </h2>
-        <Accordion type="single" collapsible className="space-y-2">
-          {faqs.map((faq, index) => (
-            <AccordionItem 
-              key={index} 
-              value={`item-${index}`}
-              className="border rounded-lg px-4"
-            >
-              <AccordionTrigger className="text-left hover:no-underline">
-                {faq.question}
-              </AccordionTrigger>
-              <AccordionContent className="text-muted-foreground">
-                {faq.answer}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
-      </div>
-
-      <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Complete Your Subscription</DialogTitle>
-            <DialogDescription>
-              Enter your email to receive subscription updates and receipts.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email (optional)</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                data-testid="input-subscription-email"
-              />
-              <p className="text-xs text-muted-foreground">
-                Your wallet address will be linked to your subscription.
-              </p>
-            </div>
-            <Button 
-              className="w-full" 
-              onClick={handleCheckout}
-              disabled={isLoading}
-              data-testid="button-proceed-checkout"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Redirecting to checkout...
-                </>
-              ) : (
-                `Subscribe to ${selectedTier === "elite" ? "Elite Mentoring" : "AI Pro"}`
-              )}
-            </Button>
+      {/* Feature comparison note */}
+      <div className="rounded-xl border bg-muted/30 p-6 space-y-4">
+        <h3 className="font-display font-semibold text-center text-lg">
+          What's included in Pro Access
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-muted-foreground">
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">Trading Tools</p>
+            <ul className="space-y-1">
+              <li>• TradingView charts</li>
+              <li>• AI pattern detection</li>
+              <li>• Trade setup signals</li>
+              <li>• RSI &amp; Stoch RSI</li>
+            </ul>
           </div>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">Exchange Integration</p>
+            <ul className="space-y-1">
+              <li>• Hyperliquid connection</li>
+              <li>• Live portfolio view</li>
+              <li>• Deposit &amp; withdraw</li>
+              <li>• Order management</li>
+            </ul>
+          </div>
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">Education &amp; Support</p>
+            <ul className="space-y-1">
+              <li>• Full pattern library</li>
+              <li>• Educational modules</li>
+              <li>• Video content</li>
+              <li>• Priority support</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
