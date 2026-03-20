@@ -11,17 +11,14 @@ interface ChartPositionOverlayProps {
 
 interface DragState {
   type: "tp" | "sl";
-  startY: number;
-  startPrice: number;
+  lockedMin: number;
+  lockedMax: number;
 }
 
 const VISIBLE_RANGE_PCT = 0.08;
 
-// P&L calculation for a leveraged position
 function calcPnl(size: number, entryPrice: number, targetPrice: number, isLong: boolean): number {
-  return isLong
-    ? size * (targetPrice - entryPrice)
-    : size * (entryPrice - targetPrice);
+  return isLong ? size * (targetPrice - entryPrice) : size * (entryPrice - targetPrice);
 }
 
 function formatPnl(pnl: number): string {
@@ -29,6 +26,18 @@ function formatPnl(pnl: number): string {
   const sign = pnl >= 0 ? "+" : "-";
   if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}K`;
   return `${sign}$${abs.toFixed(2)}`;
+}
+
+function formatPrice(p: number): string {
+  if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (p >= 1) return p.toFixed(2);
+  return p.toFixed(4);
+}
+
+function formatSize(s: number): string {
+  if (s < 0.001) return s.toFixed(6);
+  if (s < 1) return s.toFixed(4);
+  return s.toFixed(2);
 }
 
 export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverlayProps) {
@@ -61,87 +70,75 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   const tpOid = tpOrders.length > 0 ? tpOrders[0].oid : null;
   const slOid = slOrders.length > 0 ? slOrders[0].oid : null;
 
-  // Ghost SL: default suggested price when no SL is set (-2% for long, +2% for short)
-  const ghostSlPrice = position
-    ? isLong
-      ? position.entryPrice * 0.98
-      : position.entryPrice * 1.02
-    : null;
+  // Ghost prices — default position for "Add TP/SL" placeholders
+  const ghostTpPrice = position ? (isLong ? position.entryPrice * 1.02 : position.entryPrice * 0.98) : null;
+  const ghostSlPrice = position ? (isLong ? position.entryPrice * 0.98 : position.entryPrice * 1.02) : null;
 
   const [dragTpPrice, setDragTpPrice] = useState<number | null>(null);
   const [dragSlPrice, setDragSlPrice] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Display prices: real order > dragging > ghost (for SL only)
-  const displayTp = dragTpPrice ?? tpPrice;
-  // SL shows real price, drag price, OR ghost placeholder when no SL set
-  const displaySlReal = dragSlPrice ?? slPrice;
-  const isGhostSl = !displaySlReal && !!position && !isDragging;
-  const displaySl = displaySlReal ?? (isGhostSl ? ghostSlPrice : null);
+  // Effective display prices (drag > real > ghost)
+  const displayTp = dragTpPrice ?? tpPrice ?? ghostTpPrice;
+  const displaySl = dragSlPrice ?? slPrice ?? ghostSlPrice;
 
-  // Price scale
-  const getVisibleMinMax = useCallback(() => {
+  // Ghost state: no real order and not currently dragging to set one
+  const isGhostTp = !tpPrice && !(isDragging && dragRef.current?.type === "tp");
+  const isGhostSl = !slPrice && !(isDragging && dragRef.current?.type === "sl");
+
+  // ── Price scale (LOCKED during drag to prevent feedback loop) ──────────────
+  // We compute min/max from the REAL (non-drag) prices so the scale is stable.
+  const getBaseMinMax = useCallback(() => {
     const ref = position?.entryPrice ?? currentPrice;
     const range = ref * VISIBLE_RANGE_PCT;
     let min = ref - range;
     let max = ref + range;
-    const prices = [displayTp, displaySl, position?.liquidationPrice].filter(Boolean) as number[];
+    // Only use committed prices (not the drag prices) for scale
+    const prices = [tpPrice ?? ghostTpPrice, slPrice ?? ghostSlPrice, position?.liquidationPrice]
+      .filter(Boolean) as number[];
     for (const p of prices) {
       if (p < min) min = p - range * 0.2;
       if (p > max) max = p + range * 0.2;
     }
     return { min, max };
-  }, [currentPrice, position, displayTp, displaySl]);
+  }, [currentPrice, position, tpPrice, slPrice, ghostTpPrice, ghostSlPrice]);
 
-  const priceToY = useCallback((price: number, height: number): number => {
-    const { min, max } = getVisibleMinMax();
+  const priceToY = useCallback((price: number, height: number, locked?: { min: number; max: number }): number => {
+    const { min, max } = locked ?? getBaseMinMax();
     return ((max - price) / (max - min)) * height;
-  }, [getVisibleMinMax]);
+  }, [getBaseMinMax]);
 
-  const yToPrice = useCallback((y: number, height: number): number => {
-    const { min, max } = getVisibleMinMax();
+  const yToPrice = useCallback((y: number, height: number, locked: { min: number; max: number }): number => {
+    const { min, max } = locked;
     return max - (y / height) * (max - min);
-  }, [getVisibleMinMax]);
+  }, []);
 
-  const formatPrice = (p: number) => {
-    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    if (p >= 1) return p.toFixed(2);
-    return p.toFixed(4);
-  };
-
-  const formatSize = (s: number) => {
-    if (s < 0.001) return s.toFixed(6);
-    if (s < 1) return s.toFixed(4);
-    return s.toFixed(2);
-  };
-
-  // Drag
+  // ── Drag handlers ──────────────────────────────────────────────────────────
   const startDrag = useCallback((e: React.MouseEvent | React.TouchEvent, type: "tp" | "sl") => {
     e.preventDefault();
     e.stopPropagation();
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    // For ghost SL, start from ghost price; for real TP/SL start from their prices
-    const price = type === "tp"
-      ? (tpPrice ?? currentPrice)
-      : (slPrice ?? ghostSlPrice ?? currentPrice);
-    dragRef.current = { type, startY: clientY, startPrice: price };
-    if (type === "sl" && !slPrice && ghostSlPrice) {
-      setDragSlPrice(ghostSlPrice); // initialize drag from ghost position
-    }
+    // Lock scale NOW before anything changes
+    const locked = getBaseMinMax();
+    dragRef.current = { type, lockedMin: locked.min, lockedMax: locked.max };
+    // Initialize drag price from current display price
+    if (type === "tp") setDragTpPrice(tpPrice ?? ghostTpPrice ?? currentPrice);
+    else setDragSlPrice(slPrice ?? ghostSlPrice ?? currentPrice);
     setIsDragging(true);
-  }, [tpPrice, slPrice, ghostSlPrice, currentPrice]);
+  }, [getBaseMinMax, tpPrice, slPrice, ghostTpPrice, ghostSlPrice, currentPrice]);
 
   const onMouseMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!dragRef.current || !containerRef.current) return;
     const height = containerRef.current.clientHeight;
     const rect = containerRef.current.getBoundingClientRect();
     const clientY = "touches" in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
-    const relY = clientY - rect.top;
-    const newPrice = yToPrice(relY, height);
+    const relY = Math.max(0, Math.min(height, clientY - rect.top));
+    // Use LOCKED scale — never changes during drag
+    const locked = { min: dragRef.current.lockedMin, max: dragRef.current.lockedMax };
+    const newPrice = yToPrice(relY, height, locked);
     if (dragRef.current.type === "tp") {
-      setDragTpPrice(Math.max(newPrice, currentPrice * 0.001));
+      setDragTpPrice(Math.max(newPrice, currentPrice * 0.01));
     } else {
-      setDragSlPrice(Math.max(newPrice, currentPrice * 0.001));
+      setDragSlPrice(Math.max(newPrice, currentPrice * 0.01));
     }
   }, [yToPrice, currentPrice]);
 
@@ -157,16 +154,16 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     dragRef.current = null;
     setIsDragging(false);
 
-    const newTp = type === "tp" ? dragTpPrice : null;
-    const newSl = type === "sl" ? dragSlPrice : null;
+    const draggedTp = dragTpPrice;
+    const draggedSl = dragSlPrice;
 
-    const MIN_MOVE_PCT = 0.0005;
-    const tpMoved = newTp !== null && tpPrice !== null
-      ? Math.abs(newTp - tpPrice) / tpPrice > MIN_MOVE_PCT
-      : newTp !== null;
-    const slMoved = newSl !== null && slPrice !== null
-      ? Math.abs(newSl - slPrice) / slPrice > MIN_MOVE_PCT
-      : newSl !== null; // always "moved" if dragging from ghost (no existing SL)
+    const MIN_MOVE_PCT = 0.0003;
+    const tpMoved = type === "tp" && draggedTp !== null && (
+      tpPrice === null || Math.abs(draggedTp - tpPrice) / tpPrice > MIN_MOVE_PCT
+    );
+    const slMoved = type === "sl" && draggedSl !== null && (
+      slPrice === null || Math.abs(draggedSl - slPrice) / slPrice > MIN_MOVE_PCT
+    );
 
     if (!tpMoved && !slMoved) {
       setDragTpPrice(null);
@@ -174,8 +171,8 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       return;
     }
 
-    const finalTp = type === "tp" ? (newTp ?? tpPrice ?? 0) : (tpPrice ?? 0);
-    const finalSl = type === "sl" ? (newSl ?? slPrice ?? 0) : (slPrice ?? 0);
+    const finalTp = type === "tp" ? (draggedTp ?? tpPrice ?? 0) : (tpPrice ?? 0);
+    const finalSl = type === "sl" ? (draggedSl ?? slPrice ?? 0) : (slPrice ?? 0);
 
     try {
       const result = await placeTPSL(
@@ -187,11 +184,11 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
       );
       if (result.success) {
         toast({
-          title: `${type === "tp" ? "Take Profit" : "Stop Loss"} ${slPrice === null && type === "sl" ? "Added" : "Updated"}`,
+          title: `${type === "tp" ? "Take Profit" : "Stop Loss"} ${(type === "tp" ? tpPrice : slPrice) === null ? "Added" : "Updated"}`,
           description: `Set to $${formatPrice(type === "tp" ? finalTp : finalSl)}`,
         });
       } else {
-        toast({ title: "Update Failed", description: result.error, variant: "destructive" });
+        toast({ title: "Failed", description: result.error, variant: "destructive" });
       }
     } finally {
       setDragTpPrice(null);
@@ -214,12 +211,13 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
     }
   }, [isDragging, onMouseMove, onMouseUp]);
 
+  // Reset drag prices only when real orders change and NOT dragging
   useEffect(() => {
     if (!isDragging) {
       setDragTpPrice(null);
       setDragSlPrice(null);
     }
-  }, [tpPrice, slPrice]);
+  }, [tpPrice, slPrice, isDragging]);
 
   const handleCancelTP = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -238,13 +236,22 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
   if (!connected) return null;
   if (!position && coinOrders.length === 0) return null;
 
-  // Expected P&L calculations
-  const tpPnl = displayTp && position
+  // P&L shown only on confirmed (non-ghost) lines
+  const tpPnl = displayTp && position && !isGhostTp
     ? calcPnl(position.size, position.entryPrice, displayTp, isLong!)
     : null;
-  const slPnl = displaySl && position
+  const slPnl = displaySl && position && !isGhostSl
     ? calcPnl(position.size, position.entryPrice, displaySl, isLong!)
     : null;
+
+  // During drag show P&L for the dragged line too
+  const dragTpPnl = isDragging && dragRef.current?.type === "tp" && dragTpPrice && position
+    ? calcPnl(position.size, position.entryPrice, dragTpPrice, isLong!) : null;
+  const dragSlPnl = isDragging && dragRef.current?.type === "sl" && dragSlPrice && position
+    ? calcPnl(position.size, position.entryPrice, dragSlPrice, isLong!) : null;
+
+  const tpActiveDragging = isDragging && dragRef.current?.type === "tp";
+  const slActiveDragging = isDragging && dragRef.current?.type === "sl";
 
   return (
     <div
@@ -265,7 +272,7 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
           lineStyle="solid"
           draggable={false}
           containerRef={containerRef}
-          priceToY={priceToY}
+          priceToY={(p, h) => priceToY(p, h)}
         />
       )}
 
@@ -279,48 +286,55 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
           lineStyle="dashed"
           draggable={false}
           containerRef={containerRef}
-          priceToY={priceToY}
+          priceToY={(p, h) => priceToY(p, h)}
         />
       )}
 
-      {/* Take Profit line */}
+      {/* Take Profit line (ghost or real) */}
       {displayTp !== null && (
         <HLPriceLine
-          label={`TP Price ${isLong ? ">" : "<"} ${formatPrice(displayTp)}`}
-          pnlLabel={tpPnl !== null ? formatPnl(tpPnl) : undefined}
-          pnlPositive={tpPnl !== null ? tpPnl >= 0 : undefined}
-          size={position ? formatSize(position.size) : ""}
+          label={isGhostTp && !tpActiveDragging
+            ? `Add TP ${isLong ? ">" : "<"} ${formatPrice(displayTp)}`
+            : `TP Price ${isLong ? ">" : "<"} ${formatPrice(displayTp)}`}
+          pnlLabel={tpActiveDragging ? (dragTpPnl !== null ? formatPnl(dragTpPnl) : undefined) : (tpPnl !== null ? formatPnl(tpPnl) : undefined)}
+          pnlPositive={(tpActiveDragging ? dragTpPnl : tpPnl) !== null ? (tpActiveDragging ? dragTpPnl! : tpPnl!) >= 0 : undefined}
+          size={position && !isGhostTp ? formatSize(position.size) : ""}
           price={displayTp}
           color="green"
           lineStyle="dashed"
           draggable={!!position}
-          isDragging={isDragging && dragRef.current?.type === "tp"}
+          ghost={isGhostTp && !tpActiveDragging}
+          isDragging={tpActiveDragging}
           onDragStart={(e) => startDrag(e, "tp")}
           onCancel={tpOid ? handleCancelTP : undefined}
           containerRef={containerRef}
-          priceToY={priceToY}
+          priceToY={(p, h) => tpActiveDragging && dragRef.current
+            ? priceToY(p, h, { min: dragRef.current.lockedMin, max: dragRef.current.lockedMax })
+            : priceToY(p, h)}
         />
       )}
 
-      {/* Stop Loss line — shows ghost placeholder when no SL exists */}
+      {/* Stop Loss line (ghost or real) */}
       {displaySl !== null && (
         <HLPriceLine
-          label={isGhostSl
+          label={isGhostSl && !slActiveDragging
             ? `Add SL ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`
             : `SL Price ${isLong ? "<" : ">"} ${formatPrice(displaySl)}`}
-          pnlLabel={slPnl !== null && !isGhostSl ? formatPnl(slPnl) : undefined}
-          pnlPositive={slPnl !== null ? slPnl >= 0 : undefined}
+          pnlLabel={slActiveDragging ? (dragSlPnl !== null ? formatPnl(dragSlPnl) : undefined) : (slPnl !== null ? formatPnl(slPnl) : undefined)}
+          pnlPositive={(slActiveDragging ? dragSlPnl : slPnl) !== null ? (slActiveDragging ? dragSlPnl! : slPnl!) >= 0 : undefined}
           size={position && !isGhostSl ? formatSize(position.size) : ""}
           price={displaySl}
           color="red"
           lineStyle="dashed"
           draggable={!!position}
-          ghost={isGhostSl}
-          isDragging={isDragging && dragRef.current?.type === "sl"}
+          ghost={isGhostSl && !slActiveDragging}
+          isDragging={slActiveDragging}
           onDragStart={(e) => startDrag(e, "sl")}
           onCancel={slOid ? handleCancelSL : undefined}
           containerRef={containerRef}
-          priceToY={priceToY}
+          priceToY={(p, h) => slActiveDragging && dragRef.current
+            ? priceToY(p, h, { min: dragRef.current.lockedMin, max: dragRef.current.lockedMax })
+            : priceToY(p, h)}
         />
       )}
 
@@ -384,8 +398,8 @@ function HLPriceLine({
   const yPct = (priceToY(price, height) / height) * 100;
   if (yPct < 1 || yPct > 99) return null;
 
-  const lineOpacity = ghost ? 0.35 : isDragging ? 1 : 0.8;
-  const labelOpacity = ghost ? 0.55 : isDragging ? 1 : 0.93;
+  const lineOpacity = isDragging ? 1 : ghost ? 0.3 : 0.8;
+  const groupOpacity = isDragging ? 1 : ghost ? 0.5 : 0.95;
 
   return (
     <div
@@ -396,7 +410,7 @@ function HLPriceLine({
       <div
         className="absolute left-0 right-0 h-0"
         style={{
-          borderTop: `1.5px ${lineStyle === "dashed" ? "dashed" : "solid"} ${c.line}`,
+          borderTop: `1.5px ${lineStyle === "dashed" || ghost ? "dashed" : "solid"} ${c.line}`,
           opacity: lineOpacity,
         }}
       />
@@ -404,7 +418,7 @@ function HLPriceLine({
       {/* Center label group */}
       <div
         className="absolute left-1/2 flex items-center gap-1 pointer-events-auto"
-        style={{ transform: "translateX(-50%)", opacity: labelOpacity }}
+        style={{ transform: "translateX(-50%)", opacity: groupOpacity }}
       >
         {/* Drag handle */}
         {draggable && (
@@ -412,11 +426,12 @@ function HLPriceLine({
             className={cn(
               "flex items-center justify-center w-5 h-6 rounded cursor-ns-resize z-20 border",
               c.bg, c.border,
-              ghost && "border-dashed"
+              ghost && "border-dashed opacity-70"
             )}
             onMouseDown={onDragStart}
             onTouchStart={onDragStart}
             data-testid={`drag-handle-${color}`}
+            title={ghost ? "Drag to set" : "Drag to move"}
           >
             <GripVertical className={cn("h-3 w-3", c.text)} />
           </div>
@@ -462,7 +477,7 @@ function HLPriceLine({
         )}
 
         {/* Cancel X button */}
-        {onCancel && (
+        {onCancel && !ghost && (
           <button
             onClick={onCancel}
             className={cn(
@@ -477,15 +492,18 @@ function HLPriceLine({
         )}
 
         {/* Ghost hint */}
-        {ghost && !isDragging && (
-          <span className={cn("text-[9px] font-mono italic", c.text, "opacity-70")}>
+        {ghost && (
+          <span className={cn("text-[9px] font-mono italic", c.text, "opacity-60")}>
             drag to set
           </span>
         )}
       </div>
 
       {/* Right-side price tick */}
-      <div className="absolute right-0 flex items-center pointer-events-none" style={{ opacity: ghost ? 0.4 : 0.85 }}>
+      <div
+        className="absolute right-0 flex items-center pointer-events-none"
+        style={{ opacity: ghost ? 0.35 : 0.85 }}
+      >
         <div className={cn("px-1.5 py-0.5 text-[10px] font-mono rounded-l-sm", c.badge)}>
           {price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </div>
