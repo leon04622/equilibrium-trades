@@ -323,6 +323,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         curPosition.side === "long",
         currentTp > 0 ? currentTp : undefined,
         currentSl > 0 ? currentSl : undefined,
+        curEntry > 0 ? curEntry : undefined,
       );
 
       setIsPlacing(false);

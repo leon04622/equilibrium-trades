@@ -120,27 +120,28 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
     }
 
     const isLong = tpslDialog.side === "long";
-    // Validate against current mark price (same rule Hyperliquid uses), not entry.
-    const markPrice = tpslDialog.markPrice || 0;
-    if (tp && markPrice > 0) {
-      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
-      if (isLong && tp <= markPrice) {
-        toast({ title: "Invalid Take Profit", description: `TP must be above current price ($${fmtMark}) for a Long.`, variant: "destructive" });
+    // Validate against entry price — prevents false rejections when position is in the red
+    // and mark price has already moved past the intended SL level.
+    const entryPrice = tpslDialog.entryPrice || 0;
+    if (tp && entryPrice > 0) {
+      const fmtEntry = entryPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      if (isLong && tp <= entryPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be above entry price ($${fmtEntry}) for a Long.`, variant: "destructive" });
         return;
       }
-      if (!isLong && tp >= markPrice) {
-        toast({ title: "Invalid Take Profit", description: `TP must be below current price ($${fmtMark}) for a Short.`, variant: "destructive" });
+      if (!isLong && tp >= entryPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be below entry price ($${fmtEntry}) for a Short.`, variant: "destructive" });
         return;
       }
     }
-    if (sl && markPrice > 0) {
-      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
-      if (isLong && sl >= markPrice) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be below current price ($${fmtMark}) for a Long.`, variant: "destructive" });
+    if (sl && entryPrice > 0) {
+      const fmtEntry = entryPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      if (isLong && sl >= entryPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be below entry price ($${fmtEntry}) for a Long.`, variant: "destructive" });
         return;
       }
-      if (!isLong && sl <= markPrice) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be above current price ($${fmtMark}) for a Short.`, variant: "destructive" });
+      if (!isLong && sl <= entryPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be above entry price ($${fmtEntry}) for a Short.`, variant: "destructive" });
         return;
       }
     }
@@ -150,7 +151,8 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       tpslDialog.size,
       isLong,
       tp,
-      sl
+      sl,
+      entryPrice || undefined
     );
     
     if (result.success) {

@@ -93,6 +93,7 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
         position.side === "long",
         newTp > 0 ? newTp : undefined,
         newSl > 0 ? newSl : undefined,
+        position.entryPrice,
       );
 
       if (result.success) {

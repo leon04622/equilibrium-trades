@@ -140,7 +140,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         if (tpSlErr) {
           toast({ title: "TP/SL Skipped", description: tpSlErr, variant: "destructive" });
         } else {
-          const tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl);
+          const tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl, fillPrice);
           if (tpslRes.success) {
             toast({
               title: "TP/SL Set",

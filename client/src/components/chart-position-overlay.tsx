@@ -181,6 +181,7 @@ export function ChartPositionOverlay({ coin, currentPrice }: ChartPositionOverla
         position.side === "long",
         finalTp > 0 ? finalTp : undefined,
         finalSl > 0 ? finalSl : undefined,
+        position.entryPrice,
       );
       if (result.success) {
         toast({

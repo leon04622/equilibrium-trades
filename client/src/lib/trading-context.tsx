@@ -102,7 +102,7 @@ interface TradingContextType {
   closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
   cancelOrder: (orderId: string) => void;
   cancelHLOrder: (coin: string, oid: number) => Promise<{ success: boolean; error?: string }>;
-  placeTPSL: (coin: string, size: number, isLong: boolean, tpPrice?: number, slPrice?: number) => Promise<{ success: boolean; error?: string }>;
+  placeTPSL: (coin: string, size: number, isLong: boolean, tpPrice?: number, slPrice?: number, entryPriceOverride?: number) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
   refreshAccount: () => Promise<void>;
@@ -562,34 +562,34 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     size: number, 
     isLong: boolean, 
     tpPrice?: number, 
-    slPrice?: number
+    slPrice?: number,
+    entryPriceOverride?: number
   ): Promise<{ success: boolean; error?: string }> => {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
     }
 
-    // Validate TP/SL against the current mark price — same rule Hyperliquid uses.
-    // TP for long fires when price RISES to the trigger → must be above current price.
-    // SL for long fires when price FALLS to the trigger → must be below current price.
-    // (Opposite for short.) Entry price is irrelevant for this check.
+    // Validate TP/SL against the entry price of the position (or mark price if no
+    // position found yet). Using entry price prevents false rejections when the
+    // position is already in the red and mark has moved below entry.
     const pos = positions.find(p => p.coin === coin);
-    const markPrice = currentPrices[coin] || 0;
-    if (markPrice > 0) {
-      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
+    if (refPrice > 0) {
+      const fmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
       if (tpPrice && tpPrice > 0) {
-        if (isLong && tpPrice <= markPrice) {
-          return { success: false, error: `Take Profit must be above current price ($${fmtMark}) for a Long.` };
+        if (isLong && tpPrice <= refPrice) {
+          return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Long.` };
         }
-        if (!isLong && tpPrice >= markPrice) {
-          return { success: false, error: `Take Profit must be below current price ($${fmtMark}) for a Short.` };
+        if (!isLong && tpPrice >= refPrice) {
+          return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Short.` };
         }
       }
       if (slPrice && slPrice > 0) {
-        if (isLong && slPrice >= markPrice) {
-          return { success: false, error: `Stop Loss must be below current price ($${fmtMark}) for a Long.` };
+        if (isLong && slPrice >= refPrice) {
+          return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Long.` };
         }
-        if (!isLong && slPrice <= markPrice) {
-          return { success: false, error: `Stop Loss must be above current price ($${fmtMark}) for a Short.` };
+        if (!isLong && slPrice <= refPrice) {
+          return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Short.` };
         }
       }
     }
@@ -598,15 +598,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       // Cancel only the specific trigger order types that are being replaced.
       // If updating only TP, the existing SL is preserved (and vice-versa).
       const existingOrders = openOrders.filter(o => o.coin === coin && o.triggerPx);
+      const cancelRef = pos?.entryPrice || currentPrices[coin] || 0;
       for (const order of existingOrders) {
         const orderType = (() => {
           if (order.orderType === "stop_loss") return "sl";
           if (order.orderType === "take_profit") return "tp";
-          if (!pos || pos.entryPrice === 0) return "tp";
+          if (cancelRef === 0) return "tp";
           const trigPx = parseFloat(order.triggerPx || order.limitPx);
-          return pos.side === "long"
-            ? trigPx > pos.entryPrice ? "tp" : "sl"
-            : trigPx < pos.entryPrice ? "tp" : "sl";
+          return isLong
+            ? trigPx > cancelRef ? "tp" : "sl"
+            : trigPx < cancelRef ? "tp" : "sl";
         })();
         const shouldCancel =
           (orderType === "tp" && tpPrice !== undefined) ||

@@ -801,7 +801,15 @@ export async function placeTriggerOrder(
     const nonce = getUniqueNonce();
     
     const tpsl = order.isStopLoss ? "sl" : "tp";
-    const limitPrice = order.orderPrice || order.triggerPrice;
+    // For trigger market orders, the limit price acts as a "worst acceptable fill" guard.
+    // Sell orders (close long): set limit below trigger so the order fills even if the
+    // market gaps past the trigger. Buy orders (close short): set limit above trigger.
+    const SLIPPAGE = 0.05;
+    const limitPrice = order.orderPrice
+      ? order.orderPrice
+      : order.isBuy
+        ? order.triggerPrice * (1 + SLIPPAGE)
+        : order.triggerPrice * (1 - SLIPPAGE);
     
     const orderWire = {
       a: assetIndex,
@@ -840,6 +848,7 @@ export async function placeTriggerOrder(
     });
 
     const result = await response.json();
+    console.log(`[placeTriggerOrder] ${tpsl.toUpperCase()} response:`, JSON.stringify(result));
 
     if (result.status === "ok") {
       const statuses = result.response?.data?.statuses || [];
@@ -847,6 +856,7 @@ export async function placeTriggerOrder(
       const error = statuses.find((s: any) => s.error);
       
       if (error) {
+        console.error(`[placeTriggerOrder] ${tpsl.toUpperCase()} order error:`, error.error);
         return { success: false, error: error.error };
       }
       
