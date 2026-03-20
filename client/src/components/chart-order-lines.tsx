@@ -58,9 +58,14 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
     if (!position) return "other";
-    if (order.orderType === "stop_loss") return "sl";
-    if (order.orderType === "take_profit") return "tp";
+    // Always use price-based classification for visual display.
+    // Hyperliquid's orderType label (e.g. "take_profit") can be misleading when
+    // a TP was accidentally dragged below entry — we reclassify purely by price:
+    //   Long  → above entry = TP (green, top of chart), below entry = SL (red, bottom)
+    //   Short → below entry = TP (green, bottom),       above entry = SL (red, top)
+    // This matches how Hyperliquid's own chart positions and colours the lines.
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
+    if (!triggerPrice || isNaN(triggerPrice)) return "other";
     return position.side === "long"
       ? triggerPrice > position.entryPrice ? "tp" : "sl"
       : triggerPrice < position.entryPrice ? "tp" : "sl";
@@ -76,11 +81,15 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const isLong = position?.side === "long";
   const entry = position?.entryPrice ?? 0;
 
+  // Ghost prices are anchored to currentPrice (not entry) so they always appear
+  // on a sensible side of current price action, even when entry is far away.
+  // Long:  ghost TP = 2% above current, ghost SL = 2% below current
+  // Short: ghost TP = 2% below current, ghost SL = 2% above current
   const ghostTpPrice = position && !activeTpPrice
-    ? isLong ? entry * 1.02 : entry * 0.98
+    ? isLong ? currentPrice * 1.02 : currentPrice * 0.98
     : null;
   const ghostSlPrice = position && !activeSlPrice
-    ? isLong ? entry * 0.98 : entry * 1.02
+    ? isLong ? currentPrice * 0.98 : currentPrice * 1.02
     : null;
 
   // Build the visible price scale. Returns toY (price→%) and fromY (%→price).
