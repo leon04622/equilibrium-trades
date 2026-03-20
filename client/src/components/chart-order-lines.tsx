@@ -40,6 +40,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const currentPriceRef = useRef(currentPrice);
   useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
 
+  // Keep a ref that always holds the latest drag price so onUp never reads stale state
+  const dragPriceRef = useRef(0);
+
   const [dragging, setDragging] = useState(false);
   const [dragPrice, setDragPrice] = useState(0);
   const [dragCursorY, setDragCursorY] = useState(50);
@@ -111,6 +114,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     const startCursorY = ((e.clientY - rect.top) / rect.height) * 100;
 
     dragRef.current = { target, startY: e.clientY, startPrice };
+    dragPriceRef.current = startPrice;
     setDragTarget(target);
     setDragPrice(startPrice);
     setDragCursorY(Math.max(0, Math.min(100, startCursorY)));
@@ -134,6 +138,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       const deltaY = e.clientY - startY;
       const sensitivity = currentPriceRef.current * 0.0002;
       const newPrice = Math.max(1, startPrice - deltaY * sensitivity);
+      // Always write to the ref so onUp can read the final price without stale closures
+      dragPriceRef.current = newPrice;
       setDragPrice(newPrice);
     };
 
@@ -144,7 +150,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         return;
       }
       const target = dragRef.current.target;
-      const finalPrice = dragPrice;
+      // Read from ref — never stale, regardless of re-renders
+      const finalPrice = dragPriceRef.current;
       dragRef.current = null;
       setDragging(false);
       setDragTarget(null);
@@ -173,7 +180,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [dragging, dragPrice, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
+    // Intentionally NOT including dragPrice in deps — we use dragPriceRef instead
+    // to avoid re-registering listeners on every mouse move
+  }, [dragging, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
     const order = type === "tp" ? tpOrder : slOrder;
