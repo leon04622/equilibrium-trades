@@ -68,30 +68,20 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     ? isLong ? entry * 0.98 : entry * 1.02
     : null;
 
-  // ── STABLE range: only real prices (not drag state) so mapping never shifts during drag ──
+  // ── STABLE range: mirrors TradingView's typical ±40% auto-scale around current price.
+  // This means our overlay Y-axis matches what the user sees on the chart,
+  // so dragging to a visual position gives the correct price.
+  // Only depends on currentPrice so it never shifts during a drag.
   const { rangeMin, rangeMax, toY, toPrice } = useMemo(() => {
-    const allPrices = [
-      currentPrice,
-      position?.entryPrice,
-      activeTpPrice ?? ghostTpPrice,
-      activeSlPrice ?? ghostSlPrice,
-      position?.liquidationPrice,
-    ].filter((p): p is number => typeof p === "number" && p > 0);
-
-    const minP = Math.min(...allPrices);
-    const maxP = Math.max(...allPrices);
-    const span = maxP - minP || currentPrice * 0.04;
-    const pad = span * 0.4;
-    const rangeMin = minP - pad;
-    const rangeMax = maxP + pad;
+    const pad = currentPrice * 0.40;
+    const rangeMin = currentPrice - pad;
+    const rangeMax = currentPrice + pad;
 
     const toY = (price: number) => ((rangeMax - price) / (rangeMax - rangeMin)) * 100;
     const toPrice = (yPct: number) => rangeMax - (yPct / 100) * (rangeMax - rangeMin);
 
     return { rangeMin, rangeMax, toY, toPrice };
-  // Deliberately excludes dragPrice — keeps mapping stable during drag
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
+  }, [currentPrice]);
 
   // Keep ref current so event handlers always use latest mapping
   useEffect(() => { toPriceRef.current = toPrice; }, [toPrice]);
@@ -176,8 +166,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const size = position.size;
   const calcPnl = (p: number) => isLong ? size * (p - entry) : size * (entry - p);
-  const unrealizedPnl = position.unrealizedPnl;
-  const pnlPositive = unrealizedPnl >= 0;
 
   // ── Line definitions ────────────────────────────────────────────
   interface LineConfig {
@@ -375,18 +363,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
             </div>
           );
         })()}
-
-        {/* PNL badge */}
-        <div className="absolute top-2 left-2" style={{ pointerEvents: "none" }}>
-          <div className={cn(
-            "text-[11px] font-mono font-semibold px-2 py-0.5 rounded border",
-            pnlPositive
-              ? "bg-bullish/20 border-bullish/40 text-bullish"
-              : "bg-bearish/20 border-bearish/40 text-bearish"
-          )}>
-            PNL {fmtPnl(unrealizedPnl)}
-          </div>
-        </div>
 
         {isPlacing && (
           <div className="absolute top-2 right-2 text-[10px] font-mono text-muted-foreground bg-background/80 px-2 py-0.5 rounded border border-border" style={{ pointerEvents: "none" }}>
