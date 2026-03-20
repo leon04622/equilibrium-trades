@@ -14,11 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useSubscription } from "@/hooks/use-subscription";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
-import { Link } from "wouter";
+
 
 const timeframes = [
   { value: "1", label: "1m" },
@@ -49,14 +49,17 @@ export default function Trading({ visible = true }: TradingProps) {
   const { updatePrices } = useTrading();
   const { hasAccess, isConnected } = useSubscription();
   
+  // Chart with indicators (Volume/RSI/Stoch RSI) is free for all connected users
+  const canShowIndicatorChart = isConnected;
+  // AI pattern signal cards are Pro-only
   const canUseAIPatterns = isConnected && hasAccess('ai_signals');
   
-  // Reset AI chart if user loses access
+  // Reset AI chart if user disconnects
   useEffect(() => {
-    if (!canUseAIPatterns && showAIChart) {
+    if (!canShowIndicatorChart && showAIChart) {
       setShowAIChart(false);
     }
-  }, [canUseAIPatterns, showAIChart]);
+  }, [canShowIndicatorChart, showAIChart]);
 
   const tvSymbol = `BINANCE:${coin}USDT`;
 
@@ -254,7 +257,7 @@ export default function Trading({ visible = true }: TradingProps) {
             
             <div className="hidden md:flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                {canUseAIPatterns ? (
+                {canShowIndicatorChart ? (
                   <>
                     <Switch 
                       checked={showAIChart} 
@@ -267,14 +270,10 @@ export default function Trading({ visible = true }: TradingProps) {
                     </label>
                   </>
                 ) : (
-                  <Link href="/pricing">
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" data-testid="button-ai-patterns-locked">
-                      <Lock className="h-3 w-3 mr-1" />
-                      <Brain className="h-3 w-3 mr-1" />
-                      AI Patterns
-                      <span className="ml-1 text-[10px] text-primary">Pro</span>
-                    </Button>
-                  </Link>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Brain className="h-3 w-3" />
+                    AI Patterns
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-1.5">
@@ -301,13 +300,14 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 min-h-0 relative">
-                  {canUseAIPatterns && showAIChart ? (
+                  {canShowIndicatorChart && showAIChart ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
                         { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                       }
                       currentPrice={price}
+                      showSignals={canUseAIPatterns}
                       className="absolute inset-0" 
                     />
                   ) : (
@@ -331,13 +331,14 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {/* Desktop: Chart */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              {canUseAIPatterns && showAIChart ? (
+              {canShowIndicatorChart && showAIChart ? (
                 <PatternChart 
                   symbol={coin} 
                   interval={
                     { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                   }
                   currentPrice={price}
+                  showSignals={canUseAIPatterns}
                   className="h-full" 
                 />
               ) : (

@@ -40,6 +40,7 @@ interface PatternChartProps {
   interval?: string;
   className?: string;
   currentPrice?: number;
+  showSignals?: boolean;
 }
 
 interface CandleData {
@@ -123,6 +124,7 @@ function PatternChartComponent({
   interval = "5m",
   className = "",
   currentPrice = 0,
+  showSignals = false,
 }: PatternChartProps) {
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
@@ -159,6 +161,7 @@ function PatternChartComponent({
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
     queryKey: [`/api/signals/patterns?timeframes=${interval}`],
     refetchInterval: 60000,
+    enabled: showSignals,
   });
 
   const parsePrice = useCallback((val: number | string): number =>
@@ -419,8 +422,8 @@ function PatternChartComponent({
       <div className="relative flex-[6] min-h-0">
         <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
 
-        {/* Signal / SMA overlay card */}
-        {activeSignal ? (
+        {/* Signal / SMA overlay card — AI card only shown for Pro users */}
+        {showSignals && activeSignal ? (
           <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg max-w-xs z-10">
             <div className="flex items-center gap-2 mb-2">
               {activeSignal.bias === "bullish" ? (
