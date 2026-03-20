@@ -265,7 +265,9 @@ function PatternChartComponent({
       const sma200Data = calculateSMA(sortedCandles, 200);
       sma200SeriesRef.current.setData(sma200Data);
     } else if (sortedCandles.length >= 50) {
-      const sma200Data = calculateSMA(sortedCandles, sortedCandles.length);
+      // Use a period that leaves enough points to draw a visible line
+      const period = Math.max(10, Math.floor(sortedCandles.length * 0.6));
+      const sma200Data = calculateSMA(sortedCandles, period);
       sma200SeriesRef.current.setData(sma200Data);
     }
 

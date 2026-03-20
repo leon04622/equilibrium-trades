@@ -197,8 +197,8 @@ export async function getCandles(
       "1d": 24 * 60 * 60 * 1000,
     };
     
-    // Get 200 candles worth of data for the interval
-    const candleCount = 200;
+    // Get 400 candles so the 200 SMA has enough history to draw a full line
+    const candleCount = 400;
     const msPerCandle = intervalMs[interval] || 60 * 1000;
     const defaultRange = msPerCandle * candleCount;
     const start = startTime || end - defaultRange;
