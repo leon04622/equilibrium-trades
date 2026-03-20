@@ -119,26 +119,28 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
       return;
     }
 
-    const entry = tpslDialog.entryPrice;
     const isLong = tpslDialog.side === "long";
-
-    if (tp && entry > 0) {
-      if (isLong && tp <= entry) {
-        toast({ title: "Invalid Take Profit", description: `TP must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long. Set a higher price.`, variant: "destructive" });
+    // Validate against current mark price (same rule Hyperliquid uses), not entry.
+    const markPrice = tpslDialog.markPrice || 0;
+    if (tp && markPrice > 0) {
+      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      if (isLong && tp <= markPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be above current price ($${fmtMark}) for a Long.`, variant: "destructive" });
         return;
       }
-      if (!isLong && tp >= entry) {
-        toast({ title: "Invalid Take Profit", description: `TP must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short. Set a lower price.`, variant: "destructive" });
+      if (!isLong && tp >= markPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be below current price ($${fmtMark}) for a Short.`, variant: "destructive" });
         return;
       }
     }
-    if (sl && entry > 0) {
-      if (isLong && sl >= entry) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long. Set a lower price.`, variant: "destructive" });
+    if (sl && markPrice > 0) {
+      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      if (isLong && sl >= markPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be below current price ($${fmtMark}) for a Long.`, variant: "destructive" });
         return;
       }
-      if (!isLong && sl <= entry) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short. Set a higher price.`, variant: "destructive" });
+      if (!isLong && sl <= markPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be above current price ($${fmtMark}) for a Short.`, variant: "destructive" });
         return;
       }
     }
@@ -399,7 +401,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-bullish">
-                  Take Profit {tpslDialog.side === "long" ? "↑ (above entry)" : "↓ (below entry)"}
+                  Take Profit {tpslDialog.side === "long" ? "↑ (above current price)" : "↓ (below current price)"}
                 </label>
                 <div className="flex gap-1">
                   {[1, 2, 5].map(pct => {
@@ -437,7 +439,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-bearish">
-                  Stop Loss {tpslDialog.side === "long" ? "↓ (below entry)" : "↑ (above entry)"}
+                  Stop Loss {tpslDialog.side === "long" ? "↓ (below current price)" : "↑ (above current price)"}
                 </label>
                 <div className="flex gap-1">
                   {[1, 2, 5].map(pct => {

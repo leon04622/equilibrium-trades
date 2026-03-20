@@ -58,18 +58,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
     if (!position) return "other";
-    // Always use price-based classification for visual display.
-    // Hyperliquid's orderType label (e.g. "take_profit") can be misleading when
-    // a TP was accidentally dragged below entry — we reclassify purely by price:
-    //   Long  → above entry = TP (green, top of chart), below entry = SL (red, bottom)
-    //   Short → below entry = TP (green, bottom),       above entry = SL (red, top)
-    // This matches how Hyperliquid's own chart positions and colours the lines.
+    // Classify by current mark price — the same boundary Hyperliquid uses.
+    // TP for long fires when price RISES to the trigger → triggerPx > currentPrice.
+    // SL for long fires when price FALLS to the trigger → triggerPx < currentPrice.
+    // (Opposite for short.) This works even when entry is far above/below current.
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
     if (!triggerPrice || isNaN(triggerPrice)) return "other";
     return position.side === "long"
-      ? triggerPrice > position.entryPrice ? "tp" : "sl"
-      : triggerPrice < position.entryPrice ? "tp" : "sl";
-  }, [position]);
+      ? triggerPrice > currentPrice ? "tp" : "sl"
+      : triggerPrice < currentPrice ? "tp" : "sl";
+  }, [position, currentPrice]);
 
   const coinOrders = useMemo(() => openOrders.filter(o => o.coin === coin), [openOrders, coin]);
   const tpOrder = useMemo(() => coinOrders.find(o => getOrderType(o) === "tp"), [coinOrders, getOrderType]);
@@ -127,6 +125,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const activeSlPriceRef = useRef(activeSlPrice);
   const isLongRef = useRef(isLong);
   const entryRef = useRef(entry);
+  const currentPriceRef = useRef(currentPrice);
   const coinRef = useRef(coin);
   const placeTPSLRef = useRef(placeTPSL);
   const toastRef = useRef(toast);
@@ -137,6 +136,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   useEffect(() => { activeSlPriceRef.current = activeSlPrice; });
   useEffect(() => { isLongRef.current = isLong; });
   useEffect(() => { entryRef.current = entry; });
+  useEffect(() => { currentPriceRef.current = currentPrice; });
   useEffect(() => { coinRef.current = coin; });
   useEffect(() => { placeTPSLRef.current = placeTPSL; });
   useEffect(() => { toastRef.current = toast; });
@@ -190,12 +190,14 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         state.rMax - (state.rMax - state.rMin) * (yPct / 100)
       ));
 
-      // Validate against entry boundary — TP must be on the profit side, SL on loss side.
+      // Validate against current mark price (same boundary Hyperliquid uses).
+      // TP must be above current price for longs (price needs to rise to hit it).
+      // SL must be below current price for longs (price needs to fall to hit it).
       const curIsLong = isLongRef.current;
-      const curEntry = entryRef.current;
+      const curPrice = currentPriceRef.current;
       const invalid = state.target === "tp"
-        ? (curIsLong ? newPrice <= curEntry : newPrice >= curEntry)
-        : (curIsLong ? newPrice >= curEntry : newPrice <= curEntry);
+        ? (curIsLong ? newPrice <= curPrice : newPrice >= curPrice)
+        : (curIsLong ? newPrice >= curPrice : newPrice <= curPrice);
 
       setDragInvalid(invalid);
       dragPriceRef.current = newPrice;
@@ -234,17 +236,18 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       const curPlaceTPSL = placeTPSLRef.current;
       const curToast = toastRef.current;
 
-      // Final validation — reject if the drop lands in the wrong zone.
+      // Final validation — reject if the drop lands on the wrong side of current price.
+      const curPrice = currentPriceRef.current;
       const invalid = target === "tp"
-        ? (curIsLong ? finalPrice <= curEntry : finalPrice >= curEntry)
-        : (curIsLong ? finalPrice >= curEntry : finalPrice <= curEntry);
+        ? (curIsLong ? finalPrice <= curPrice : finalPrice >= curPrice)
+        : (curIsLong ? finalPrice >= curPrice : finalPrice <= curPrice);
 
       if (invalid) {
         curToast({
           title: "Invalid price",
           description: target === "tp"
-            ? `Take Profit must be ${curIsLong ? "above" : "below"} entry ($${fmt(curEntry)})`
-            : `Stop Loss must be ${curIsLong ? "below" : "above"} entry ($${fmt(curEntry)})`,
+            ? `Take Profit must be ${curIsLong ? "above" : "below"} current price ($${fmt(curPrice)})`
+            : `Stop Loss must be ${curIsLong ? "below" : "above"} current price ($${fmt(curPrice)})`,
           variant: "destructive",
         });
         return;

@@ -568,24 +568,28 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return { success: false, error: "Wallet not connected" };
     }
 
-    // Validate TP/SL direction against position entry price
+    // Validate TP/SL against the current mark price — same rule Hyperliquid uses.
+    // TP for long fires when price RISES to the trigger → must be above current price.
+    // SL for long fires when price FALLS to the trigger → must be below current price.
+    // (Opposite for short.) Entry price is irrelevant for this check.
     const pos = positions.find(p => p.coin === coin);
-    if (pos && pos.entryPrice > 0) {
-      const entry = pos.entryPrice;
+    const markPrice = currentPrices[coin] || 0;
+    if (markPrice > 0) {
+      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 0 });
       if (tpPrice && tpPrice > 0) {
-        if (isLong && tpPrice <= entry) {
-          return { success: false, error: `Take Profit must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long position. Got: $${tpPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        if (isLong && tpPrice <= markPrice) {
+          return { success: false, error: `Take Profit must be above current price ($${fmtMark}) for a Long.` };
         }
-        if (!isLong && tpPrice >= entry) {
-          return { success: false, error: `Take Profit must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short position. Got: $${tpPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        if (!isLong && tpPrice >= markPrice) {
+          return { success: false, error: `Take Profit must be below current price ($${fmtMark}) for a Short.` };
         }
       }
       if (slPrice && slPrice > 0) {
-        if (isLong && slPrice >= entry) {
-          return { success: false, error: `Stop Loss must be below entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Long position. Got: $${slPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        if (isLong && slPrice >= markPrice) {
+          return { success: false, error: `Stop Loss must be below current price ($${fmtMark}) for a Long.` };
         }
-        if (!isLong && slPrice <= entry) {
-          return { success: false, error: `Stop Loss must be above entry price ($${entry.toLocaleString(undefined, { maximumFractionDigits: 0 })}) for a Short position. Got: $${slPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` };
+        if (!isLong && slPrice <= markPrice) {
+          return { success: false, error: `Stop Loss must be above current price ($${fmtMark}) for a Short.` };
         }
       }
     }
