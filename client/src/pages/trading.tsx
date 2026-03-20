@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
+import { ChartOrderLines } from "@/components/chart-order-lines";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
@@ -307,11 +308,15 @@ export default function Trading({ visible = true }: TradingProps) {
                       symbol={coin} 
                       interval={
                         { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
-                      } 
+                      }
+                      currentPrice={price}
                       className="absolute inset-0" 
                     />
                   ) : (
-                    <TradingViewChart symbol={tvSymbol} interval={timeframe} currentPrice={price} className="absolute inset-0" />
+                    <>
+                      <TradingViewChart symbol={tvSymbol} interval={timeframe} className="absolute inset-0" />
+                      {price > 0 && <ChartOrderLines coin={coin} currentPrice={price} />}
+                    </>
                   )}
                 </div>
               )}
@@ -334,11 +339,15 @@ export default function Trading({ visible = true }: TradingProps) {
                   symbol={coin} 
                   interval={
                     { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
-                  } 
+                  }
+                  currentPrice={price}
                   className="h-full" 
                 />
               ) : (
-                <TradingViewChart symbol={tvSymbol} interval={timeframe} currentPrice={price} className="h-full" />
+                <>
+                  <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
+                  {price > 0 && <ChartOrderLines coin={coin} currentPrice={price} />}
+                </>
               )}
             </div>
             

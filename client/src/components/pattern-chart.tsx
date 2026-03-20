@@ -5,12 +5,15 @@ import {
   CrosshairMode,
   CandlestickSeries,
   LineSeries,
+  LineStyle,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type Time,
 } from "lightweight-charts";
 import { useTheme } from "@/lib/theme";
 import { useQuery } from "@tanstack/react-query";
+import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, Target, AlertCircle } from "lucide-react";
@@ -35,6 +38,7 @@ interface PatternChartProps {
   symbol: string;
   interval?: string;
   className?: string;
+  currentPrice?: number;
 }
 
 interface CandleData {
@@ -52,16 +56,18 @@ type LineSeriesType = ISeriesApi<"Line">;
 function PatternChartComponent({ 
   symbol = "BTC", 
   interval = "5m",
-  className = ""
+  className = "",
+  currentPrice = 0,
 }: PatternChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<CandlestickSeriesType | null>(null);
   const sma21SeriesRef = useRef<LineSeriesType | null>(null);
   const sma200SeriesRef = useRef<LineSeriesType | null>(null);
-  const priceLineRefs = useRef<any[]>([]);
+  const priceLineRefs = useRef<IPriceLine[]>([]);
   const isInitialLoadRef = useRef(true);
   const { theme } = useTheme();
+  const { positions, openOrders } = useTrading();
   const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
   const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
 
@@ -264,33 +270,58 @@ function PatternChartComponent({
   }, [candles, parsePrice]);
 
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
-
     const series = candleSeriesRef.current;
-    
+    if (!series) return;
+
+    // Clear previous lines
     priceLineRefs.current.forEach(line => {
-      try {
-        series.removePriceLine(line);
-      } catch (e) {}
+      try { series.removePriceLine(line); } catch (_) {}
     });
     priceLineRefs.current = [];
 
-    // Educational mode - no entry/SL/TP lines, only show current price reference
-    if (!activeSignal) return;
-
-    // Show current price as reference
-    if (activeSignal.currentPrice) {
-      const priceLine = series.createPriceLine({
-        price: activeSignal.currentPrice,
-        color: activeSignal.bias === "bullish" ? "#22c55e" : activeSignal.bias === "bearish" ? "#ef4444" : "#f59e0b",
+    const addLine = (price: number, color: string, title: string) => {
+      if (!price || isNaN(price) || price <= 0) return;
+      const pl = series.createPriceLine({
+        price,
+        color,
         lineWidth: 1,
-        lineStyle: 2,
+        lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: "Current",
+        title,
       });
-      priceLineRefs.current.push(priceLine);
+      priceLineRefs.current.push(pl);
+    };
+
+    // Draw TP / SL / Entry / Liq from trading position
+    const position = positions.find(p => p.coin === coin);
+    if (position) {
+      const isLong = position.side === "long";
+      const coinOrders = openOrders.filter(o => o.coin === coin);
+
+      const getOrderType = (order: any): "tp" | "sl" | "other" => {
+        const ot = (order.orderType || "").toLowerCase();
+        if (ot.includes("take profit") || ot === "take_profit") return "tp";
+        if (ot.includes("stop") || ot === "stop_loss") return "sl";
+        const px = parseFloat(order.triggerPx || order.limitPx);
+        if (!px || isNaN(px)) return "other";
+        return isLong
+          ? px > (position.entryPrice || currentPrice) ? "tp" : "sl"
+          : px < (position.entryPrice || currentPrice) ? "tp" : "sl";
+      };
+
+      const tpOrder = coinOrders.find(o => getOrderType(o) === "tp");
+      const slOrder = coinOrders.find(o => getOrderType(o) === "sl");
+      const tpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
+      const slPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
+
+      if (tpPrice) addLine(tpPrice, "#22c55e", `TP ${isLong ? ">" : "<"} ${tpPrice}`);
+      if (position.entryPrice) addLine(position.entryPrice, "#60a5fa", "Entry");
+      if (slPrice) addLine(slPrice, "#ef4444", `SL ${isLong ? "<" : ">"} ${slPrice}`);
+      if (position.liquidationPrice && position.liquidationPrice > 0) {
+        addLine(position.liquidationPrice, "#f97316", "Liq.");
+      }
     }
-  }, [activeSignal]);
+  }, [positions, openOrders, coin, currentPrice]);
 
   const isBullish = smaStatus?.isBullish ?? true;
   const patternName = isBullish ? "Potential Bull Flag" : "Potential Bear Flag";
