@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, memo, useCallback } from "react";
-import { 
-  createChart, 
+import {
+  createChart,
   ColorType,
   CrosshairMode,
   CandlestickSeries,
@@ -52,80 +52,75 @@ interface CandleData {
   v: number | string;
 }
 
-const CHART_BG_DARK = "#0d1117";
-const CHART_BG_LIGHT = "#ffffff";
-const GRID_DARK = "#21262d";
-const GRID_LIGHT = "#e1e4e8";
-const BORDER_DARK = "#30363d";
-const BORDER_LIGHT = "#d0d7de";
-const TEXT_DARK = "#c9d1d9";
-const TEXT_LIGHT = "#24292f";
+const BG = "#131722";
+const GRID = "#1e2535";
+const BORDER = "#2a3249";
+const TEXT = "#b2b5be";
+const HANDLE_PX = 4;
 
-function calcSMA(closes: number[], times: Time[], period: number): { time: Time; value: number }[] {
-  const result: { time: Time; value: number }[] = [];
-  for (let i = period - 1; i < closes.length; i++) {
-    let sum = 0;
-    for (let j = 0; j < period; j++) sum += closes[i - j];
-    result.push({ time: times[i], value: sum / period });
+function calcSMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
+  const out: { time: Time; value: number }[] = [];
+  for (let i = period - 1; i < vals.length; i++) {
+    let s = 0;
+    for (let j = 0; j < period; j++) s += vals[i - j];
+    out.push({ time: times[i], value: s / period });
   }
-  return result;
+  return out;
 }
 
 function calcRSI(closes: number[], times: Time[], period = 14): { time: Time; value: number }[] {
   if (closes.length < period + 1) return [];
-  let avgGain = 0, avgLoss = 0;
+  let ag = 0, al = 0;
   for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) avgGain += diff; else avgLoss -= diff;
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) ag += d; else al -= d;
   }
-  avgGain /= period;
-  avgLoss /= period;
-  const result: { time: Time; value: number }[] = [];
-  const rs0 = avgLoss === 0 ? 100 : avgGain / avgLoss;
-  result.push({ time: times[period], value: 100 - 100 / (1 + rs0) });
+  ag /= period; al /= period;
+  const out: { time: Time; value: number }[] = [];
+  out.push({ time: times[period], value: 100 - 100 / (1 + (al === 0 ? 100 : ag / al)) });
   for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    result.push({ time: times[i], value: 100 - 100 / (1 + rs) });
+    const d = closes[i] - closes[i - 1];
+    ag = (ag * (period - 1) + (d > 0 ? d : 0)) / period;
+    al = (al * (period - 1) + (d < 0 ? -d : 0)) / period;
+    out.push({ time: times[i], value: 100 - 100 / (1 + (al === 0 ? 100 : ag / al)) });
   }
-  return result;
+  return out;
 }
 
-function calcStochRSI(
-  rsi: { time: Time; value: number }[],
-  period = 14, kSmooth = 3, dSmooth = 3,
-): { k: { time: Time; value: number }[]; d: { time: Time; value: number }[] } {
-  if (rsi.length < period) return { k: [], d: [] };
-  const rawStoch: { time: Time; value: number }[] = [];
+function calcStochRSI(rsi: { time: Time; value: number }[], period = 14, ks = 3, ds = 3) {
+  if (rsi.length < period) return { k: [] as { time: Time; value: number }[], d: [] as { time: Time; value: number }[] };
+  const raw: { time: Time; value: number }[] = [];
   for (let i = period - 1; i < rsi.length; i++) {
-    const vals = rsi.slice(i - period + 1, i + 1).map(x => x.value);
-    const mn = Math.min(...vals), mx = Math.max(...vals);
-    rawStoch.push({ time: rsi[i].time, value: mx === mn ? 50 : ((rsi[i].value - mn) / (mx - mn)) * 100 });
+    const sl = rsi.slice(i - period + 1, i + 1).map(x => x.value);
+    const mn = Math.min(...sl), mx = Math.max(...sl);
+    raw.push({ time: rsi[i].time, value: mx === mn ? 50 : ((rsi[i].value - mn) / (mx - mn)) * 100 });
   }
   const k: { time: Time; value: number }[] = [];
-  for (let i = kSmooth - 1; i < rawStoch.length; i++) {
-    const sum = rawStoch.slice(i - kSmooth + 1, i + 1).reduce((a, x) => a + x.value, 0);
-    k.push({ time: rawStoch[i].time, value: sum / kSmooth });
+  for (let i = ks - 1; i < raw.length; i++) {
+    k.push({ time: raw[i].time, value: raw.slice(i - ks + 1, i + 1).reduce((a, x) => a + x.value, 0) / ks });
   }
   const d: { time: Time; value: number }[] = [];
-  for (let i = dSmooth - 1; i < k.length; i++) {
-    const sum = k.slice(i - dSmooth + 1, i + 1).reduce((a, x) => a + x.value, 0);
-    d.push({ time: k[i].time, value: sum / dSmooth });
+  for (let i = ds - 1; i < k.length; i++) {
+    d.push({ time: k[i].time, value: k.slice(i - ds + 1, i + 1).reduce((a, x) => a + x.value, 0) / ds });
   }
   return { k, d };
 }
 
-function PatternChartComponent({ 
-  symbol = "BTC", 
+function fmtVol(v: number): string {
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + "B";
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(2) + "K";
+  return v.toFixed(2);
+}
+
+function PatternChartComponent({
+  symbol = "BTC",
   interval = "5m",
   className = "",
   currentPrice = 0,
   showSignals = false,
 }: PatternChartProps) {
+  const outerRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const stochContainerRef = useRef<HTMLDivElement>(null);
@@ -138,19 +133,25 @@ function PatternChartComponent({
   const sma21SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const sma200SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const volumeSmaSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochKSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-
   const priceLineRefs = useRef<IPriceLine[]>([]);
-  const isInitialLoadRef = useRef(true);
   const isSyncingRef = useRef(false);
+  const isInitialLoadRef = useRef(true);
+
+  // Pane resize state — flex-grow weights
+  const [weights, setWeights] = useState([6, 2, 2]);
+  const [lastVol, setLastVol] = useState<number | null>(null);
+  const [lastRSI, setLastRSI] = useState<number | null>(null);
+  const [lastK, setLastK] = useState<number | null>(null);
+  const [lastD, setLastD] = useState<number | null>(null);
+  const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
+  const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
 
   const { theme } = useTheme();
   const { positions, openOrders } = useTrading();
-  const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
-  const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
-
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
   const { data: candles } = useQuery<CandleData[]>({
@@ -167,68 +168,76 @@ function PatternChartComponent({
   const parsePrice = useCallback((val: number | string): number =>
     typeof val === "string" ? parseFloat(val) : val, []);
 
-  // SMA status for signal card
+  // ── Drag-to-resize logic ──
+  const startDrag = useCallback((handleIdx: number) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = outerRef.current;
+    if (!container) return;
+    const startY = e.clientY;
+    const startWeights = [...weights];
+    const totalH = container.clientHeight - HANDLE_PX * 2;
+    const totalW = startWeights.reduce((a, b) => a + b, 0);
+    const a = handleIdx, b = handleIdx + 1;
+    const minW = totalW * 0.07;
+    const combined = startWeights[a] + startWeights[b];
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ((ev.clientY - startY) / totalH) * totalW;
+      const newA = Math.max(minW, Math.min(combined - minW, startWeights[a] + delta));
+      const next = [...startWeights];
+      next[a] = newA;
+      next[b] = combined - newA;
+      setWeights(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [weights]);
+
+  // ── SMA status for signal card ──
   useEffect(() => {
     if (!candles || candles.length < 21) { setSmaStatus(null); return; }
     const sorted = [...candles].sort((a, b) => a.t - b.t);
     const closes = sorted.map(c => parsePrice(c.c));
     const times = sorted.map(c => (c.t / 1000) as Time);
     const sma21 = calcSMA(closes, times, 21);
-    const period200 = Math.min(sorted.length, 200);
-    const sma200 = sorted.length >= 21 ? calcSMA(closes, times, Math.max(10, Math.floor(period200 * 0.6 < period200 ? period200 : period200))) : [];
+    const period200 = Math.min(sorted.length - 1, 200);
+    const sma200 = period200 >= 10 ? calcSMA(closes, times, period200) : [];
     const s21 = sma21.length > 0 ? sma21[sma21.length - 1].value : 0;
     const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : 0;
     if (s21 > 0) setSmaStatus({ sma21: s21, sma200: s200, isBullish: s21 > s200 });
-    else setSmaStatus(null);
   }, [candles, parsePrice]);
 
-  const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
-
   useEffect(() => {
+    const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
     if (currentSignal && smaStatus) {
-      const signalIsBullish = currentSignal.bias === "bullish";
-      if ((smaStatus.isBullish && signalIsBullish) || (!smaStatus.isBullish && !signalIsBullish)) {
-        setActiveSignal(currentSignal);
-      } else {
-        setActiveSignal(null);
-      }
+      const sigBull = currentSignal.bias === "bullish";
+      setActiveSignal((smaStatus.isBullish && sigBull) || (!smaStatus.isBullish && !sigBull) ? currentSignal : null);
     } else {
       setActiveSignal(null);
     }
-  }, [currentSignal, smaStatus]);
+  }, [signals, smaStatus, coin, interval]);
 
-  // Build chart options
-  const chartOpts = useCallback((isDark: boolean, showTime: boolean) => ({
-    layout: {
-      background: { type: ColorType.Solid, color: isDark ? CHART_BG_DARK : CHART_BG_LIGHT },
-      textColor: isDark ? TEXT_DARK : TEXT_LIGHT,
-    },
-    grid: {
-      vertLines: { color: isDark ? GRID_DARK : GRID_LIGHT, style: LineStyle.Solid },
-      horzLines: { color: isDark ? GRID_DARK : GRID_LIGHT, style: LineStyle.Solid },
-    },
+  // ── Chart initialization ──
+  const chartBase = useCallback((isDark: boolean) => ({
+    layout: { background: { type: ColorType.Solid, color: BG }, textColor: TEXT },
+    grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
     crosshair: { mode: CrosshairMode.Normal },
-    rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: true },
-    timeScale: {
-      borderColor: isDark ? BORDER_DARK : BORDER_LIGHT,
-      timeVisible: showTime,
-      visible: showTime,
-      rightOffset: 5,
-      barSpacing: 8,
-    },
+    rightPriceScale: { borderColor: BORDER, autoScale: true },
     handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
     handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
   }), []);
 
-  // Initialize charts
   useEffect(() => {
     if (!mainContainerRef.current || !rsiContainerRef.current || !stochContainerRef.current) return;
-    const isDark = theme === "dark";
 
-    // ── Main chart ──
+    // ── Main ──
     const mainChart = createChart(mainContainerRef.current, {
-      ...chartOpts(isDark, true),
-      timeScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, timeVisible: true, visible: false, rightOffset: 5, barSpacing: 8 },
+      ...chartBase(theme === "dark"),
+      timeScale: { borderColor: BORDER, timeVisible: true, visible: false, rightOffset: 5, barSpacing: 8 },
     });
     mainChartRef.current = mainChart;
 
@@ -239,68 +248,71 @@ function PatternChartComponent({
     });
     candleSeriesRef.current = candleSeries;
 
-    const sma21Series = mainChart.addSeries(LineSeries, {
-      color: "#ffffff", lineWidth: 2, lineStyle: LineStyle.Solid,
-      title: "21 SMA", priceLineVisible: false, lastValueVisible: true,
+    const sma21 = mainChart.addSeries(LineSeries, {
+      color: "#ffffff", lineWidth: 2, title: "21", priceLineVisible: false, lastValueVisible: true,
     });
-    sma21SeriesRef.current = sma21Series;
+    sma21SeriesRef.current = sma21;
 
-    const sma200Series = mainChart.addSeries(LineSeries, {
-      color: "#f5e642", lineWidth: 2, lineStyle: LineStyle.Solid,
-      title: "200 SMA", priceLineVisible: false, lastValueVisible: true,
+    const sma200 = mainChart.addSeries(LineSeries, {
+      color: "#f5e642", lineWidth: 2, title: "200", priceLineVisible: false, lastValueVisible: true,
     });
-    sma200SeriesRef.current = sma200Series;
+    sma200SeriesRef.current = sma200;
 
-    const volumeSeries = mainChart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "volume",
+    const volSeries = mainChart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" }, priceScaleId: "volume",
     });
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    volumeSeriesRef.current = volumeSeries;
+    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    volumeSeriesRef.current = volSeries;
 
-    // ── RSI chart ──
+    const volSmaSeries = mainChart.addSeries(LineSeries, {
+      color: "#f59e0b", lineWidth: 1, priceScaleId: "volume",
+      priceLineVisible: false, lastValueVisible: false, title: "",
+    });
+    volumeSmaSeriesRef.current = volSmaSeries;
+
+    // ── RSI ──
     const rsiChart = createChart(rsiContainerRef.current, {
-      ...chartOpts(isDark, false),
-      timeScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, visible: false, rightOffset: 5, barSpacing: 8 },
-      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      ...chartBase(theme === "dark"),
+      timeScale: { borderColor: BORDER, visible: false, rightOffset: 5, barSpacing: 8 },
+      rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
     rsiChartRef.current = rsiChart;
 
     const rsiSeries = rsiChart.addSeries(LineSeries, {
-      color: "#a78bfa", lineWidth: 2, title: "", priceLineVisible: false, lastValueVisible: true,
+      color: "#7b5ea7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
     });
     rsiSeriesRef.current = rsiSeries;
-    // Reference levels
-    rsiSeries.createPriceLine({ price: 70, color: "#ef4444", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "OB", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 30, color: "#22c55e", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "OS", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 50, color: "#555", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 70, color: "#ef444480", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 50, color: "#4b556380", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 30, color: "#22c55e80", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
-    // ── Stoch RSI chart ──
+    // ── Stoch RSI ──
     const stochChart = createChart(stochContainerRef.current, {
-      ...chartOpts(isDark, true),
-      rightPriceScale: { borderColor: isDark ? BORDER_DARK : BORDER_LIGHT, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      ...chartBase(theme === "dark"),
+      timeScale: { borderColor: BORDER, timeVisible: true, rightOffset: 5, barSpacing: 8 },
+      rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
     });
     stochChartRef.current = stochChart;
 
-    const stochKSeries = stochChart.addSeries(LineSeries, {
-      color: "#38bdf8", lineWidth: 2, title: "K", priceLineVisible: false, lastValueVisible: true,
+    const kSeries = stochChart.addSeries(LineSeries, {
+      color: "#2962ff", lineWidth: 2, title: "K", priceLineVisible: false, lastValueVisible: true,
     });
-    stochKSeriesRef.current = stochKSeries;
+    stochKSeriesRef.current = kSeries;
 
-    const stochDSeries = stochChart.addSeries(LineSeries, {
-      color: "#fb923c", lineWidth: 2, title: "D", priceLineVisible: false, lastValueVisible: true,
+    const dSeries = stochChart.addSeries(LineSeries, {
+      color: "#ff6d00", lineWidth: 2, title: "D", priceLineVisible: false, lastValueVisible: true,
     });
-    stochDSeriesRef.current = stochDSeries;
+    stochDSeriesRef.current = dSeries;
 
-    stochKSeries.createPriceLine({ price: 80, color: "#ef4444", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-    stochKSeries.createPriceLine({ price: 20, color: "#22c55e", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    kSeries.createPriceLine({ price: 80, color: "#ef444470", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+    kSeries.createPriceLine({ price: 20, color: "#22c55e70", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
-    // ── Time scale sync ──
-    const sync = (source: IChartApi, targets: IChartApi[]) => {
+    // ── Time sync ──
+    const sync = (src: IChartApi, targets: IChartApi[]) => {
       if (isSyncingRef.current) return;
       isSyncingRef.current = true;
-      const range = source.timeScale().getVisibleLogicalRange();
-      if (range) targets.forEach(t => t.timeScale().setVisibleLogicalRange(range));
+      const r = src.timeScale().getVisibleLogicalRange();
+      if (r) targets.forEach(t => t.timeScale().setVisibleLogicalRange(r));
       isSyncingRef.current = false;
     };
     mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(mainChart, [rsiChart, stochChart]));
@@ -308,64 +320,66 @@ function PatternChartComponent({
     stochChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(stochChart, [mainChart, rsiChart]));
 
     // ── Resize observers ──
-    const observeResize = (el: HTMLDivElement, chart: IChartApi) => {
-      const ro = new ResizeObserver(() => {
-        chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
-      });
+    const obs = (el: HTMLDivElement, chart: IChartApi) => {
+      const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }));
       ro.observe(el);
       chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
       return ro;
     };
-    const roMain = observeResize(mainContainerRef.current!, mainChart);
-    const roRsi = observeResize(rsiContainerRef.current!, rsiChart);
-    const roStoch = observeResize(stochContainerRef.current!, stochChart);
-
+    const r1 = obs(mainContainerRef.current!, mainChart);
+    const r2 = obs(rsiContainerRef.current!, rsiChart);
+    const r3 = obs(stochContainerRef.current!, stochChart);
     isInitialLoadRef.current = true;
 
     return () => {
-      roMain.disconnect(); roRsi.disconnect(); roStoch.disconnect();
+      r1.disconnect(); r2.disconnect(); r3.disconnect();
       mainChart.remove(); rsiChart.remove(); stochChart.remove();
       mainChartRef.current = null; rsiChartRef.current = null; stochChartRef.current = null;
     };
-  }, [theme, chartOpts]);
+  }, [theme, chartBase]);
 
-  // Update data
+  // ── Data update ──
   useEffect(() => {
     if (!candles || !candleSeriesRef.current || !sma21SeriesRef.current || !sma200SeriesRef.current) return;
-    if (!volumeSeriesRef.current || !rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current) return;
+    if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current || !rsiSeriesRef.current) return;
+    if (!stochKSeriesRef.current || !stochDSeriesRef.current) return;
 
     const sorted = [...candles].sort((a, b) => a.t - b.t);
     const closes = sorted.map(c => parsePrice(c.c));
     const times = sorted.map(c => (c.t / 1000) as Time);
     const vols = sorted.map(c => parsePrice(c.v));
 
-    // Candles
     candleSeriesRef.current.setData(sorted.map((c, i) => ({
       time: times[i], open: parsePrice(c.o), high: parsePrice(c.h),
       low: parsePrice(c.l), close: parsePrice(c.c),
     })));
 
-    // Volume
-    volumeSeriesRef.current.setData(sorted.map((c, i) => ({
-      time: times[i],
-      value: vols[i],
-      color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.5)" : "rgba(239,83,80,0.5)",
-    })));
+    const volData = sorted.map((c, i) => ({
+      time: times[i], value: vols[i],
+      color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+    }));
+    volumeSeriesRef.current.setData(volData);
+    setLastVol(vols[vols.length - 1] ?? null);
 
-    // SMAs
+    // Volume SMA-20
+    if (vols.length >= 20) {
+      volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
+    }
+
     if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-    const period200 = sorted.length >= 200 ? 200 : Math.max(10, Math.floor(sorted.length * 0.6));
-    if (sorted.length > period200) sma200SeriesRef.current.setData(calcSMA(closes, times, period200));
+    const p200 = Math.min(sorted.length - 1, 200);
+    if (p200 >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200));
 
-    // RSI
     const rsiData = calcRSI(closes, times, 14);
-    if (rsiData.length > 0) rsiSeriesRef.current.setData(rsiData);
+    if (rsiData.length > 0) {
+      rsiSeriesRef.current.setData(rsiData);
+      setLastRSI(rsiData[rsiData.length - 1].value);
+    }
 
-    // Stoch RSI
     if (rsiData.length >= 14) {
       const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
-      if (k.length > 0) stochKSeriesRef.current.setData(k);
-      if (d.length > 0) stochDSeriesRef.current.setData(d);
+      if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
+      if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
     }
 
     if (mainChartRef.current && isInitialLoadRef.current) {
@@ -374,135 +388,138 @@ function PatternChartComponent({
     }
   }, [candles, parsePrice]);
 
-  // TP/SL/Entry/Liq price lines on the main chart
+  // ── TP/SL/Entry/Liq price lines ──
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
-    priceLineRefs.current.forEach(line => { try { series.removePriceLine(line); } catch (_) {} });
+    priceLineRefs.current.forEach(l => { try { series.removePriceLine(l); } catch (_) {} });
     priceLineRefs.current = [];
 
-    const addLine = (price: number, color: string, title: string) => {
+    const add = (price: number, color: string, title: string) => {
       if (!price || isNaN(price) || price <= 0) return;
       priceLineRefs.current.push(series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title }));
     };
 
-    const position = positions.find(p => p.coin === coin);
-    if (position) {
-      const isLong = position.side === "long";
-      const coinOrders = openOrders.filter(o => o.coin === coin);
-      const getOrderType = (order: any): "tp" | "sl" | "other" => {
-        const ot = (order.orderType || "").toLowerCase();
-        if (ot.includes("take profit") || ot === "take_profit") return "tp";
-        if (ot.includes("stop") || ot === "stop_loss") return "sl";
-        const px = parseFloat(order.triggerPx || order.limitPx);
-        if (!px || isNaN(px)) return "other";
-        return isLong ? (px > (position.entryPrice || currentPrice) ? "tp" : "sl") : (px < (position.entryPrice || currentPrice) ? "tp" : "sl");
+    const pos = positions.find(p => p.coin === coin);
+    if (pos) {
+      const isLong = pos.side === "long";
+      const orders = openOrders.filter(o => o.coin === coin);
+      const getType = (o: any) => {
+        const ot = (o.orderType || "").toLowerCase();
+        if (ot.includes("take profit")) return "tp";
+        if (ot.includes("stop")) return "sl";
+        const px = parseFloat(o.triggerPx || o.limitPx);
+        if (isNaN(px)) return "other";
+        return isLong ? (px > (pos.entryPrice || currentPrice) ? "tp" : "sl") : (px < (pos.entryPrice || currentPrice) ? "tp" : "sl");
       };
-      const tpOrder = coinOrders.find(o => getOrderType(o) === "tp");
-      const slOrder = coinOrders.find(o => getOrderType(o) === "sl");
-      const tpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
-      const slPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
-
-      if (tpPrice) addLine(tpPrice, "#22c55e", `TP`);
-      if (position.entryPrice) addLine(position.entryPrice, "#60a5fa", "Entry");
-      if (slPrice) addLine(slPrice, "#ef4444", `SL`);
-      if (position.liquidationPrice && position.liquidationPrice > 0) addLine(position.liquidationPrice, "#f97316", "Liq.");
+      const tp = orders.find(o => getType(o) === "tp");
+      const sl = orders.find(o => getType(o) === "sl");
+      if (tp) add(parseFloat(tp.triggerPx || tp.limitPx), "#22c55e", "TP");
+      if (pos.entryPrice) add(pos.entryPrice, "#60a5fa", "Entry");
+      if (sl) add(parseFloat(sl.triggerPx || sl.limitPx), "#ef4444", "SL");
+      if (pos.liquidationPrice > 0) add(pos.liquidationPrice, "#f97316", "Liq.");
     }
   }, [positions, openOrders, coin, currentPrice]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
+  // ── Render ──
   return (
-    <div className={`flex flex-col h-full ${className}`}>
-      {/* ── Main chart (candles + SMAs + volume) ── */}
-      <div className="relative flex-[6] min-h-0">
+    <div ref={outerRef} className={`flex flex-col overflow-hidden ${className}`} style={{ background: BG }}>
+
+      {/* ── Main chart pane ── */}
+      <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative overflow-hidden">
         <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
 
-        {/* Signal / SMA overlay card — AI card only shown for Pro users */}
+        {/* Volume label */}
+        <div className="absolute top-1 left-1 z-10 pointer-events-none flex items-center gap-1">
+          <span className="text-[10px] text-[#b2b5be] font-mono">Volume SMA</span>
+          {lastVol !== null && <span className="text-[10px] text-[#f59e0b] font-mono">{fmtVol(lastVol)}</span>}
+        </div>
+
+        {/* SMA legend */}
+        <div className="absolute top-1 right-8 z-10 pointer-events-none flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-4 h-0.5 bg-white" />
+            <span className="text-[9px] text-[#b2b5be]">21</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-4 h-0.5" style={{ background: "#f5e642" }} />
+            <span className="text-[9px] text-[#b2b5be]">200</span>
+          </span>
+        </div>
+
+        {/* Signal overlay card */}
         {showSignals && activeSignal ? (
-          <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg max-w-xs z-10">
+          <Card className="absolute top-8 left-1 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-[#2a3249] shadow-xl max-w-xs z-10">
             <div className="flex items-center gap-2 mb-2">
-              {activeSignal.bias === "bullish" ? (
-                <TrendingUp className="h-5 w-5 text-green-500" />
-              ) : activeSignal.bias === "bearish" ? (
-                <TrendingDown className="h-5 w-5 text-red-500" />
-              ) : (
-                <AlertCircle className="h-5 w-5 text-yellow-500" />
-              )}
-              <span className="font-semibold text-sm">{activeSignal.patternName}</span>
-              <Badge
-                variant={activeSignal.patternStatus === "breakout_watch" ? "default" : activeSignal.patternStatus === "forming" ? "secondary" : "outline"}
-                className={`text-xs ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-yellow-600" : activeSignal.patternStatus === "developed" ? "bg-green-600" : ""}`}
-              >
+              {activeSignal.bias === "bullish" ? <TrendingUp className="h-4 w-4 text-green-400" /> :
+               activeSignal.bias === "bearish" ? <TrendingDown className="h-4 w-4 text-red-400" /> :
+               <AlertCircle className="h-4 w-4 text-yellow-400" />}
+              <span className="font-semibold text-sm text-[#e8ecf1]">{activeSignal.patternName}</span>
+              <Badge className={`text-[9px] px-1 ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-yellow-700" : "bg-green-700"}`}>
                 {activeSignal.patternStatus === "breakout_watch" ? "WATCH" : activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
               </Badge>
             </div>
-            <div className="bg-blue-500/20 border border-blue-500/50 rounded px-2 py-1 mb-2">
-              <p className="text-xs text-blue-400 font-medium">Educational - Learn to identify your own entry/exit</p>
+            <div className="bg-blue-900/40 border border-blue-700/40 rounded px-2 py-1 mb-2">
+              <p className="text-[10px] text-blue-300">Educational · Learn to identify your own entries</p>
             </div>
-            <p className="text-xs text-muted-foreground mb-3 leading-relaxed">{activeSignal.educationalNote}</p>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-white" />
-                <span className="text-muted-foreground">21 SMA:</span>
-                <span className="font-mono">${activeSignal.sma21.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#f5e642" }} />
-                <span className="text-muted-foreground">200 SMA:</span>
-                <span className="font-mono">${activeSignal.sma200.toFixed(2)}</span>
-              </div>
+            <p className="text-[10px] text-[#8c9ab5] mb-2 leading-relaxed">{activeSignal.educationalNote}</p>
+            <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
+              <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-white inline-block" /><span className="text-[#8c9ab5]">21 SMA</span><span className="font-mono text-[#e8ecf1]">${activeSignal.sma21.toFixed(1)}</span></span>
+              <span className="flex items-center gap-1"><span className="w-2 h-0.5 inline-block" style={{ background: "#f5e642" }} /><span className="text-[#8c9ab5]">200 SMA</span><span className="font-mono text-[#e8ecf1]">${activeSignal.sma200.toFixed(1)}</span></span>
             </div>
-            <div className="mt-3 pt-3 border-t">
-              <p className="text-xs font-medium text-amber-500 mb-1">What to Watch:</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">{activeSignal.whatToWatch}</p>
-            </div>
-            <div className="mt-3 pt-2 border-t flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Bias</span>
-              <Badge variant={activeSignal.bias === "bullish" ? "default" : activeSignal.bias === "bearish" ? "destructive" : "secondary"}>
-                {activeSignal.bias.charAt(0).toUpperCase() + activeSignal.bias.slice(1)}
-              </Badge>
+            <div className="border-t border-[#2a3249] pt-2">
+              <p className="text-[10px] font-medium text-amber-400 mb-0.5">What to Watch:</p>
+              <p className="text-[10px] text-[#8c9ab5] leading-relaxed">{activeSignal.whatToWatch}</p>
             </div>
           </Card>
-        ) : (
-          <Card className="absolute top-4 left-4 p-3 bg-background/90 backdrop-blur-sm border shadow-lg z-10">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-3 h-0.5 bg-white" />
-              <span className="text-sm">21 SMA</span>
-              {smaStatus && <span className="font-mono text-xs text-muted-foreground">${smaStatus.sma21.toFixed(2)}</span>}
+        ) : smaStatus ? (
+          <div className="absolute top-8 left-1 z-10 pointer-events-none">
+            <div className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${isBullish ? "text-green-400" : "text-red-400"}`}
+              style={{ background: "rgba(19,23,34,0.7)" }}>
+              {isBullish ? "21 > 200 · Bullish bias" : "21 < 200 · Bearish bias"}
             </div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-3 h-0.5" style={{ backgroundColor: "#f5e642" }} />
-              <span className="text-sm">200 SMA</span>
-              {smaStatus && smaStatus.sma200 > 0 && <span className="font-mono text-xs text-muted-foreground">${smaStatus.sma200.toFixed(2)}</span>}
-            </div>
-            {smaStatus && (
-              <div className={`text-xs border-t pt-2 ${isBullish ? "text-green-500" : "text-red-500"}`}>
-                {isBullish ? `21 > 200 on ${interval} - Looking for bullish patterns...` : `21 < 200 on ${interval} - Looking for bearish patterns...`}
-              </div>
-            )}
-            {!smaStatus && <div className="text-xs text-muted-foreground border-t pt-2">Waiting for pattern...</div>}
-          </Card>
-        )}
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── Drag handle 1 ── */}
+      <div
+        onMouseDown={startDrag(0)}
+        className="flex-shrink-0 cursor-row-resize group"
+        style={{ height: HANDLE_PX, background: BORDER }}
+      >
+        <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
       </div>
 
       {/* ── RSI pane ── */}
-      <div className="relative flex-[2] min-h-0 border-t border-white/10">
+      <div style={{ flexGrow: weights[1], minHeight: 50 }} className="relative overflow-hidden">
         <div ref={rsiContainerRef} className="absolute inset-0" />
-        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-2">
-          <span className="text-[9px] font-mono text-violet-400 bg-black/40 px-1 rounded">RSI (14)</span>
-          <span className="text-[9px] text-red-400/70">70</span>
-          <span className="text-[9px] text-green-400/70">30</span>
+        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+          <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
+          <span className="text-[10px] text-[#b2b5be] font-mono">14</span>
+          {lastRSI !== null && <span className="text-[10px] font-mono" style={{ color: "#a78bfa" }}>{lastRSI.toFixed(2)}</span>}
         </div>
       </div>
 
+      {/* ── Drag handle 2 ── */}
+      <div
+        onMouseDown={startDrag(1)}
+        className="flex-shrink-0 cursor-row-resize group"
+        style={{ height: HANDLE_PX, background: BORDER }}
+      >
+        <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
+      </div>
+
       {/* ── Stoch RSI pane ── */}
-      <div className="relative flex-[2] min-h-0 border-t border-white/10">
+      <div style={{ flexGrow: weights[2], minHeight: 50 }} className="relative overflow-hidden">
         <div ref={stochContainerRef} className="absolute inset-0" />
-        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-2">
-          <span className="text-[9px] font-mono text-sky-400 bg-black/40 px-1 rounded">Stoch RSI</span>
-          <span className="text-[9px] text-sky-400/70">K</span>
-          <span className="text-[9px] text-orange-400/70">D</span>
+        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+          <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
+          <span className="text-[10px] text-[#b2b5be] font-mono">14 14 3 3</span>
+          {lastK !== null && <span className="text-[10px] font-mono" style={{ color: "#2962ff" }}>{lastK.toFixed(2)}</span>}
+          {lastD !== null && <span className="text-[10px] font-mono" style={{ color: "#ff6d00" }}>{lastD.toFixed(2)}</span>}
         </div>
       </div>
     </div>
