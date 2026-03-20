@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useTrading } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
+import { X, Pencil, Check } from "lucide-react";
 
 interface ChartOrderLinesProps {
   coin: string;
@@ -31,10 +31,14 @@ function fmtPnl(pnl: number): string {
 }
 
 export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
-  const { positions, openOrders, cancelHLOrder } = useTrading();
+  const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
   const [containerHeight, setContainerHeight] = useState(400);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [editMode, setEditMode] = useState<null | "tp" | "sl">(null);
+  const [editInput, setEditInput] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -44,6 +48,13 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (editMode && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editMode]);
 
   const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
 
@@ -75,6 +86,42 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       : { title: "Cancel failed", description: result.error, variant: "destructive" });
   }, [tpOrder, slOrder, coin, cancelHLOrder, toast]);
 
+  const startEdit = useCallback((type: "tp" | "sl") => {
+    const price = type === "tp" ? tpPrice : slPrice;
+    setEditInput(price ? fmt(price) : "");
+    setEditMode(type);
+  }, [tpPrice, slPrice]);
+
+  const cancelEdit = useCallback(() => {
+    setEditMode(null);
+    setEditInput("");
+  }, []);
+
+  const confirmEdit = useCallback(async () => {
+    if (!editMode || !position) return;
+    const newPrice = parseFloat(editInput);
+    if (isNaN(newPrice) || newPrice <= 0) {
+      toast({ title: "Invalid price", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const isLong = position.side === "long";
+      const tp = editMode === "tp" ? newPrice : (tpPrice ?? undefined);
+      const sl = editMode === "sl" ? newPrice : (slPrice ?? undefined);
+      const result = await placeTPSL(coin, isLong, tp, sl, position.entryPrice);
+      if (result.success) {
+        toast({ title: `${editMode === "tp" ? "Take Profit" : "Stop Loss"} updated` });
+        setEditMode(null);
+        setEditInput("");
+      } else {
+        toast({ title: "Update failed", description: result.error, variant: "destructive" });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast]);
+
   if (!position) return null;
 
   const isLong = position.side === "long";
@@ -84,7 +131,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const pnlPositive = unrealizedPnl >= 0;
   const liqPrice = position.liquidationPrice;
 
-  // Build price scale that fits all key levels
   const priceLevels: number[] = [currentPrice, entry].filter(p => p > 0);
   if (tpPrice) priceLevels.push(tpPrice);
   if (slPrice) priceLevels.push(slPrice);
@@ -102,14 +148,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   interface LineConfig {
     key: string;
     price: number;
-    color: string;          // tailwind / hex
-    lineColor: string;      // for border-color inline style
+    lineColor: string;
+    color: string;
     dashed: boolean;
     label: string;
     pnlLabel?: string;
     sizeLabel: string;
     canCancel: boolean;
+    canEdit: boolean;
     cancelType?: "tp" | "sl";
+    editType?: "tp" | "sl";
     labelSide?: "left" | "center";
   }
 
@@ -122,10 +170,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       color: "text-[#22c55e]",
       lineColor: "#22c55e",
       dashed: true,
-      label: `TP Price ${isLong ? ">" : "<"} ${fmt(tpPrice)}`,
+      label: `TP ${fmt(tpPrice)}`,
       sizeLabel: fmtSize(size),
       canCancel: true,
+      canEdit: true,
       cancelType: "tp",
+      editType: "tp",
       labelSide: "center",
     });
   }
@@ -140,6 +190,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     pnlLabel: `PNL ${fmtPnl(unrealizedPnl)}`,
     sizeLabel: fmtSize(size),
     canCancel: false,
+    canEdit: false,
     labelSide: "left",
   });
 
@@ -150,10 +201,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       color: "text-[#ef4444]",
       lineColor: "#ef4444",
       dashed: true,
-      label: `SL Price ${isLong ? "<" : ">"} ${fmt(slPrice)}`,
+      label: `SL ${fmt(slPrice)}`,
       sizeLabel: fmtSize(size),
       canCancel: true,
+      canEdit: true,
       cancelType: "sl",
+      editType: "sl",
       labelSide: "center",
     });
   }
@@ -165,9 +218,10 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       color: "text-orange-400",
       lineColor: "#f97316",
       dashed: true,
-      label: `Liq. Price`,
+      label: `Liq. ${fmt(liqPrice)}`,
       sizeLabel: "",
       canCancel: false,
+      canEdit: false,
       labelSide: "left",
     });
   }
@@ -182,6 +236,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       {lines.map(line => {
         const yPct = toYPct(line.price);
         if (yPct < -8 || yPct > 108) return null;
+        const isEditing = editMode === line.editType;
 
         return (
           <div
@@ -192,13 +247,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
             {/* Full-width dashed line */}
             <div
               className="absolute left-0 right-0 h-0"
-              style={{
-                borderTop: `1px dashed ${line.lineColor}`,
-                opacity: 0.7,
-              }}
+              style={{ borderTop: `1px dashed ${line.lineColor}`, opacity: 0.7 }}
             />
 
-            {/* Label – centered for TP/SL, left for Entry/Liq */}
             {line.labelSide === "center" ? (
               <div
                 className="absolute"
@@ -209,25 +260,72 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                   zIndex: 30,
                 }}
               >
-                <div
-                  className={cn(
-                    "flex items-center gap-2 px-2.5 py-1 rounded text-[11px] font-mono font-semibold",
-                    "bg-[#1a1f2e] border border-white/15 shadow-lg select-none whitespace-nowrap",
-                    line.color,
-                  )}
-                >
-                  <span>{line.label}</span>
-                  <span className="opacity-50">{line.sizeLabel}</span>
-                  {line.canCancel && (
+                {isEditing ? (
+                  /* Inline edit mode */
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-[#1a1f2e] border border-white/25 shadow-lg">
+                    <input
+                      ref={inputRef}
+                      type="number"
+                      value={editInput}
+                      onChange={e => setEditInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") confirmEdit();
+                        if (e.key === "Escape") cancelEdit();
+                      }}
+                      className={cn(
+                        "w-24 bg-transparent text-[11px] font-mono font-semibold outline-none",
+                        line.color
+                      )}
+                      disabled={isSubmitting}
+                      data-testid={`edit-input-${line.key}`}
+                    />
                     <button
-                      className="opacity-60 hover:opacity-100 transition-opacity ml-0.5"
-                      onClick={() => line.cancelType && handleCancel(line.cancelType!)}
-                      data-testid={`cancel-${line.key}`}
+                      onClick={confirmEdit}
+                      disabled={isSubmitting}
+                      className="text-green-400 hover:text-green-300 transition-colors disabled:opacity-40"
+                      data-testid={`confirm-edit-${line.key}`}
+                    >
+                      <Check className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      data-testid={`cancel-edit-${line.key}`}
                     >
                       <X className="h-3 w-3" />
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  /* Normal display mode */
+                  <div
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-semibold",
+                      "bg-[#1a1f2e] border border-white/15 shadow-lg select-none whitespace-nowrap",
+                      line.color,
+                    )}
+                  >
+                    <span>{line.label}</span>
+                    <span className="opacity-50">{line.sizeLabel}</span>
+                    {line.canEdit && (
+                      <button
+                        className="opacity-60 hover:opacity-100 transition-opacity"
+                        onClick={() => startEdit(line.editType!)}
+                        data-testid={`edit-${line.key}`}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                    {line.canCancel && (
+                      <button
+                        className="opacity-60 hover:opacity-100 transition-opacity"
+                        onClick={() => handleCancel(line.cancelType!)}
+                        data-testid={`cancel-${line.key}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               /* Left-side label for Entry and Liq */

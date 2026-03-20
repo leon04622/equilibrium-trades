@@ -9,7 +9,6 @@ import { RecentTrades } from "@/components/recent-trades";
 import { OrderEntry } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
 import { BottomTradingPanel } from "@/components/bottom-trading-panel";
-import { ActivePositionPanel } from "@/components/active-position-panel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -394,8 +393,6 @@ export default function Trading({ visible = true }: TradingProps) {
         <div className="w-72 xl:w-80 border-l flex flex-col bg-card/30 hidden md:flex">
           <div className="flex-1 overflow-y-auto">
             <div className="p-3 space-y-3">
-              <ActivePositionPanel coin={coin} currentPrice={price} />
-              
               <OrderEntry 
                 coin={coin} 
                 currentPrice={price} 
@@ -434,7 +431,6 @@ export default function Trading({ visible = true }: TradingProps) {
             </SheetHeader>
             <div className="overflow-y-auto h-full pb-8">
               <div className="space-y-4 px-2">
-                <ActivePositionPanel coin={coin} currentPrice={price} />
                 <OrderEntry 
                   coin={coin} 
                   currentPrice={price} 
