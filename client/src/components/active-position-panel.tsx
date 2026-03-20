@@ -366,28 +366,6 @@ function OrderLevelRow({
         </div>
       </div>
 
-      {/* Quick-set % buttons */}
-      <div className="flex flex-wrap gap-1">
-        {quickOptions.map(opt => {
-          const isActive = inputValue && Math.abs(parseFloat(inputValue) - opt.price) < 0.01;
-          return (
-            <button
-              key={opt.label}
-              onClick={() => onQuickSet(opt.price)}
-              className={cn(
-                "text-[10px] px-1.5 py-0.5 rounded border font-mono transition-colors",
-                isActive
-                  ? cn(colorCls.border, colorCls.text)
-                  : "text-muted-foreground border-border hover:text-foreground hover:border-muted-foreground"
-              )}
-              data-testid={`quick-${label.toLowerCase().replace(" ", "-")}-${opt.label}`}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Price input (only when editing) */}
       {isEditing && (
         <div className="flex items-center gap-1">
