@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
-import { ChartOrderLines } from "@/components/chart-order-lines";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
@@ -314,7 +313,6 @@ export default function Trading({ visible = true }: TradingProps) {
                   ) : (
                     <>
                       <TradingViewChart symbol={tvSymbol} interval={timeframe} className="absolute inset-0" />
-                      {price > 0 && <ChartOrderLines coin={coin} currentPrice={price} />}
                     </>
                   )}
                 </div>
@@ -345,7 +343,6 @@ export default function Trading({ visible = true }: TradingProps) {
               ) : (
                 <>
                   <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
-                  {price > 0 && <ChartOrderLines coin={coin} currentPrice={price} />}
                 </>
               )}
             </div>
