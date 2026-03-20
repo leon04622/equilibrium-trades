@@ -50,7 +50,7 @@ export default function Portfolio() {
     currentPrices,
     refreshAccount,
   } = useTrading();
-  const { address, signer } = useWallet();
+  const { address, signer, provider } = useWallet();
   const [, setLocation] = useLocation();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
   const [isLoadingSpot, setIsLoadingSpot] = useState(false);
@@ -125,10 +125,33 @@ export default function Portfolio() {
   };
 
   const handleTransfer = async () => {
-    if (!signer) {
-      setTransferResult({ success: false, error: "Wallet not connected. Please reconnect your wallet and try again." });
+    console.log("[Transfer] handleTransfer called, signer:", !!signer, "address:", address, "provider:", !!provider);
+
+    // Try to recover a fresh signer if stored one is null (can happen after account switch)
+    let activeSigner = signer;
+    if (!activeSigner) {
+      console.warn("[Transfer] signer is null, attempting to recover from provider...");
+      try {
+        if (provider) {
+          activeSigner = await provider.getSigner();
+          console.log("[Transfer] Recovered signer from provider:", !!activeSigner);
+        } else if (window.ethereum) {
+          const { BrowserProvider } = await import("ethers");
+          const freshProvider = new BrowserProvider(window.ethereum);
+          activeSigner = await freshProvider.getSigner();
+          console.log("[Transfer] Recovered signer from window.ethereum:", !!activeSigner);
+        }
+      } catch (err) {
+        console.error("[Transfer] Failed to recover signer:", err);
+      }
+    }
+
+    if (!activeSigner) {
+      console.error("[Transfer] No signer available — cannot proceed");
+      setTransferResult({ success: false, error: "Wallet not connected. Please reconnect your wallet on the Hyperliquid page and try again." });
       return;
     }
+
     const amount = parseFloat(transferAmount);
     if (isNaN(amount) || amount <= 0) {
       setTransferResult({ success: false, error: "Please enter a valid amount greater than 0." });
@@ -140,9 +163,9 @@ export default function Portfolio() {
     }
     setTransferring(true);
     setTransferResult(null);
-    console.log(`Initiating USDC transfer: ${amount} USDC, toPerp=${transferToPerp}`);
+    console.log(`[Transfer] Initiating USDC transfer: ${amount} USDC, toPerp=${transferToPerp}`);
     try {
-      const result = await transferUsdcBetweenAccounts(signer, amount, transferToPerp);
+      const result = await transferUsdcBetweenAccounts(activeSigner, amount, transferToPerp);
       setTransferResult(result);
       if (result.success) {
         setTimeout(() => {

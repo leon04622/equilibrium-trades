@@ -865,8 +865,8 @@ export async function transferUsdcBetweenAccounts(
       ],
     };
 
-    // Amount as a plain decimal string (e.g. "10.5" not "10.500000")
-    const amountStr = amount.toString();
+    // Amount as a normalized decimal string — round to avoid floating-point artifacts like "12.640000000001"
+    const amountStr = parseFloat(amount.toFixed(6)).toString();
 
     const message = {
       hyperliquidChain: "Mainnet",

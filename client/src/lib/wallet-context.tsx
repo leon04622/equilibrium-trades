@@ -141,13 +141,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [address, refreshApprovalStatus]);
 
-  const handleAccountsChanged = useCallback((accounts: string[]) => {
+  const handleAccountsChanged = useCallback(async (accounts: string[]) => {
     if (accounts.length === 0) {
       setAddress(null);
       setSigner(null);
       setProvider(null);
     } else {
       setAddress(accounts[0]);
+      // Refresh signer for the new account so signing operations work correctly
+      if (window.ethereum) {
+        try {
+          const browserProvider = new BrowserProvider(window.ethereum);
+          const browserSigner = await browserProvider.getSigner();
+          setProvider(browserProvider);
+          setSigner(browserSigner);
+        } catch (err) {
+          console.error("Error refreshing signer after account change:", err);
+        }
+      }
     }
   }, []);
 
