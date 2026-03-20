@@ -27,8 +27,11 @@ type DragTarget = "tp" | "sl";
 
 interface DragState {
   target: DragTarget;
-  startY: number;
-  startPrice: number;
+  // Frozen scale captured at drag-start so price↔visual always use same coords
+  rMin: number;
+  rMax: number;
+  containerTop: number;
+  containerHeight: number;
 }
 
 export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
@@ -37,15 +40,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const currentPriceRef = useRef(currentPrice);
-  useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
-
-  // Keep a ref that always holds the latest drag price so onUp never reads stale state
+  // Always-current price ref so the submitted price is never stale
   const dragPriceRef = useRef(0);
 
   const [dragging, setDragging] = useState(false);
   const [dragPrice, setDragPrice] = useState(0);
-  const [dragCursorY, setDragCursorY] = useState(50);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
 
@@ -78,7 +77,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     ? isLong ? entry * 0.98 : entry * 1.02
     : null;
 
-  const { toY } = useMemo(() => {
+  // Build the visible price scale. Returns toY (price→%) and fromY (%→price).
+  // This is the SINGLE source of truth for visual↔price mapping.
+  const { toY, fromY, rMin, rMax } = useMemo(() => {
     const allPrices = [
       currentPrice,
       position?.entryPrice,
@@ -94,7 +95,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     const rMin = minP - pad;
     const rMax = maxP + pad;
 
-    return { toY: (price: number) => ((rMax - price) / (rMax - rMin)) * 100 };
+    const toY = (price: number) => ((rMax - price) / (rMax - rMin)) * 100;
+    // Inverse: given Y% (0=top), return price
+    const fromY = (yPct: number) => rMax - (rMax - rMin) * (yPct / 100);
+
+    return { toY, fromY, rMin, rMax };
   }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
 
   const displayTpPrice = dragging && dragTarget === "tp" ? dragPrice : (activeTpPrice ?? ghostTpPrice);
@@ -111,46 +116,53 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       : (activeSlPrice ?? ghostSlPrice ?? currentPrice * 0.98);
 
     const rect = container.getBoundingClientRect();
-    const startCursorY = ((e.clientY - rect.top) / rect.height) * 100;
 
-    dragRef.current = { target, startY: e.clientY, startPrice };
+    // Freeze the scale at drag-start. Visual Y and price will both use this
+    // throughout the drag, so they are guaranteed to be in sync.
+    dragRef.current = {
+      target,
+      rMin,
+      rMax,
+      containerTop: rect.top,
+      containerHeight: rect.height,
+    };
     dragPriceRef.current = startPrice;
     setDragTarget(target);
     setDragPrice(startPrice);
-    setDragCursorY(Math.max(0, Math.min(100, startCursorY)));
     setDragging(true);
-  }, [activeTpPrice, ghostTpPrice, activeSlPrice, ghostSlPrice, currentPrice]);
+  }, [activeTpPrice, ghostTpPrice, activeSlPrice, ghostSlPrice, currentPrice, rMin, rMax]);
 
   useEffect(() => {
     if (!dragging) return;
 
     const onMove = (e: MouseEvent) => {
-      if (!dragRef.current) return;
-      const container = containerRef.current;
+      const state = dragRef.current;
+      if (!state) return;
 
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-        setDragCursorY(yPct);
-      }
+      // Cursor Y as a percentage of the container height (clamped 0–100)
+      const yPct = Math.max(0, Math.min(100,
+        ((e.clientY - state.containerTop) / state.containerHeight) * 100
+      ));
 
-      const { startY, startPrice } = dragRef.current;
-      const deltaY = e.clientY - startY;
-      const sensitivity = currentPriceRef.current * 0.0002;
-      const newPrice = Math.max(1, startPrice - deltaY * sensitivity);
-      // Always write to the ref so onUp can read the final price without stale closures
+      // Convert cursor position → price using the FROZEN scale from drag-start.
+      // This is the exact inverse of toY, so visual line position will match
+      // cursor pixel-for-pixel within our overlay.
+      const newPrice = Math.max(state.rMin, Math.min(state.rMax,
+        state.rMax - (state.rMax - state.rMin) * (yPct / 100)
+      ));
+
       dragPriceRef.current = newPrice;
       setDragPrice(newPrice);
     };
 
     const onUp = async () => {
-      if (!position || !dragRef.current) {
+      const state = dragRef.current;
+      if (!position || !state) {
         setDragging(false);
         setDragTarget(null);
         return;
       }
-      const target = dragRef.current.target;
-      // Read from ref — never stale, regardless of re-renders
+      const target = state.target;
       const finalPrice = dragPriceRef.current;
       dragRef.current = null;
       setDragging(false);
@@ -180,8 +192,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-    // Intentionally NOT including dragPrice in deps — we use dragPriceRef instead
-    // to avoid re-registering listeners on every mouse move
   }, [dragging, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast]);
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
@@ -221,7 +231,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   if (displayTpPrice && displayTpPrice > 0) {
     const isDraggingThis = dragging && dragTarget === "tp";
     const isGhost = !activeTpPrice && !isDraggingThis;
-    const visualY = isDraggingThis ? dragCursorY : toY(displayTpPrice);
+    // ALWAYS derive visual position from price through toY — never from raw cursor Y
+    const visualY = toY(displayTpPrice);
 
     lines.push({
       key: "tp",
@@ -232,7 +243,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         : `TP Price ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
       pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displayTpPrice)),
       sizeLabel: isGhost ? undefined : fmt(size),
-      lineColor: isDraggingThis ? "#22c55e" : "#22c55e",
+      lineColor: "#22c55e",
       pillBg: "bg-[#22c55e]/20",
       textColor: "text-[#22c55e]",
       dashed: isGhost,
@@ -267,7 +278,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   if (displaySlPrice && displaySlPrice > 0) {
     const isDraggingThis = dragging && dragTarget === "sl";
     const isGhost = !activeSlPrice && !isDraggingThis;
-    const visualY = isDraggingThis ? dragCursorY : toY(displaySlPrice);
+    const visualY = toY(displaySlPrice);
 
     lines.push({
       key: "sl",
@@ -278,7 +289,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         : `SL Price ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
       pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displaySlPrice)),
       sizeLabel: isGhost ? undefined : fmt(size),
-      lineColor: isDraggingThis ? "#ef4444" : "#ef4444",
+      lineColor: "#ef4444",
       pillBg: "bg-[#ef4444]/20",
       textColor: "text-[#ef4444]",
       dashed: isGhost,
@@ -309,6 +320,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   return (
     <>
+      {/* Full-screen capture layer prevents TradingView iframe from stealing mouse during drag */}
       {dragging && (
         <div className="fixed inset-0 z-[999] cursor-ns-resize" style={{ pointerEvents: "all" }} />
       )}
@@ -336,16 +348,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 pointerEvents: "none",
               }}
             >
-              {/* Full-width draggable hit area (12px tall) */}
+              {/* Full-width invisible hit strip — lets users grab anywhere on the line */}
               {line.draggable && line.draggableAs && (
                 <div
                   className="absolute left-0 right-0 cursor-ns-resize"
-                  style={{
-                    height: "24px",
-                    top: "-12px",
-                    pointerEvents: "auto",
-                    zIndex: 25,
-                  }}
+                  style={{ height: "28px", top: "-14px", pointerEvents: "auto", zIndex: 25 }}
                   onMouseDown={(e) => startDrag(e, line.draggableAs!)}
                   data-testid={`drag-line-${line.key}`}
                 />
@@ -355,12 +362,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
               <div
                 className="absolute left-0 right-0"
                 style={{
-                  borderTop: `${line.dashed ? "1.5px dashed" : "1.5px solid"} ${line.lineColor}`,
-                  opacity: line.ghost ? 0.45 : isDraggingThis ? 1 : 0.85,
+                  borderTop: `${line.dashed ? "1.5px dashed" : "2px solid"} ${line.lineColor}`,
+                  opacity: line.ghost ? 0.45 : isDraggingThis ? 1 : 0.9,
                 }}
               />
 
-              {/* Left-anchored label pill — Hyperliquid style */}
+              {/* Left label — Hyperliquid style: type + price + size + cancel */}
               <div
                 className="absolute left-2"
                 style={{
@@ -384,7 +391,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 >
                   <span>{line.label}</span>
                   {line.sizeLabel && (
-                    <span className="opacity-60 text-[10px]">{line.sizeLabel}</span>
+                    <span className="opacity-55 text-[10px]">{line.sizeLabel}</span>
                   )}
                   {line.canCancel && (
                     <button
@@ -400,7 +407,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 </div>
               </div>
 
-              {/* PNL label — positioned slightly right of center */}
+              {/* PNL badge — centred on the line */}
               {line.pnlLabel && !line.ghost && (
                 <div
                   className="absolute"
@@ -425,12 +432,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 </div>
               )}
 
-              {/* Right-edge price tag */}
+              {/* Right-edge price box */}
               <div
                 className={cn(
                   "absolute right-0 px-1.5 py-[3px] text-[10px] font-mono font-semibold rounded-l",
                   "border-l border-t border-b border-white/15",
-                  line.ghost ? "opacity-35" : "opacity-90",
+                  line.ghost ? "opacity-35" : "opacity-95",
                 )}
                 style={{
                   pointerEvents: "none",
