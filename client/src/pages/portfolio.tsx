@@ -33,12 +33,14 @@ import {
   XCircle,
   Loader2,
   ArrowUpFromLine,
+  ArrowDownToLine,
   Info,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, type SpotBalance } from "@/lib/hyperliquid-client";
+import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, depositUsdcToHyperliquid, getArbitrumUsdcBalance, type SpotBalance } from "@/lib/hyperliquid-client";
 import { Link, useLocation } from "wouter";
 
 export default function Portfolio() {
@@ -52,7 +54,7 @@ export default function Portfolio() {
     currentPrices,
     refreshAccount,
   } = useTrading();
-  const { address, signer, provider } = useWallet();
+  const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
@@ -71,6 +73,14 @@ export default function Portfolio() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawStep, setWithdrawStep] = useState<string>("");
   const [withdrawResult, setWithdrawResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  const [depositOpen, setDepositOpen] = useState(false);
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositing, setDepositing] = useState(false);
+  const [depositStep, setDepositStep] = useState<string>("");
+  const [depositResult, setDepositResult] = useState<{ success: boolean; txHash?: string; error?: string } | null>(null);
+  const [arbUsdcBalance, setArbUsdcBalance] = useState<number | null>(null);
+  const [isLoadingArbBalance, setIsLoadingArbBalance] = useState(false);
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
@@ -310,6 +320,104 @@ export default function Portfolio() {
     }
   };
 
+  const openDepositDialog = async () => {
+    setDepositAmount("");
+    setDepositResult(null);
+    setDepositStep("");
+    setDepositOpen(true);
+    if (address) {
+      setIsLoadingArbBalance(true);
+      try {
+        const bal = await getArbitrumUsdcBalance(address);
+        setArbUsdcBalance(bal);
+        const safeMax = Math.floor(bal * 100) / 100;
+        setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+      } catch {
+        setArbUsdcBalance(0);
+      } finally {
+        setIsLoadingArbBalance(false);
+      }
+    }
+  };
+
+  const handleDeposit = async () => {
+    setDepositStep("Checking wallet...");
+    setDepositResult(null);
+
+    const ARBITRUM_CHAIN_ID = 42161;
+    if (chainId !== ARBITRUM_CHAIN_ID) {
+      setDepositStep("Switching to Arbitrum...");
+      try {
+        await switchToArbitrum();
+      } catch {
+        setDepositStep("");
+        setDepositResult({ success: false, error: "Please switch your wallet to Arbitrum One and try again." });
+        return;
+      }
+    }
+
+    let activeSigner = signer;
+    if (!activeSigner) {
+      setDepositStep("Reconnecting wallet signer...");
+      try {
+        if (provider) {
+          activeSigner = await provider.getSigner();
+        } else if (window.ethereum) {
+          const { BrowserProvider } = await import("ethers");
+          const freshProvider = new BrowserProvider(window.ethereum);
+          activeSigner = await freshProvider.getSigner();
+        }
+      } catch (err: any) {
+        console.error("[Deposit] Signer recovery failed:", err);
+      }
+    }
+
+    if (!activeSigner) {
+      const msg = "Wallet signer not available. Please disconnect and reconnect your wallet, then try again.";
+      setDepositStep("");
+      setDepositResult({ success: false, error: msg });
+      toast({ title: "Deposit Failed", description: msg, variant: "destructive" });
+      return;
+    }
+
+    const amount = parseFloat(depositAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setDepositStep("");
+      setDepositResult({ success: false, error: "Please enter a valid amount greater than 0." });
+      return;
+    }
+    const maxDeposit = arbUsdcBalance ?? 0;
+    if (amount > maxDeposit + 0.001) {
+      setDepositStep("");
+      setDepositResult({ success: false, error: `Amount exceeds your Arbitrum USDC balance of ${maxDeposit.toFixed(2)} USDC.` });
+      return;
+    }
+
+    setDepositing(true);
+    setDepositStep("Sending USDC to Hyperliquid — confirm the transaction in your wallet...");
+
+    try {
+      const result = await depositUsdcToHyperliquid(activeSigner, amount);
+      setDepositStep("");
+      setDepositResult(result);
+
+      if (result.success) {
+        toast({ title: "Deposit Submitted", description: `${amount} USDC sent to Hyperliquid. It will appear in your account within a few minutes.` });
+        setTimeout(() => handleRefresh(), 10000);
+        setTimeout(() => handleRefresh(), 30000);
+      } else {
+        toast({ title: "Deposit Failed", description: result.error || "Deposit failed", variant: "destructive" });
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || String(err) || "Deposit failed unexpectedly";
+      setDepositStep("");
+      setDepositResult({ success: false, error: errMsg });
+      toast({ title: "Deposit Failed", description: errMsg, variant: "destructive" });
+    } finally {
+      setDepositing(false);
+    }
+  };
+
   if (!connected) {
     return (
       <div className="p-6 space-y-6">
@@ -359,6 +467,15 @@ export default function Portfolio() {
           >
             <ArrowRightLeft className="h-4 w-4 mr-2" />
             Transfer
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openDepositDialog}
+            data-testid="button-deposit"
+          >
+            <ArrowDownToLine className="h-4 w-4 mr-2" />
+            Deposit
           </Button>
           <Button
             size="sm"
@@ -819,6 +936,158 @@ export default function Portfolio() {
                 <>
                   <ArrowRightLeft className="h-4 w-4 mr-2" />
                   Transfer USDC
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Deposit Dialog ── */}
+      <Dialog open={depositOpen} onOpenChange={setDepositOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="dialog-deposit">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowDownToLine className="h-5 w-5 text-primary" />
+              Deposit USDC to Hyperliquid
+            </DialogTitle>
+            <DialogDescription>
+              Send native USDC from your Arbitrum wallet to your Hyperliquid account. Funds typically arrive within a few minutes.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!signer && (
+            <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.</span>
+            </div>
+          )}
+
+          {chainId !== null && chainId !== 42161 && (
+            <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Your wallet is not on Arbitrum One. Clicking Deposit will prompt you to switch networks first.</span>
+            </div>
+          )}
+
+          <div className="space-y-4 py-2">
+            {/* Arbitrum USDC balance */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 text-sm">
+              <span className="text-muted-foreground">Available on Arbitrum</span>
+              <span className="font-semibold font-mono">
+                {isLoadingArbBalance ? (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading...
+                  </span>
+                ) : arbUsdcBalance !== null ? (
+                  `${arbUsdcBalance.toFixed(2)} USDC`
+                ) : (
+                  "—"
+                )}
+              </span>
+            </div>
+
+            {/* Amount */}
+            <div className="space-y-1.5">
+              <Label htmlFor="deposit-amount">Amount (USDC)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="deposit-amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  min="0"
+                  step="0.01"
+                  data-testid="input-deposit-amount"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    const max = arbUsdcBalance ?? 0;
+                    setDepositAmount((Math.floor(max * 100) / 100).toFixed(2));
+                  }}
+                  data-testid="button-deposit-max"
+                >
+                  Max
+                </Button>
+              </div>
+              {arbUsdcBalance !== null && arbUsdcBalance <= 0 && (
+                <p className="text-xs text-amber-500">No USDC found in your Arbitrum wallet. Please fund your wallet on Arbitrum first.</p>
+              )}
+            </div>
+
+            {/* Info note */}
+            <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Info className="h-3 w-3 shrink-0 mt-0.5" />
+              <span>
+                Deposits use native USDC on Arbitrum One. The transaction sends your USDC directly to the Hyperliquid bridge contract.{" "}
+                <a
+                  href={`https://arbiscan.io/address/0x2Df1c51E09a4aB13229630FC358d49776d67093e`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-0.5"
+                  data-testid="link-bridge-contract"
+                >
+                  View bridge contract
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </span>
+            </div>
+
+            {depositStep && (
+              <div className="flex items-center gap-2 p-3 rounded-lg text-sm bg-primary/10 text-primary border border-primary/20">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                <span>{depositStep}</span>
+              </div>
+            )}
+
+            {depositResult && (
+              <div className={cn(
+                "flex items-start gap-2 p-3 rounded-lg text-sm font-medium",
+                depositResult.success
+                  ? "bg-bullish/10 text-bullish border border-bullish/20"
+                  : "bg-destructive/15 text-destructive border border-destructive/30"
+              )}>
+                {depositResult.success ? (
+                  <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                ) : (
+                  <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                )}
+                <span className="break-all">
+                  {depositResult.success
+                    ? `Deposit of ${depositAmount} USDC submitted! Funds will appear in your Hyperliquid account shortly.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
+                    : depositResult.error || "Deposit failed"}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDepositOpen(false)} data-testid="button-deposit-cancel">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeposit}
+              disabled={
+                depositing ||
+                !depositAmount ||
+                parseFloat(depositAmount) <= 0 ||
+                (arbUsdcBalance !== null && parseFloat(depositAmount) > arbUsdcBalance + 0.001)
+              }
+              data-testid="button-deposit-confirm"
+            >
+              {depositing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Depositing...
+                </>
+              ) : (
+                <>
+                  <ArrowDownToLine className="h-4 w-4 mr-2" />
+                  Deposit USDC
                 </>
               )}
             </Button>
