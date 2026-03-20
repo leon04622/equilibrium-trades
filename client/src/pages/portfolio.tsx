@@ -105,19 +105,34 @@ export default function Portfolio() {
     return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  const maxTransferAmount = transferToPerp ? usdcSpotAvailable : availableBalance;
+
   const openTransferDialog = (toPerp: boolean) => {
+    const max = toPerp ? usdcSpotAvailable : (balance || 0);
     setTransferToPerp(toPerp);
-    setTransferAmount("");
+    // Pre-fill with max available so the button is immediately usable
+    setTransferAmount(max > 0 ? max.toFixed(2) : "");
     setTransferResult(null);
     setTransferOpen(true);
   };
 
   const handleTransfer = async () => {
-    if (!signer) return;
+    if (!signer) {
+      setTransferResult({ success: false, error: "Wallet not connected. Please reconnect your wallet and try again." });
+      return;
+    }
     const amount = parseFloat(transferAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    if (isNaN(amount) || amount <= 0) {
+      setTransferResult({ success: false, error: "Please enter a valid amount greater than 0." });
+      return;
+    }
+    if (amount > maxTransferAmount) {
+      setTransferResult({ success: false, error: `Amount exceeds available balance of ${maxTransferAmount.toFixed(2)} USDC.` });
+      return;
+    }
     setTransferring(true);
     setTransferResult(null);
+    console.log(`Initiating USDC transfer: ${amount} USDC, toPerp=${transferToPerp}`);
     try {
       const result = await transferUsdcBetweenAccounts(signer, amount, transferToPerp);
       setTransferResult(result);
@@ -128,13 +143,12 @@ export default function Portfolio() {
         }, 2000);
       }
     } catch (err: any) {
+      console.error("Transfer caught error:", err);
       setTransferResult({ success: false, error: err.message || "Transfer failed" });
     } finally {
       setTransferring(false);
     }
   };
-
-  const maxTransferAmount = transferToPerp ? usdcSpotAvailable : availableBalance;
 
   if (!connected) {
     return (
@@ -534,7 +548,11 @@ export default function Portfolio() {
                     ? "bg-primary text-primary-foreground border-primary"
                     : "border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
                 )}
-                onClick={() => setTransferToPerp(true)}
+                onClick={() => {
+                  setTransferToPerp(true);
+                  setTransferAmount(usdcSpotAvailable > 0 ? usdcSpotAvailable.toFixed(2) : "");
+                  setTransferResult(null);
+                }}
                 data-testid="button-direction-to-perp"
               >
                 Spot → Perp
@@ -546,7 +564,11 @@ export default function Portfolio() {
                     ? "bg-primary text-primary-foreground border-primary"
                     : "border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
                 )}
-                onClick={() => setTransferToPerp(false)}
+                onClick={() => {
+                  setTransferToPerp(false);
+                  setTransferAmount(availableBalance > 0 ? availableBalance.toFixed(2) : "");
+                  setTransferResult(null);
+                }}
                 data-testid="button-direction-to-spot"
               >
                 Perp → Spot

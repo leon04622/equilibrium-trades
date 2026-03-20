@@ -837,7 +837,7 @@ export async function closePosition(
 // Transfer USDC between spot and perp accounts
 // toPerp = true: moves USDC from spot → perp margin
 // toPerp = false: moves USDC from perp margin → spot
-// This must be signed by the user's main wallet (not agent) via EIP-712
+// Signed by the user's main wallet via EIP-712 (same as approveAgent pattern)
 export async function transferUsdcBetweenAccounts(
   signer: JsonRpcSigner,
   amount: number,
@@ -864,8 +864,8 @@ export async function transferUsdcBetweenAccounts(
       ],
     };
 
-    // Amount must be a string with up to 6 decimal places
-    const amountStr = amount.toFixed(6);
+    // Amount as a plain decimal string (e.g. "10.5" not "10.500000")
+    const amountStr = amount.toString();
 
     const message = {
       hyperliquidChain: "Mainnet",
@@ -874,12 +874,18 @@ export async function transferUsdcBetweenAccounts(
       nonce,
     };
 
+    console.log("usdClassTransfer: requesting EIP-712 signature...");
+    console.log("Domain:", domain);
+    console.log("Message:", message);
+
     const signature = await signer.signTypedData(domain, types, message);
+    console.log("usdClassTransfer: signature obtained:", signature.slice(0, 20) + "...");
 
     const r = signature.slice(0, 66);
     const s = "0x" + signature.slice(66, 130);
     const v = parseInt(signature.slice(130, 132), 16);
 
+    // Action format matches approveAgent: includes signatureChainId + hyperliquidChain + nonce
     const action = {
       type: "usdClassTransfer",
       signatureChainId,
@@ -889,14 +895,18 @@ export async function transferUsdcBetweenAccounts(
       nonce,
     };
 
+    const payload = {
+      action,
+      signature: { r, s, v },
+      nonce,
+    };
+
+    console.log("usdClassTransfer: submitting to exchange API:", JSON.stringify(payload));
+
     const response = await fetch(EXCHANGE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action,
-        signature: { r, s, v },
-        nonce,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const result = await response.json();
@@ -906,10 +916,16 @@ export async function transferUsdcBetweenAccounts(
       return { success: true };
     }
 
-    return {
-      success: false,
-      error: result.response?.data || result.error || JSON.stringify(result),
-    };
+    const errMsg =
+      typeof result.response === "string"
+        ? result.response
+        : result.response?.data
+        ? JSON.stringify(result.response.data)
+        : result.error
+        ? String(result.error)
+        : JSON.stringify(result);
+
+    return { success: false, error: errMsg };
   } catch (error: any) {
     console.error("Transfer error:", error);
     return { success: false, error: error.message || "Transfer failed" };
