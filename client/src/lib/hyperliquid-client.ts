@@ -995,6 +995,97 @@ export async function transferUsdcBetweenAccounts(
   }
 }
 
+// Withdraw USDC from Hyperliquid perp account to an Arbitrum wallet address
+// Uses Hyperliquid's withdraw3 action, signed via EIP-712 with the user's primary wallet
+export async function withdrawUsdcToWallet(
+  signer: JsonRpcSigner,
+  amount: number,
+  destination: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await syncServerTime();
+    const nonce = getUniqueNonce();
+    const signatureChainId = "0xa4b1"; // Arbitrum One
+
+    const domain = {
+      name: "HyperliquidSignTransaction",
+      version: "1",
+      chainId: parseInt(signatureChainId, 16), // 42161
+      verifyingContract: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+    };
+
+    const types = {
+      "HyperliquidTransaction:Withdraw": [
+        { name: "hyperliquidChain", type: "string" },
+        { name: "destination", type: "string" },
+        { name: "amount", type: "string" },
+        { name: "time", type: "uint64" },
+      ],
+    };
+
+    const amountStr = parseFloat(amount.toFixed(6)).toString();
+
+    const message = {
+      hyperliquidChain: "Mainnet",
+      destination,
+      amount: amountStr,
+      time: nonce,
+    };
+
+    console.log("withdraw3: requesting EIP-712 signature...");
+    const signature = await signer.signTypedData(domain, types, message);
+    console.log("withdraw3: signature obtained:", signature.slice(0, 20) + "...");
+
+    const r = signature.slice(0, 66);
+    const s = "0x" + signature.slice(66, 130);
+    const v = parseInt(signature.slice(130, 132), 16);
+
+    const action = {
+      type: "withdraw3",
+      hyperliquidChain: "Mainnet",
+      signatureChainId,
+      destination,
+      amount: amountStr,
+      time: nonce,
+    };
+
+    const payload = {
+      action,
+      signature: { r, s, v },
+      nonce,
+    };
+
+    console.log("withdraw3: submitting to exchange API:", JSON.stringify(payload));
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    console.log("withdraw3 response:", result);
+
+    if (result.status === "ok") {
+      return { success: true };
+    }
+
+    const errMsg =
+      typeof result.response === "string"
+        ? result.response
+        : result.response?.data
+        ? JSON.stringify(result.response.data)
+        : result.error
+        ? String(result.error)
+        : JSON.stringify(result);
+
+    return { success: false, error: errMsg };
+  } catch (error: any) {
+    console.error("Withdrawal error:", error);
+    return { success: false, error: error.message || "Withdrawal failed" };
+  }
+}
+
 export async function setLeverage(
   signer: JsonRpcSigner,
   coin: string,

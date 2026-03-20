@@ -32,11 +32,13 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
+  ArrowUpFromLine,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { getSpotBalances, transferUsdcBetweenAccounts, type SpotBalance } from "@/lib/hyperliquid-client";
+import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, type SpotBalance } from "@/lib/hyperliquid-client";
 import { Link, useLocation } from "wouter";
 
 export default function Portfolio() {
@@ -62,6 +64,13 @@ export default function Portfolio() {
   const [transferring, setTransferring] = useState(false);
   const [transferStep, setTransferStep] = useState<string>("");
   const [transferResult, setTransferResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawDest, setWithdrawDest] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawStep, setWithdrawStep] = useState<string>("");
+  const [withdrawResult, setWithdrawResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
@@ -222,6 +231,85 @@ export default function Portfolio() {
     }
   };
 
+  const openWithdrawDialog = () => {
+    const safeMax = Math.floor(withdrawablePerp * 100) / 100;
+    setWithdrawAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+    setWithdrawDest(address || "");
+    setWithdrawResult(null);
+    setWithdrawStep("");
+    setWithdrawOpen(true);
+  };
+
+  const handleWithdraw = async () => {
+    setWithdrawStep("Checking wallet connection...");
+    setWithdrawResult(null);
+
+    let activeSigner = signer;
+    if (!activeSigner) {
+      setWithdrawStep("Reconnecting wallet signer...");
+      try {
+        if (provider) {
+          activeSigner = await provider.getSigner();
+        } else if (window.ethereum) {
+          const { BrowserProvider } = await import("ethers");
+          const freshProvider = new BrowserProvider(window.ethereum);
+          activeSigner = await freshProvider.getSigner();
+        }
+      } catch (err: any) {
+        console.error("[Withdraw] Signer recovery failed:", err);
+      }
+    }
+
+    if (!activeSigner) {
+      const msg = "Wallet signer not available. Please disconnect and reconnect your wallet, then try again.";
+      setWithdrawStep("");
+      setWithdrawResult({ success: false, error: msg });
+      toast({ title: "Withdrawal Failed", description: msg, variant: "destructive" });
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setWithdrawStep("");
+      setWithdrawResult({ success: false, error: "Please enter a valid amount greater than 0." });
+      return;
+    }
+    if (amount > withdrawablePerp) {
+      setWithdrawStep("");
+      setWithdrawResult({ success: false, error: `Amount exceeds withdrawable balance of ${withdrawablePerp.toFixed(2)} USDC.` });
+      return;
+    }
+    if (!withdrawDest || !/^0x[0-9a-fA-F]{40}$/.test(withdrawDest)) {
+      setWithdrawStep("");
+      setWithdrawResult({ success: false, error: "Please enter a valid Arbitrum wallet address (0x...)." });
+      return;
+    }
+
+    setWithdrawing(true);
+    setWithdrawStep("Requesting signature from your wallet — check MetaMask/your wallet app...");
+
+    try {
+      const result = await withdrawUsdcToWallet(activeSigner, amount, withdrawDest);
+      setWithdrawStep("");
+      setWithdrawResult(result);
+
+      if (result.success) {
+        toast({ title: "Withdrawal Submitted", description: `${amount} USDC withdrawal to ${withdrawDest.slice(0, 6)}...${withdrawDest.slice(-4)} is processing.` });
+        setTimeout(() => handleRefresh(), 5000);
+        setTimeout(() => handleRefresh(), 15000);
+      } else {
+        toast({ title: "Withdrawal Failed", description: result.error || "Withdrawal failed", variant: "destructive" });
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || String(err) || "Withdrawal failed unexpectedly";
+      setWithdrawStep("");
+      setWithdrawResult({ success: false, error: errMsg });
+      toast({ title: "Withdrawal Failed", description: errMsg, variant: "destructive" });
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
   if (!connected) {
     return (
       <div className="p-6 space-y-6">
@@ -270,7 +358,15 @@ export default function Portfolio() {
             data-testid="button-transfer-funds"
           >
             <ArrowRightLeft className="h-4 w-4 mr-2" />
-            Transfer Funds
+            Transfer
+          </Button>
+          <Button
+            size="sm"
+            onClick={openWithdrawDialog}
+            data-testid="button-withdraw"
+          >
+            <ArrowUpFromLine className="h-4 w-4 mr-2" />
+            Withdraw
           </Button>
         </div>
       </div>
@@ -723,6 +819,140 @@ export default function Portfolio() {
                 <>
                   <ArrowRightLeft className="h-4 w-4 mr-2" />
                   Transfer USDC
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Withdraw Dialog ── */}
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="dialog-withdraw">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowUpFromLine className="h-5 w-5 text-primary" />
+              Withdraw USDC to Wallet
+            </DialogTitle>
+            <DialogDescription>
+              Send USDC from your Hyperliquid perp account to any Arbitrum wallet. Funds arrive on Arbitrum within minutes.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!signer && (
+            <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.</span>
+            </div>
+          )}
+
+          <div className="space-y-4 py-2">
+            {/* Balance info */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 text-sm">
+              <span className="text-muted-foreground">Withdrawable Balance</span>
+              <span className="font-semibold font-mono">{formatPrice(withdrawablePerp)} USDC</span>
+            </div>
+
+            {/* Amount */}
+            <div className="space-y-1.5">
+              <Label htmlFor="withdraw-amount">Amount (USDC)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="withdraw-amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  min="0"
+                  step="0.01"
+                  data-testid="input-withdraw-amount"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setWithdrawAmount((Math.floor(withdrawablePerp * 100) / 100).toFixed(2))}
+                  data-testid="button-withdraw-max"
+                >
+                  Max
+                </Button>
+              </div>
+              {withdrawablePerp <= 0 && (
+                <p className="text-xs text-amber-500">No withdrawable USDC. Open positions may be using your margin — close them first or wait for them to settle.</p>
+              )}
+            </div>
+
+            {/* Destination address */}
+            <div className="space-y-1.5">
+              <Label htmlFor="withdraw-dest">Destination Wallet (Arbitrum)</Label>
+              <Input
+                id="withdraw-dest"
+                type="text"
+                placeholder="0x..."
+                value={withdrawDest}
+                onChange={(e) => setWithdrawDest(e.target.value)}
+                className="font-mono text-xs"
+                data-testid="input-withdraw-destination"
+              />
+              <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>Defaults to your connected wallet. Make sure this is an Arbitrum address you control.</span>
+              </div>
+            </div>
+
+            {withdrawStep && (
+              <div className="flex items-center gap-2 p-3 rounded-lg text-sm bg-primary/10 text-primary border border-primary/20">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                <span>{withdrawStep}</span>
+              </div>
+            )}
+
+            {withdrawResult && (
+              <div className={cn(
+                "flex items-start gap-2 p-3 rounded-lg text-sm font-medium",
+                withdrawResult.success
+                  ? "bg-bullish/10 text-bullish border border-bullish/20"
+                  : "bg-destructive/15 text-destructive border border-destructive/30"
+              )}>
+                {withdrawResult.success ? (
+                  <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                ) : (
+                  <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                )}
+                <span className="break-all">
+                  {withdrawResult.success
+                    ? `Withdrawal of ${withdrawAmount} USDC submitted! Funds will arrive at your wallet on Arbitrum within a few minutes.`
+                    : withdrawResult.error || "Withdrawal failed"}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setWithdrawOpen(false)} data-testid="button-withdraw-cancel">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleWithdraw}
+              disabled={
+                withdrawing ||
+                !withdrawAmount ||
+                parseFloat(withdrawAmount) <= 0 ||
+                parseFloat(withdrawAmount) > withdrawablePerp ||
+                !withdrawDest ||
+                !/^0x[0-9a-fA-F]{40}$/.test(withdrawDest)
+              }
+              data-testid="button-withdraw-confirm"
+            >
+              {withdrawing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Withdrawing...
+                </>
+              ) : (
+                <>
+                  <ArrowUpFromLine className="h-4 w-4 mr-2" />
+                  Withdraw USDC
                 </>
               )}
             </Button>
