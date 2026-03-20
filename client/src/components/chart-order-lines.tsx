@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useTrading } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { X, GripHorizontal } from "lucide-react";
+import { X } from "lucide-react";
 
 interface ChartOrderLinesProps {
   coin: string;
@@ -37,13 +37,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  // Always-current price ref so event handlers never use a stale value
   const currentPriceRef = useRef(currentPrice);
   useEffect(() => { currentPriceRef.current = currentPrice; }, [currentPrice]);
 
   const [dragging, setDragging] = useState(false);
   const [dragPrice, setDragPrice] = useState(0);
-  // Y% of cursor inside the container (0=top, 100=bottom) for visual line tracking
   const [dragCursorY, setDragCursorY] = useState(50);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
@@ -70,7 +68,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const isLong = position?.side === "long";
   const entry = position?.entryPrice ?? 0;
 
-  // Ghost prices when no real order exists
   const ghostTpPrice = position && !activeTpPrice
     ? isLong ? entry * 1.02 : entry * 0.98
     : null;
@@ -78,9 +75,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     ? isLong ? entry * 0.98 : entry * 1.02
     : null;
 
-  // ── NARROW visual range: only real/ghost prices so all lines are visible and
-  // correctly spaced relative to each other regardless of chart zoom level.
-  // Does NOT try to match TradingView's Y-axis (impossible with a cross-origin iframe).
   const { toY } = useMemo(() => {
     const allPrices = [
       currentPrice,
@@ -100,15 +94,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     return { toY: (price: number) => ((rMax - price) / (rMax - rMin)) * 100 };
   }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
 
-  // Displayed prices: drag overrides when actively dragging that target
   const displayTpPrice = dragging && dragTarget === "tp" ? dragPrice : (activeTpPrice ?? ghostTpPrice);
   const displaySlPrice = dragging && dragTarget === "sl" ? dragPrice : (activeSlPrice ?? ghostSlPrice);
 
-  // ── DELTA-BASED drag — works at any chart zoom level ────────────────────
-  // Instead of mapping Y-position to absolute price (breaks when TradingView is
-  // zoomed in), we move relative to the drag start price.
-  // Up = higher price, down = lower price.
-  // Sensitivity: 0.0001 of currentPrice per pixel → 100px ≈ 1% price change.
   const startDrag = useCallback((e: React.MouseEvent, target: DragTarget) => {
     e.preventDefault();
     e.stopPropagation();
@@ -136,17 +124,15 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       if (!dragRef.current) return;
       const container = containerRef.current;
 
-      // Update cursor Y for visual line tracking
       if (container) {
         const rect = container.getBoundingClientRect();
         const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
         setDragCursorY(yPct);
       }
 
-      // Delta-based price: moving up increases price, down decreases
       const { startY, startPrice } = dragRef.current;
-      const deltaY = e.clientY - startY; // positive = down = lower price
-      const sensitivity = currentPriceRef.current * 0.0002; // price per pixel
+      const deltaY = e.clientY - startY;
+      const sensitivity = currentPriceRef.current * 0.0002;
       const newPrice = Math.max(1, startPrice - deltaY * sensitivity);
       setDragPrice(newPrice);
     };
@@ -203,15 +189,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const size = position.size;
   const calcPnl = (p: number) => isLong ? size * (p - entry) : size * (entry - p);
 
-  // ── Line definitions ────────────────────────────────────────────
   interface LineConfig {
     key: string;
     price: number;
-    visualY: number; // 0–100% from top
+    visualY: number;
     label: string;
-    sublabel?: string;
+    pnlLabel?: string;
+    sizeLabel?: string;
     lineColor: string;
     pillBg: string;
+    textColor: string;
     dashed: boolean;
     ghost: boolean;
     draggable: boolean;
@@ -222,7 +209,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const lines: LineConfig[] = [];
 
-  // Take Profit
   if (displayTpPrice && displayTpPrice > 0) {
     const isDraggingThis = dragging && dragTarget === "tp";
     const isGhost = !activeTpPrice && !isDraggingThis;
@@ -234,10 +220,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       visualY,
       label: isGhost
         ? `Drag to set TP  ${fmt(displayTpPrice)}`
-        : `TP ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
-      sublabel: isGhost ? undefined : fmtPnl(calcPnl(displayTpPrice)),
-      lineColor: isDraggingThis ? "#22c55e" : "hsl(var(--bullish))",
-      pillBg: "bg-bullish",
+        : `TP Price ${isLong ? ">" : "<"} ${fmt(displayTpPrice)}`,
+      pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displayTpPrice)),
+      sizeLabel: isGhost ? undefined : fmt(size),
+      lineColor: isDraggingThis ? "#22c55e" : "#22c55e",
+      pillBg: "bg-[#22c55e]/20",
+      textColor: "text-[#22c55e]",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
@@ -247,17 +235,19 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     });
   }
 
-  // Entry
   {
     const y = toY(entry);
+    const pnlAtCurrent = calcPnl(currentPrice);
     lines.push({
       key: "entry",
       price: entry,
       visualY: y,
       label: `Entry  ${fmt(entry)}`,
-      sublabel: `${isLong ? "Long" : "Short"} ${fmt(size)} ${coin}`,
-      lineColor: "rgba(255,255,255,0.4)",
-      pillBg: "bg-muted-foreground/60",
+      pnlLabel: `PNL ${fmtPnl(pnlAtCurrent)}`,
+      sizeLabel: fmt(size),
+      lineColor: "rgba(255,255,255,0.45)",
+      pillBg: "bg-white/10",
+      textColor: "text-white/80",
       dashed: true,
       ghost: false,
       draggable: false,
@@ -265,7 +255,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     });
   }
 
-  // Stop Loss
   if (displaySlPrice && displaySlPrice > 0) {
     const isDraggingThis = dragging && dragTarget === "sl";
     const isGhost = !activeSlPrice && !isDraggingThis;
@@ -277,10 +266,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       visualY,
       label: isGhost
         ? `Drag to set SL  ${fmt(displaySlPrice)}`
-        : `SL ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
-      sublabel: isGhost ? undefined : fmtPnl(calcPnl(displaySlPrice)),
-      lineColor: isDraggingThis ? "#ef4444" : "hsl(var(--bearish))",
-      pillBg: "bg-bearish",
+        : `SL Price ${isLong ? "<" : ">"} ${fmt(displaySlPrice)}`,
+      pnlLabel: isGhost ? undefined : fmtPnl(calcPnl(displaySlPrice)),
+      sizeLabel: isGhost ? undefined : fmt(size),
+      lineColor: isDraggingThis ? "#ef4444" : "#ef4444",
+      pillBg: "bg-[#ef4444]/20",
+      textColor: "text-[#ef4444]",
       dashed: isGhost,
       ghost: isGhost,
       draggable: true,
@@ -290,16 +281,16 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     });
   }
 
-  // Liquidation
   if (position.liquidationPrice && position.liquidationPrice > 0) {
     const y = toY(position.liquidationPrice);
     lines.push({
       key: "liq",
       price: position.liquidationPrice,
       visualY: y,
-      label: `Liq.  ${fmt(position.liquidationPrice)}`,
-      lineColor: "hsl(30 100% 55%)",
-      pillBg: "bg-orange-500",
+      label: `Liq. Price  ${fmt(position.liquidationPrice)}`,
+      lineColor: "#f97316",
+      pillBg: "bg-orange-500/20",
+      textColor: "text-orange-400",
       dashed: true,
       ghost: false,
       draggable: false,
@@ -309,7 +300,6 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   return (
     <>
-      {/* Capture overlay — prevents iframe from stealing mouse during drag */}
       {dragging && (
         <div className="fixed inset-0 z-[999] cursor-ns-resize" style={{ pointerEvents: "all" }} />
       )}
@@ -320,10 +310,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         style={{ pointerEvents: "none" }}
         data-testid="chart-order-lines"
       >
-        {/* Price lines */}
         {lines.map(line => {
           const y = line.visualY;
           if (y < -15 || y > 115) return null;
+
+          const isDraggingThis = dragging && dragTarget === line.draggableAs;
 
           return (
             <div
@@ -336,41 +327,63 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 pointerEvents: "none",
               }}
             >
+              {/* Full-width draggable hit area (12px tall) */}
+              {line.draggable && line.draggableAs && (
+                <div
+                  className="absolute left-0 right-0 cursor-ns-resize"
+                  style={{
+                    height: "24px",
+                    top: "-12px",
+                    pointerEvents: "auto",
+                    zIndex: 25,
+                  }}
+                  onMouseDown={(e) => startDrag(e, line.draggableAs!)}
+                  data-testid={`drag-line-${line.key}`}
+                />
+              )}
+
               {/* Horizontal line */}
               <div
                 className="absolute left-0 right-0"
                 style={{
                   borderTop: `${line.dashed ? "1.5px dashed" : "1.5px solid"} ${line.lineColor}`,
-                  opacity: line.ghost ? 0.5 : 0.85,
+                  opacity: line.ghost ? 0.45 : isDraggingThis ? 1 : 0.85,
                 }}
               />
 
-              {/* Center pill label */}
+              {/* Left-anchored label pill — Hyperliquid style */}
               <div
-                className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
-                style={{ pointerEvents: line.draggable ? "auto" : "none" }}
+                className="absolute left-2"
+                style={{
+                  transform: "translateY(-50%)",
+                  pointerEvents: line.draggable ? "auto" : "none",
+                  zIndex: 30,
+                }}
+                onMouseDown={line.draggable && line.draggableAs
+                  ? (e) => startDrag(e, line.draggableAs!)
+                  : undefined}
               >
                 <div
                   className={cn(
-                    "flex items-center gap-1.5 px-2 py-0.5 rounded text-white text-[11px] font-mono font-semibold",
-                    "border border-white/20 shadow-lg select-none whitespace-nowrap",
+                    "flex items-center gap-2 px-2 py-[3px] rounded text-[11px] font-mono font-semibold",
+                    "border border-white/15 shadow-lg select-none whitespace-nowrap backdrop-blur-sm",
                     line.pillBg,
+                    line.textColor,
                     line.ghost && "opacity-60",
                     line.draggable && "cursor-ns-resize",
                   )}
-                  onMouseDown={line.draggable && line.draggableAs
-                    ? (e) => startDrag(e, line.draggableAs!)
-                    : undefined}
                 >
-                  {line.draggable && <GripHorizontal className="h-3 w-3 opacity-70 flex-shrink-0" />}
                   <span>{line.label}</span>
-                  {line.sublabel && <span className="opacity-75 text-[10px]">{line.sublabel}</span>}
+                  {line.sizeLabel && (
+                    <span className="opacity-60 text-[10px]">{line.sizeLabel}</span>
+                  )}
                   {line.canCancel && (
                     <button
-                      className="opacity-70 hover:opacity-100 ml-0.5"
+                      className="opacity-60 hover:opacity-100 transition-opacity"
                       style={{ pointerEvents: "auto" }}
                       onMouseDown={e => e.stopPropagation()}
                       onClick={() => line.cancelType && handleCancel(line.cancelType)}
+                      data-testid={`cancel-${line.key}`}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -378,14 +391,44 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 </div>
               </div>
 
+              {/* PNL label — positioned slightly right of center */}
+              {line.pnlLabel && !line.ghost && (
+                <div
+                  className="absolute"
+                  style={{
+                    left: "50%",
+                    transform: "translateX(-50%) translateY(-50%)",
+                    pointerEvents: "none",
+                    zIndex: 20,
+                  }}
+                >
+                  <div
+                    className={cn(
+                      "flex items-center gap-1.5 px-2 py-[3px] rounded text-[10px] font-mono",
+                      "border border-white/10 shadow backdrop-blur-sm whitespace-nowrap",
+                      line.pillBg,
+                      line.textColor,
+                      "opacity-70",
+                    )}
+                  >
+                    {line.pnlLabel}
+                  </div>
+                </div>
+              )}
+
               {/* Right-edge price tag */}
               <div
                 className={cn(
-                  "absolute right-0 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-white rounded-l",
-                  line.pillBg,
-                  line.ghost ? "opacity-40" : "opacity-90",
+                  "absolute right-0 px-1.5 py-[3px] text-[10px] font-mono font-semibold rounded-l",
+                  "border-l border-t border-b border-white/15",
+                  line.ghost ? "opacity-35" : "opacity-90",
                 )}
-                style={{ pointerEvents: "none" }}
+                style={{
+                  pointerEvents: "none",
+                  background: line.lineColor,
+                  color: "#fff",
+                  zIndex: 20,
+                }}
               >
                 {fmt(line.price)}
               </div>
