@@ -99,10 +99,10 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
     if (!position) return "other";
-    // Classify by current mark price — the same boundary Hyperliquid uses.
-    // TP for long fires when price RISES to the trigger → triggerPx > currentPrice.
-    // SL for long fires when price FALLS to the trigger → triggerPx < currentPrice.
-    // (Opposite for short.) This works even when entry is far above/below current.
+    // Prefer the pre-classified orderType from trading-context (most reliable).
+    if (order.orderType === "take_profit") return "tp";
+    if (order.orderType === "stop_loss") return "sl";
+    // Fallback: classify by trigger price relative to current mark price.
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
     if (!triggerPrice || isNaN(triggerPrice)) return "other";
     return position.side === "long"
