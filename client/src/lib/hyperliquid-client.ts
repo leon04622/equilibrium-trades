@@ -834,6 +834,88 @@ export async function closePosition(
   return result;
 }
 
+// Transfer USDC between spot and perp accounts
+// toPerp = true: moves USDC from spot → perp margin
+// toPerp = false: moves USDC from perp margin → spot
+// This must be signed by the user's main wallet (not agent) via EIP-712
+export async function transferUsdcBetweenAccounts(
+  signer: JsonRpcSigner,
+  amount: number,
+  toPerp: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await syncServerTime();
+    const nonce = getUniqueNonce();
+    const signatureChainId = "0xa4b1"; // Arbitrum One
+
+    const domain = {
+      name: "HyperliquidSignTransaction",
+      version: "1",
+      chainId: parseInt(signatureChainId, 16), // 42161
+      verifyingContract: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+    };
+
+    const types = {
+      "HyperliquidTransaction:UsdClassTransfer": [
+        { name: "hyperliquidChain", type: "string" },
+        { name: "amount", type: "string" },
+        { name: "toPerp", type: "bool" },
+        { name: "nonce", type: "uint64" },
+      ],
+    };
+
+    // Amount must be a string with up to 6 decimal places
+    const amountStr = amount.toFixed(6);
+
+    const message = {
+      hyperliquidChain: "Mainnet",
+      amount: amountStr,
+      toPerp,
+      nonce,
+    };
+
+    const signature = await signer.signTypedData(domain, types, message);
+
+    const r = signature.slice(0, 66);
+    const s = "0x" + signature.slice(66, 130);
+    const v = parseInt(signature.slice(130, 132), 16);
+
+    const action = {
+      type: "usdClassTransfer",
+      signatureChainId,
+      hyperliquidChain: "Mainnet",
+      amount: amountStr,
+      toPerp,
+      nonce,
+    };
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        signature: { r, s, v },
+        nonce,
+      }),
+    });
+
+    const result = await response.json();
+    console.log("usdClassTransfer response:", result);
+
+    if (result.status === "ok") {
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: result.response?.data || result.error || JSON.stringify(result),
+    };
+  } catch (error: any) {
+    console.error("Transfer error:", error);
+    return { success: false, error: error.message || "Transfer failed" };
+  }
+}
+
 export async function setLeverage(
   signer: JsonRpcSigner,
   coin: string,

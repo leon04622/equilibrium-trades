@@ -4,6 +4,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { 
   Wallet, 
   TrendingUp, 
@@ -16,13 +26,18 @@ import {
   RefreshCw,
   ExternalLink,
   AlertCircle,
-  Coins
+  Coins,
+  ArrowRightLeft,
+  ArrowRight,
+  CheckCircle,
+  XCircle,
+  Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { getSpotBalances, type SpotBalance } from "@/lib/hyperliquid-client";
-import { Link } from "wouter";
+import { getSpotBalances, transferUsdcBetweenAccounts, type SpotBalance } from "@/lib/hyperliquid-client";
+import { Link, useLocation } from "wouter";
 
 export default function Portfolio() {
   const { 
@@ -34,14 +49,26 @@ export default function Portfolio() {
     currentPrices,
     refreshAccount,
   } = useTrading();
-  const { address } = useWallet();
+  const { address, signer } = useWallet();
+  const [, setLocation] = useLocation();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
   const [isLoadingSpot, setIsLoadingSpot] = useState(false);
+
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferToPerp, setTransferToPerp] = useState(true);
+  const [transferring, setTransferring] = useState(false);
+  const [transferResult, setTransferResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
   const totalMarginUsed = marginUsed || 0;
+
+  const usdcSpotBalance = spotBalances.find(b => b.coin === "USDC");
+  const usdcSpotAvailable = usdcSpotBalance
+    ? parseFloat(usdcSpotBalance.total) - parseFloat(usdcSpotBalance.hold)
+    : 0;
 
   const fetchSpotBalances = async () => {
     if (!address) return;
@@ -77,6 +104,37 @@ export default function Portfolio() {
     const sign = val >= 0 ? "+" : "";
     return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
+
+  const openTransferDialog = (toPerp: boolean) => {
+    setTransferToPerp(toPerp);
+    setTransferAmount("");
+    setTransferResult(null);
+    setTransferOpen(true);
+  };
+
+  const handleTransfer = async () => {
+    if (!signer) return;
+    const amount = parseFloat(transferAmount);
+    if (isNaN(amount) || amount <= 0) return;
+    setTransferring(true);
+    setTransferResult(null);
+    try {
+      const result = await transferUsdcBetweenAccounts(signer, amount, transferToPerp);
+      setTransferResult(result);
+      if (result.success) {
+        setTimeout(() => {
+          setTransferOpen(false);
+          handleRefresh();
+        }, 2000);
+      }
+    } catch (err: any) {
+      setTransferResult({ success: false, error: err.message || "Transfer failed" });
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const maxTransferAmount = transferToPerp ? usdcSpotAvailable : availableBalance;
 
   if (!connected) {
     return (
@@ -119,6 +177,15 @@ export default function Portfolio() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => openTransferDialog(true)}
+            data-testid="button-transfer-funds"
+          >
+            <ArrowRightLeft className="h-4 w-4 mr-2" />
+            Transfer Funds
+          </Button>
           <a href="https://app.hyperliquid.xyz/trade" target="_blank" rel="noopener noreferrer">
             <Button size="sm" data-testid="button-deposit">
               <DollarSign className="h-4 w-4 mr-2" />
@@ -142,7 +209,7 @@ export default function Portfolio() {
 
         <Card data-testid="card-available-balance">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Available Balance</CardTitle>
+            <CardTitle className="text-sm font-medium">Perp Balance</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -286,11 +353,6 @@ export default function Portfolio() {
                                 Trade
                               </Button>
                             </Link>
-                            <a href={`https://app.hyperliquid.xyz/trade/${position.coin}`} target="_blank" rel="noopener noreferrer">
-                              <Button variant="ghost" size="icon" data-testid={`button-hl-${position.coin}`}>
-                                <ExternalLink className="h-4 w-4" />
-                              </Button>
-                            </a>
                           </div>
                         </div>
                       );
@@ -303,6 +365,28 @@ export default function Portfolio() {
         </TabsContent>
 
         <TabsContent value="spot" className="space-y-4">
+          {usdcSpotBalance && usdcSpotAvailable > 0 && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3">
+                  <ArrowRightLeft className="h-5 w-5 text-primary" />
+                  <div>
+                    <p className="font-medium text-sm">You have {formatPrice(usdcSpotAvailable)} USDC in your Spot account</p>
+                    <p className="text-xs text-muted-foreground">Transfer to your Perp account to start trading perpetuals</p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => openTransferDialog(true)}
+                  data-testid="button-transfer-spot-to-perp-banner"
+                >
+                  <ArrowRight className="h-4 w-4 mr-1" />
+                  Move to Perp
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Spot Holdings</CardTitle>
@@ -332,6 +416,7 @@ export default function Portfolio() {
                       const total = parseFloat(balance.total);
                       const hold = parseFloat(balance.hold);
                       const available = total - hold;
+                      const isUsdc = balance.coin === "USDC";
                       
                       return (
                         <div
@@ -366,11 +451,23 @@ export default function Portfolio() {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <a href={`https://app.hyperliquid.xyz/trade/${balance.coin}`} target="_blank" rel="noopener noreferrer">
-                              <Button variant="outline" size="sm" data-testid={`button-trade-spot-${balance.coin}`}>
-                                Trade
+                            {isUsdc ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openTransferDialog(true)}
+                                data-testid={`button-transfer-spot-${balance.coin}`}
+                              >
+                                <ArrowRightLeft className="h-3 w-3 mr-1" />
+                                Transfer to Perp
                               </Button>
-                            </a>
+                            ) : (
+                              <Link href={`/trading?coin=${balance.coin}`}>
+                                <Button variant="outline" size="sm" data-testid={`button-trade-spot-${balance.coin}`}>
+                                  Trade
+                                </Button>
+                              </Link>
+                            )}
                           </div>
                         </div>
                       );
@@ -399,6 +496,136 @@ export default function Portfolio() {
           </a>
         </CardContent>
       </Card>
+
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="dialog-transfer">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-primary" />
+              Transfer USDC
+            </DialogTitle>
+            <DialogDescription>
+              Move USDC between your Spot and Perp accounts. Your funds stay in your wallet — no custody involved.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50 text-sm">
+              <div className="flex-1 text-center">
+                <p className="font-medium">{transferToPerp ? "Spot Account" : "Perp Account"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {transferToPerp
+                    ? `${formatPrice(usdcSpotAvailable)} USDC available`
+                    : `${formatPrice(availableBalance)} USDC available`}
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-primary shrink-0" />
+              <div className="flex-1 text-center">
+                <p className="font-medium">{transferToPerp ? "Perp Account" : "Spot Account"}</p>
+                <p className="text-xs text-muted-foreground">Trading margin</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 text-xs">
+              <button
+                className={cn(
+                  "flex-1 py-1.5 rounded border text-center transition-colors",
+                  transferToPerp
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
+                )}
+                onClick={() => setTransferToPerp(true)}
+                data-testid="button-direction-to-perp"
+              >
+                Spot → Perp
+              </button>
+              <button
+                className={cn(
+                  "flex-1 py-1.5 rounded border text-center transition-colors",
+                  !transferToPerp
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
+                )}
+                onClick={() => setTransferToPerp(false)}
+                data-testid="button-direction-to-spot"
+              >
+                Perp → Spot
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-amount">Amount (USDC)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="transfer-amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  min="0"
+                  step="0.01"
+                  data-testid="input-transfer-amount"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setTransferAmount(maxTransferAmount.toFixed(2))}
+                  data-testid="button-transfer-max"
+                >
+                  Max
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Available: {formatPrice(maxTransferAmount)} USDC
+              </p>
+            </div>
+
+            {transferResult && (
+              <div className={cn(
+                "flex items-center gap-2 p-3 rounded-lg text-sm",
+                transferResult.success
+                  ? "bg-bullish/10 text-bullish border border-bullish/20"
+                  : "bg-bearish/10 text-bearish border border-bearish/20"
+              )}>
+                {transferResult.success ? (
+                  <CheckCircle className="h-4 w-4 shrink-0" />
+                ) : (
+                  <XCircle className="h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {transferResult.success
+                    ? `Successfully transferred ${transferAmount} USDC to ${transferToPerp ? "Perp" : "Spot"} account!`
+                    : transferResult.error || "Transfer failed"}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setTransferOpen(false)} data-testid="button-transfer-cancel">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleTransfer}
+              disabled={transferring || !transferAmount || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > maxTransferAmount}
+              data-testid="button-transfer-confirm"
+            >
+              {transferring ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Transferring...
+                </>
+              ) : (
+                <>
+                  <ArrowRightLeft className="h-4 w-4 mr-2" />
+                  Transfer USDC
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
