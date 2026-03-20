@@ -587,32 +587,32 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
     isPlacingTPSLRef.current = true;
 
-    // Validate TP/SL against the entry price of the position (or mark price if no
-    // position found yet). Using entry price prevents false rejections when the
-    // position is already in the red and mark has moved below entry.
-    const pos = positions.find(p => p.coin === coin);
-    const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
-    if (refPrice > 0) {
-      const fmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
-      if (tpPrice && tpPrice > 0) {
-        if (isLong && tpPrice <= refPrice) {
-          return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Long.` };
-        }
-        if (!isLong && tpPrice >= refPrice) {
-          return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Short.` };
-        }
-      }
-      if (slPrice && slPrice > 0) {
-        if (isLong && slPrice >= refPrice) {
-          return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Long.` };
-        }
-        if (!isLong && slPrice <= refPrice) {
-          return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Short.` };
-        }
-      }
-    }
-    
     try {
+      // Validate TP/SL against the entry price of the position (or mark price if no
+      // position found yet). Using entry price prevents false rejections when the
+      // position is already in the red and mark has moved below entry.
+      const pos = positions.find(p => p.coin === coin);
+      const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
+      if (refPrice > 0) {
+        const fmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        if (tpPrice && tpPrice > 0) {
+          if (isLong && tpPrice <= refPrice) {
+            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Long.` };
+          }
+          if (!isLong && tpPrice >= refPrice) {
+            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Short.` };
+          }
+        }
+        if (slPrice && slPrice > 0) {
+          if (isLong && slPrice >= refPrice) {
+            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Long.` };
+          }
+          if (!isLong && slPrice <= refPrice) {
+            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Short.` };
+          }
+        }
+      }
+
       // Cancel only the specific trigger order types that are being replaced.
       // If updating only TP, the existing SL is preserved (and vice-versa).
       const existingOrders = openOrders.filter(o => o.coin === coin && o.triggerPx);
