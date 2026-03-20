@@ -9,6 +9,30 @@ interface ChartOrderLinesProps {
   currentPrice: number;
 }
 
+async function fetch24hRange(coin: string): Promise<{ high: number; low: number } | null> {
+  try {
+    const now = Date.now();
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    const res = await fetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "candleSnapshot",
+        req: { coin, interval: "1h", startTime: dayAgo, endTime: now },
+      }),
+    });
+    if (!res.ok) return null;
+    const candles: Array<{ h: string; l: string }> = await res.json();
+    if (!candles || candles.length === 0) return null;
+    const high = Math.max(...candles.map(c => parseFloat(c.h)));
+    const low = Math.min(...candles.map(c => parseFloat(c.l)));
+    if (!isFinite(high) || !isFinite(low) || high <= low) return null;
+    return { high, low };
+  } catch {
+    return null;
+  }
+}
+
 function fmt(p: number): string {
   if (!p || p === 0) return "0";
   if (p >= 10000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -36,6 +60,23 @@ interface DragState {
 export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const { positions, openOrders, placeTPSL, cancelHLOrder } = useTrading();
   const { toast } = useToast();
+
+  // 24h high/low — fetched from Hyperliquid candle API so the scale matches
+  // what TradingView's 1D view is actually displaying.
+  const [chartRange, setChartRange] = useState<{ high: number; low: number } | null>(null);
+
+  useEffect(() => {
+    setChartRange(null); // reset on coin change
+    let cancelled = false;
+    async function load() {
+      const range = await fetch24hRange(coin);
+      if (!cancelled) setChartRange(range);
+    }
+    load();
+    // Refresh every 5 minutes — candle data doesn't change fast.
+    const id = setInterval(load, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [coin]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -91,9 +132,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     : null;
 
   // Build the visible price scale. Returns toY (price→%) and fromY (%→price).
-  // This is the SINGLE source of truth for visual↔price mapping.
+  // Primary source: 24h candle high/low from Hyperliquid — this matches the
+  // price range TradingView's widget shows (configured with range: "1D").
+  // Fallback: order/entry prices with tight padding, used while candles load.
   const { toY, fromY, rMin, rMax } = useMemo(() => {
-    const allPrices = [
+    // All prices that must be visible (entry, orders, liquidation, current).
+    const mustFit = [
       currentPrice,
       position?.entryPrice,
       activeTpPrice ?? ghostTpPrice,
@@ -101,18 +145,33 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       position?.liquidationPrice,
     ].filter((p): p is number => typeof p === "number" && p > 0);
 
-    const minP = Math.min(...allPrices);
-    const maxP = Math.max(...allPrices);
-    const span = maxP - minP || currentPrice * 0.04;
-    const pad = span * 0.40;
-    const rMin = minP - pad;
-    const rMax = maxP + pad;
+    let rMin: number, rMax: number;
+
+    if (chartRange) {
+      // Use the 24h candle range as the base — aligns with TradingView's 1D view.
+      const span = chartRange.high - chartRange.low;
+      const pad = span * 0.12; // 12% padding so the chart isn't cramped
+      rMin = chartRange.low - pad;
+      rMax = chartRange.high + pad;
+      // Expand further if any order/entry price falls outside the candle range.
+      for (const p of mustFit) {
+        if (p < rMin) rMin = p - span * 0.05;
+        if (p > rMax) rMax = p + span * 0.05;
+      }
+    } else {
+      // Fallback: derive scale from order prices while candle data loads.
+      const minP = Math.min(...mustFit);
+      const maxP = Math.max(...mustFit);
+      const span = maxP - minP || currentPrice * 0.04;
+      rMin = minP - span * 0.20;
+      rMax = maxP + span * 0.20;
+    }
 
     const toY = (price: number) => ((rMax - price) / (rMax - rMin)) * 100;
     const fromY = (yPct: number) => rMax - (rMax - rMin) * (yPct / 100);
 
     return { toY, fromY, rMin, rMax };
-  }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
+  }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice, chartRange]);
 
   // ── Stable refs for drag effect ──────────────────────────────────────────
   // The trading context polls refreshAccount() every 10 seconds. When it fires,
