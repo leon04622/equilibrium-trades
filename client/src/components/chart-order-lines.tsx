@@ -27,9 +27,8 @@ type DragTarget = "tp" | "sl";
 
 interface DragState {
   target: DragTarget;
-  // Frozen scale captured at drag-start so price↔visual always use same coords.
-  // Container bounds are NOT frozen — they are read live in onMove so that
-  // any layout shift (toast notification, scroll) doesn't drift the mapping.
+  // Only the price scale is frozen at drag-start. Container bounds are read live
+  // in onMove so layout shifts (toasts, scroll) don't drift the price mapping.
   rMin: number;
   rMax: number;
 }
@@ -39,12 +38,14 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const { toast } = useToast();
 
   const containerRef = useRef<HTMLDivElement>(null);
-  // Always-present capture layer — toggled synchronously via ref (no React re-render)
-  // This prevents the TradingView iframe from stealing mouse events between
-  // mousedown and the next React render tick.
+
+  // Always-present capture layer — pointer events are toggled synchronously
+  // via this ref in startDrag/onUp to prevent the TradingView iframe from
+  // stealing mouse events between mousedown and the next React render tick.
   const fixedCaptureRef = useRef<HTMLDivElement>(null);
+
   const dragRef = useRef<DragState | null>(null);
-  // Always-current price ref so the submitted price is never stale
+  // dragPriceRef always holds the latest dragged price so onUp is never stale.
   const dragPriceRef = useRef(0);
 
   const [dragging, setDragging] = useState(false);
@@ -106,6 +107,31 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     return { toY, fromY, rMin, rMax };
   }, [currentPrice, position, activeTpPrice, activeSlPrice, ghostTpPrice, ghostSlPrice]);
 
+  // ── Stable refs for drag effect ──────────────────────────────────────────
+  // The trading context polls refreshAccount() every 10 seconds. When it fires,
+  // position/orders/placeTPSL all change reference, which would normally cause
+  // the drag useEffect to tear down and re-register listeners (creating a brief
+  // gap where mouseup can be lost). By reading from refs inside the effect we
+  // reduce the effect dependency to [dragging] only, making drags polling-safe.
+  const positionRef = useRef(position);
+  const activeTpPriceRef = useRef(activeTpPrice);
+  const activeSlPriceRef = useRef(activeSlPrice);
+  const isLongRef = useRef(isLong);
+  const entryRef = useRef(entry);
+  const coinRef = useRef(coin);
+  const placeTPSLRef = useRef(placeTPSL);
+  const toastRef = useRef(toast);
+
+  // Keep every ref in sync on every render (no dep array → always current).
+  useEffect(() => { positionRef.current = position; });
+  useEffect(() => { activeTpPriceRef.current = activeTpPrice; });
+  useEffect(() => { activeSlPriceRef.current = activeSlPrice; });
+  useEffect(() => { isLongRef.current = isLong; });
+  useEffect(() => { entryRef.current = entry; });
+  useEffect(() => { coinRef.current = coin; });
+  useEffect(() => { placeTPSLRef.current = placeTPSL; });
+  useEffect(() => { toastRef.current = toast; });
+
   const displayTpPrice = dragging && dragTarget === "tp" ? dragPrice : (activeTpPrice ?? ghostTpPrice);
   const displaySlPrice = dragging && dragTarget === "sl" ? dragPrice : (activeSlPrice ?? ghostSlPrice);
 
@@ -125,8 +151,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       ? (activeTpPrice ?? ghostTpPrice ?? currentPrice * 1.02)
       : (activeSlPrice ?? ghostSlPrice ?? currentPrice * 0.98);
 
-    // Only freeze the price scale — container bounds are read live in onMove
-    // so layout shifts (toasts, scrolls) don't drift the price mapping.
+    // Freeze only the price scale — container bounds are read live in onMove.
     dragRef.current = { target, rMin, rMax };
     dragPriceRef.current = startPrice;
     setDragTarget(target);
@@ -135,6 +160,9 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     setDragging(true);
   }, [activeTpPrice, ghostTpPrice, activeSlPrice, ghostSlPrice, currentPrice, rMin, rMax]);
 
+  // The drag effect has ONLY [dragging] as its dependency. All other values are
+  // read from refs so that polling updates (which change position/orders every
+  // 10 s) never cause the listeners to be torn down and re-registered mid-drag.
   useEffect(() => {
     if (!dragging) return;
 
@@ -143,7 +171,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       const container = containerRef.current;
       if (!state || !container) return;
 
-      // Read bounds live so the mapping stays accurate after any layout shift
+      // Read bounds live so the mapping stays accurate after any layout shift.
       const rect = container.getBoundingClientRect();
       const yPct = Math.max(0, Math.min(100,
         ((e.clientY - rect.top) / rect.height) * 100
@@ -153,10 +181,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
         state.rMax - (state.rMax - state.rMin) * (yPct / 100)
       ));
 
-      // Validate against entry boundary — TP must be on the profit side, SL on loss side
+      // Validate against entry boundary — TP must be on the profit side, SL on loss side.
+      const curIsLong = isLongRef.current;
+      const curEntry = entryRef.current;
       const invalid = state.target === "tp"
-        ? (isLong ? newPrice <= entry : newPrice >= entry)
-        : (isLong ? newPrice >= entry : newPrice <= entry);
+        ? (curIsLong ? newPrice <= curEntry : newPrice >= curEntry)
+        : (curIsLong ? newPrice >= curEntry : newPrice <= curEntry);
 
       setDragInvalid(invalid);
       dragPriceRef.current = newPrice;
@@ -164,18 +194,21 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
     };
 
     const onUp = async () => {
-      // Release the capture layer immediately and synchronously
+      // Release the capture layer immediately — before any async work.
       if (fixedCaptureRef.current) {
         fixedCaptureRef.current.style.pointerEvents = "none";
       }
 
       const state = dragRef.current;
-      if (!position || !state) {
+      const curPosition = positionRef.current;
+
+      if (!curPosition || !state) {
         setDragging(false);
         setDragTarget(null);
         setDragInvalid(false);
         return;
       }
+
       const target = state.target;
       const finalPrice = dragPriceRef.current;
       dragRef.current = null;
@@ -183,17 +216,26 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       setDragTarget(null);
       setDragInvalid(false);
 
-      // Final validation — reject if the drop lands in the wrong zone
+      // Read latest values from refs — immune to polling re-renders.
+      const curIsLong = isLongRef.current;
+      const curEntry = entryRef.current;
+      const curActiveTp = activeTpPriceRef.current;
+      const curActiveSl = activeSlPriceRef.current;
+      const curCoin = coinRef.current;
+      const curPlaceTPSL = placeTPSLRef.current;
+      const curToast = toastRef.current;
+
+      // Final validation — reject if the drop lands in the wrong zone.
       const invalid = target === "tp"
-        ? (isLong ? finalPrice <= entry : finalPrice >= entry)
-        : (isLong ? finalPrice >= entry : finalPrice <= entry);
+        ? (curIsLong ? finalPrice <= curEntry : finalPrice >= curEntry)
+        : (curIsLong ? finalPrice >= curEntry : finalPrice <= curEntry);
 
       if (invalid) {
-        toast({
+        curToast({
           title: "Invalid price",
           description: target === "tp"
-            ? `Take Profit must be ${isLong ? "above" : "below"} entry ($${fmt(entry)})`
-            : `Stop Loss must be ${isLong ? "below" : "above"} entry ($${fmt(entry)})`,
+            ? `Take Profit must be ${curIsLong ? "above" : "below"} entry ($${fmt(curEntry)})`
+            : `Stop Loss must be ${curIsLong ? "below" : "above"} entry ($${fmt(curEntry)})`,
           variant: "destructive",
         });
         return;
@@ -201,19 +243,19 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
       setIsPlacing(true);
 
-      const currentTp = target === "tp" ? finalPrice : (activeTpPrice ?? 0);
-      const currentSl = target === "sl" ? finalPrice : (activeSlPrice ?? 0);
+      const currentTp = target === "tp" ? finalPrice : (curActiveTp ?? 0);
+      const currentSl = target === "sl" ? finalPrice : (curActiveSl ?? 0);
 
-      const result = await placeTPSL(
-        coin,
-        position.size,
-        position.side === "long",
+      const result = await curPlaceTPSL(
+        curCoin,
+        curPosition.size,
+        curPosition.side === "long",
         currentTp > 0 ? currentTp : undefined,
         currentSl > 0 ? currentSl : undefined,
       );
 
       setIsPlacing(false);
-      toast(result.success
+      curToast(result.success
         ? { title: `${target === "tp" ? "Take Profit" : "Stop Loss"} set at $${fmt(finalPrice)}` }
         : { title: "Failed to set order", description: result.error, variant: "destructive" });
     };
@@ -224,7 +266,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [dragging, position, activeTpPrice, activeSlPrice, coin, placeTPSL, toast, isLong, entry]);
+  }, [dragging]); // ONLY [dragging] — all other values are read from stable refs
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
     const order = type === "tp" ? tpOrder : slOrder;
@@ -353,10 +395,12 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
 
   return (
     <>
-      {/* Always-present capture layer — pointer events activated synchronously
-          in startDrag() and deactivated in onUp() via fixedCaptureRef.
-          This eliminates the React render-cycle timing gap that previously allowed
-          the TradingView iframe to steal mouse events during drag. */}
+      {/* Always-present full-viewport capture layer.
+          Pointer events are enabled SYNCHRONOUSLY in startDrag() (before React's
+          next render tick) and disabled in onUp() via fixedCaptureRef.
+          This eliminates the race window that let the TradingView iframe steal
+          mouse events mid-drag. The fixed + z-[999] positioning places it above
+          the iframe regardless of where it appears in the DOM. */}
       <div
         ref={fixedCaptureRef}
         className="fixed inset-0 z-[999] cursor-ns-resize"
@@ -386,8 +430,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 pointerEvents: "none",
               }}
             >
-              {/* Full-width invisible hit strip — lets users grab anywhere on the line.
-                  Subtle hover background provides visual affordance that the strip is draggable. */}
+              {/* Full-width invisible hit strip — grab anywhere along the line.
+                  Hover background gives a visual affordance that this is draggable. */}
               {line.draggable && line.draggableAs && (
                 <div
                   className="absolute left-0 right-0 cursor-ns-resize hover:bg-white/5 transition-colors"
@@ -407,7 +451,7 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
                 }}
               />
 
-              {/* Left label — Hyperliquid style: type + price + size + cancel */}
+              {/* Left label pill */}
               <div
                 className="absolute left-2"
                 style={{

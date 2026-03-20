@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -44,15 +44,23 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
 
   const position = positions.find(p => p.coin === coin);
 
+  // Use a ref so getOrderType has a stable identity (empty dep array).
+  // This prevents the "more hooks than previous render" error that occurs
+  // when position's reference changes on every polling cycle, causing
+  // getOrderType → tpOrder/slOrder → downstream callbacks to all cascade-recreate.
+  const positionRef = useRef(position);
+  useEffect(() => { positionRef.current = position; });
+
   const getOrderType = useCallback((order: HLOpenOrder): "tp" | "sl" | "other" => {
-    if (!position) return "other";
+    const pos = positionRef.current;
+    if (!pos) return "other";
     if (order.orderType === "stop_loss") return "sl";
     if (order.orderType === "take_profit") return "tp";
     const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    return position.side === "long"
-      ? triggerPrice < position.entryPrice ? "sl" : "tp"
-      : triggerPrice > position.entryPrice ? "sl" : "tp";
-  }, [position]);
+    return pos.side === "long"
+      ? triggerPrice < pos.entryPrice ? "sl" : "tp"
+      : triggerPrice > pos.entryPrice ? "sl" : "tp";
+  }, []); // stable — reads from ref, never needs to re-create
 
   const coinOrders = openOrders.filter(o => o.coin === coin);
   const tpOrder = coinOrders.find(o => getOrderType(o) === "tp");
