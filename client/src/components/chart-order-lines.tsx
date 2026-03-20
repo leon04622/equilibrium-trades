@@ -1,9 +1,8 @@
-import { useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useTrading } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { X, TrendingUp, TrendingDown } from "lucide-react";
-import { useCallback } from "react";
+import { X } from "lucide-react";
 
 interface ChartOrderLinesProps {
   coin: string;
@@ -18,6 +17,12 @@ function fmt(p: number): string {
   return p.toFixed(4);
 }
 
+function fmtSize(s: number): string {
+  if (s < 0.001) return s.toFixed(6);
+  if (s < 1) return s.toFixed(4);
+  return s.toFixed(3);
+}
+
 function fmtPnl(pnl: number): string {
   const abs = Math.abs(pnl);
   const sign = pnl >= 0 ? "+" : "-";
@@ -28,18 +33,30 @@ function fmtPnl(pnl: number): string {
 export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder } = useTrading();
   const { toast } = useToast();
+  const [containerHeight, setContainerHeight] = useState(400);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setContainerHeight(el.clientHeight);
+    const ro = new ResizeObserver(() => setContainerHeight(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
 
   const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
     if (!position) return "other";
-    if (order.orderType === "take_profit" || order.orderType === "Take Profit Market") return "tp";
-    if (order.orderType === "stop_loss" || order.orderType === "Stop Market") return "sl";
-    const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    if (!triggerPrice || isNaN(triggerPrice)) return "other";
+    const ot = (order.orderType || "").toLowerCase();
+    if (ot.includes("take profit") || ot === "take_profit") return "tp";
+    if (ot.includes("stop") || ot === "stop_loss") return "sl";
+    const trigPx = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
+    if (!trigPx || isNaN(trigPx)) return "other";
     return position.side === "long"
-      ? triggerPrice > currentPrice ? "tp" : "sl"
-      : triggerPrice < currentPrice ? "tp" : "sl";
+      ? trigPx > (position.entryPrice || currentPrice) ? "tp" : "sl"
+      : trigPx < (position.entryPrice || currentPrice) ? "tp" : "sl";
   }, [position, currentPrice]);
 
   const coinOrders = useMemo(() => openOrders.filter(o => o.coin === coin), [openOrders, coin]);
@@ -65,94 +82,188 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const size = position.size;
   const unrealizedPnl = position.unrealizedPnl ?? (isLong ? size * (currentPrice - entry) : size * (entry - currentPrice));
   const pnlPositive = unrealizedPnl >= 0;
+  const liqPrice = position.liquidationPrice;
+
+  // Build price scale that fits all key levels
+  const priceLevels: number[] = [currentPrice, entry].filter(p => p > 0);
+  if (tpPrice) priceLevels.push(tpPrice);
+  if (slPrice) priceLevels.push(slPrice);
+  if (liqPrice && liqPrice > 0) priceLevels.push(liqPrice);
+
+  const rawMin = Math.min(...priceLevels);
+  const rawMax = Math.max(...priceLevels);
+  const span = rawMax - rawMin || currentPrice * 0.06;
+  const pad = span * 0.25;
+  const rMin = rawMin - pad;
+  const rMax = rawMax + pad;
+
+  const toYPct = (price: number): number => ((rMax - price) / (rMax - rMin)) * 100;
+
+  interface LineConfig {
+    key: string;
+    price: number;
+    color: string;          // tailwind / hex
+    lineColor: string;      // for border-color inline style
+    dashed: boolean;
+    label: string;
+    pnlLabel?: string;
+    sizeLabel: string;
+    canCancel: boolean;
+    cancelType?: "tp" | "sl";
+    labelSide?: "left" | "center";
+  }
+
+  const lines: LineConfig[] = [];
+
+  if (tpPrice && tpPrice > 0) {
+    lines.push({
+      key: "tp",
+      price: tpPrice,
+      color: "text-[#22c55e]",
+      lineColor: "#22c55e",
+      dashed: true,
+      label: `TP Price ${isLong ? ">" : "<"} ${fmt(tpPrice)}`,
+      sizeLabel: fmtSize(size),
+      canCancel: true,
+      cancelType: "tp",
+      labelSide: "center",
+    });
+  }
+
+  lines.push({
+    key: "entry",
+    price: entry,
+    color: "text-blue-400",
+    lineColor: "#60a5fa",
+    dashed: true,
+    label: `Entry ${fmt(entry)}`,
+    pnlLabel: `PNL ${fmtPnl(unrealizedPnl)}`,
+    sizeLabel: fmtSize(size),
+    canCancel: false,
+    labelSide: "left",
+  });
+
+  if (slPrice && slPrice > 0) {
+    lines.push({
+      key: "sl",
+      price: slPrice,
+      color: "text-[#ef4444]",
+      lineColor: "#ef4444",
+      dashed: true,
+      label: `SL Price ${isLong ? "<" : ">"} ${fmt(slPrice)}`,
+      sizeLabel: fmtSize(size),
+      canCancel: true,
+      cancelType: "sl",
+      labelSide: "center",
+    });
+  }
+
+  if (liqPrice && liqPrice > 0) {
+    lines.push({
+      key: "liq",
+      price: liqPrice,
+      color: "text-orange-400",
+      lineColor: "#f97316",
+      dashed: true,
+      label: `Liq. Price`,
+      sizeLabel: "",
+      canCancel: false,
+      labelSide: "left",
+    });
+  }
 
   return (
     <div
-      className="absolute inset-0 z-10 overflow-hidden pointer-events-none"
+      ref={containerRef}
+      className="absolute inset-0 z-10 overflow-hidden"
+      style={{ pointerEvents: "none", height: containerHeight || undefined }}
       data-testid="chart-order-lines"
     >
-      {/* ── Top bar: Take Profit ──────────────────────────────────── */}
-      {tpPrice && tpPrice > 0 && (
-        <div className="absolute top-2 left-2 pointer-events-auto" data-testid="tp-badge">
-          <div className="flex items-center gap-1.5 bg-[#22c55e]/15 border border-[#22c55e]/40 rounded px-2.5 py-1 shadow-lg backdrop-blur-sm">
-            <span className="text-[11px] font-mono font-semibold text-[#22c55e]">
-              TP  ${fmt(tpPrice)}
-            </span>
-            <span className="text-[10px] font-mono text-[#22c55e]/60">
-              {fmt(size)}
-            </span>
-            {tpOrder && (
-              <button
-                className="text-[#22c55e]/60 hover:text-[#22c55e] transition-colors ml-0.5"
-                onClick={() => handleCancel("tp")}
-                data-testid="cancel-tp"
+      {lines.map(line => {
+        const yPct = toYPct(line.price);
+        if (yPct < -8 || yPct > 108) return null;
+
+        return (
+          <div
+            key={line.key}
+            className="absolute left-0 right-0"
+            style={{ top: `${yPct}%`, transform: "translateY(-50%)" }}
+          >
+            {/* Full-width dashed line */}
+            <div
+              className="absolute left-0 right-0 h-0"
+              style={{
+                borderTop: `1px dashed ${line.lineColor}`,
+                opacity: 0.7,
+              }}
+            />
+
+            {/* Label – centered for TP/SL, left for Entry/Liq */}
+            {line.labelSide === "center" ? (
+              <div
+                className="absolute"
+                style={{
+                  left: "50%",
+                  transform: "translateX(-50%) translateY(-50%)",
+                  pointerEvents: "auto",
+                  zIndex: 30,
+                }}
               >
-                <X className="h-3 w-3" />
-              </button>
+                <div
+                  className={cn(
+                    "flex items-center gap-2 px-2.5 py-1 rounded text-[11px] font-mono font-semibold",
+                    "bg-[#1a1f2e] border border-white/15 shadow-lg select-none whitespace-nowrap",
+                    line.color,
+                  )}
+                >
+                  <span>{line.label}</span>
+                  <span className="opacity-50">{line.sizeLabel}</span>
+                  {line.canCancel && (
+                    <button
+                      className="opacity-60 hover:opacity-100 transition-opacity ml-0.5"
+                      onClick={() => line.cancelType && handleCancel(line.cancelType!)}
+                      data-testid={`cancel-${line.key}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Left-side label for Entry and Liq */
+              <div
+                className="absolute left-2"
+                style={{ transform: "translateY(-50%)", pointerEvents: "auto", zIndex: 30 }}
+              >
+                <div
+                  className={cn(
+                    "flex items-center gap-2 px-2.5 py-1 rounded text-[11px] font-mono font-semibold",
+                    "bg-[#1a1f2e] border border-white/15 shadow-lg select-none whitespace-nowrap",
+                    line.color,
+                  )}
+                >
+                  {line.pnlLabel ? (
+                    <>
+                      <span className={cn(
+                        "text-[10px] font-semibold",
+                        pnlPositive ? "text-[#22c55e]" : "text-[#ef4444]"
+                      )}>
+                        {line.pnlLabel}
+                      </span>
+                      <span className="opacity-50">{line.sizeLabel}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{line.label}</span>
+                      {line.sizeLabel && <span className="opacity-50">{line.sizeLabel}</span>}
+                    </>
+                  )}
+                </div>
+              </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* ── Middle left: Entry + PNL ──────────────────────────────── */}
-      <div className="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" data-testid="entry-badge">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-1.5 bg-white/8 border border-white/15 rounded px-2.5 py-1 shadow backdrop-blur-sm">
-            {isLong
-              ? <TrendingUp className="h-3 w-3 text-white/60" />
-              : <TrendingDown className="h-3 w-3 text-white/60" />
-            }
-            <span className="text-[11px] font-mono font-semibold text-white/80">
-              Entry  ${fmt(entry)}
-            </span>
-            <span className="text-[10px] font-mono text-white/50">{fmt(size)}</span>
-          </div>
-          <div className={cn(
-            "flex items-center gap-1.5 rounded px-2.5 py-0.5 shadow backdrop-blur-sm border",
-            pnlPositive
-              ? "bg-[#22c55e]/10 border-[#22c55e]/25 text-[#22c55e]"
-              : "bg-[#ef4444]/10 border-[#ef4444]/25 text-[#ef4444]"
-          )}>
-            <span className="text-[10px] font-mono font-semibold">
-              PNL {fmtPnl(unrealizedPnl)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Bottom bar: Stop Loss ─────────────────────────────────── */}
-      {slPrice && slPrice > 0 && (
-        <div className="absolute bottom-2 left-2 pointer-events-auto" data-testid="sl-badge">
-          <div className="flex items-center gap-1.5 bg-[#ef4444]/15 border border-[#ef4444]/40 rounded px-2.5 py-1 shadow-lg backdrop-blur-sm">
-            <span className="text-[11px] font-mono font-semibold text-[#ef4444]">
-              SL  ${fmt(slPrice)}
-            </span>
-            <span className="text-[10px] font-mono text-[#ef4444]/60">
-              {fmt(size)}
-            </span>
-            {slOrder && (
-              <button
-                className="text-[#ef4444]/60 hover:text-[#ef4444] transition-colors ml-0.5"
-                onClick={() => handleCancel("sl")}
-                data-testid="cancel-sl"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Top-right: Liq price warning ─────────────────────────── */}
-      {position.liquidationPrice && position.liquidationPrice > 0 && (
-        <div className="absolute top-2 right-2 pointer-events-none" data-testid="liq-badge">
-          <div className="flex items-center gap-1.5 bg-orange-500/15 border border-orange-500/30 rounded px-2.5 py-1 shadow backdrop-blur-sm">
-            <span className="text-[11px] font-mono font-semibold text-orange-400">
-              Liq  ${fmt(position.liquidationPrice)}
-            </span>
-          </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
