@@ -84,6 +84,7 @@ interface TradingContextType {
   connected: boolean;
   address: string;
   balance: number;
+  withdrawable: number;
   accountValue: number;
   marginUsed: number;
   positions: Position[];
@@ -213,6 +214,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const { address: walletAddress, isConnected: walletConnected, signer } = useWallet();
   
   const [balance, setBalance] = useState(0);
+  const [withdrawable, setWithdrawable] = useState(0);
   const [accountValue, setAccountValue] = useState(0);
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -247,9 +249,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (accountState) {
         const accValue = parseFloat(accountState.marginSummary.accountValue || "0");
         const margUsed = parseFloat(accountState.marginSummary.totalMarginUsed || "0");
+        const withdrawableVal = parseFloat(accountState.withdrawable || "0");
         setAccountValue(accValue);
         setMarginUsed(margUsed);
         setBalance(accValue - margUsed);
+        setWithdrawable(withdrawableVal > 0 ? withdrawableVal : Math.max(0, accValue - margUsed));
       }
 
       // Convert Hyperliquid positions to our format
@@ -297,6 +301,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } else {
       setPositions([]);
       setBalance(0);
+      setWithdrawable(0);
       setAccountValue(0);
       setMarginUsed(0);
     }
@@ -681,6 +686,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       connected,
       address,
       balance,
+      withdrawable,
       accountValue,
       marginUsed,
       positions,

@@ -46,6 +46,7 @@ export default function Portfolio() {
     accountValue,
     marginUsed,
     balance,
+    withdrawable,
     currentPrices,
     refreshAccount,
   } = useTrading();
@@ -62,6 +63,7 @@ export default function Portfolio() {
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
+  const withdrawablePerp = withdrawable || 0;
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
   const totalMarginUsed = marginUsed || 0;
 
@@ -105,12 +107,18 @@ export default function Portfolio() {
     return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const maxTransferAmount = transferToPerp ? usdcSpotAvailable : availableBalance;
+  const maxTransferAmount = transferToPerp ? usdcSpotAvailable : withdrawablePerp;
 
-  const openTransferDialog = (toPerp: boolean) => {
-    const max = toPerp ? usdcSpotAvailable : (balance || 0);
+  const openTransferDialog = (preferToPerp: boolean) => {
+    // Smart direction: if the preferred direction has no funds, switch to the other direction
+    let toPerp = preferToPerp;
+    if (preferToPerp && usdcSpotAvailable <= 0 && withdrawablePerp > 0) {
+      toPerp = false; // No spot USDC, but has perp balance — switch to Perp→Spot
+    } else if (!preferToPerp && withdrawablePerp <= 0 && usdcSpotAvailable > 0) {
+      toPerp = true; // No perp balance, but has spot USDC — switch to Spot→Perp
+    }
+    const max = toPerp ? usdcSpotAvailable : withdrawablePerp;
     setTransferToPerp(toPerp);
-    // Pre-fill with max available so the button is immediately usable
     setTransferAmount(max > 0 ? max.toFixed(2) : "");
     setTransferResult(null);
     setTransferOpen(true);
@@ -530,7 +538,7 @@ export default function Portfolio() {
                 <p className="text-xs text-muted-foreground">
                   {transferToPerp
                     ? `${formatPrice(usdcSpotAvailable)} USDC available`
-                    : `${formatPrice(availableBalance)} USDC available`}
+                    : `${formatPrice(withdrawablePerp)} USDC available`}
                 </p>
               </div>
               <ArrowRight className="h-4 w-4 text-primary shrink-0" />
@@ -566,7 +574,7 @@ export default function Portfolio() {
                 )}
                 onClick={() => {
                   setTransferToPerp(false);
-                  setTransferAmount(availableBalance > 0 ? availableBalance.toFixed(2) : "");
+                  setTransferAmount(withdrawablePerp > 0 ? withdrawablePerp.toFixed(2) : "");
                   setTransferResult(null);
                 }}
                 data-testid="button-direction-to-spot"
@@ -601,6 +609,13 @@ export default function Portfolio() {
               <p className="text-xs text-muted-foreground">
                 Available: {formatPrice(maxTransferAmount)} USDC
               </p>
+              {maxTransferAmount <= 0 && (
+                <p className="text-xs text-amber-500 mt-1">
+                  {transferToPerp
+                    ? "No USDC in Spot account. Try switching to Perp → Spot if you have funds in your Perp account."
+                    : "No withdrawable USDC in Perp account. Deposit funds to Hyperliquid first."}
+                </p>
+              )}
             </div>
 
             {transferResult && (

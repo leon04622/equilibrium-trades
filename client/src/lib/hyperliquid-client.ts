@@ -268,6 +268,7 @@ export interface AccountState {
     accountValue: string;
     totalNtlPos: string;
   };
+  withdrawable?: string;
   assetPositions: Array<{
     position: {
       coin: string;
