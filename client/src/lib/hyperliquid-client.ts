@@ -4,6 +4,10 @@ import { signL1Action as sdkSignL1Action, PrivateKeySigner } from "@nktkas/hyper
 const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
 const AGENT_STORAGE_KEY = "hyperliquid_agent";
+const BUILDER_FEE_STORAGE_KEY = "hyperliquid_builder_fee_approved";
+
+// Your registered builder wallet address — users approve this once so you earn a fee on their trades
+const BUILDER_ADDRESS = (import.meta.env.VITE_BUILDER_ADDRESS || "").toLowerCase();
 
 // Get server-synced timestamp to avoid browser clock issues
 // The Replit preview can have significant clock drift compared to Hyperliquid servers
@@ -197,7 +201,73 @@ async function authorizeAgent(
   }
 }
 
-// Get or create an authorized agent for trading
+// Submit approveBuilderFee action to Hyperliquid so the platform earns a fee on the user's trades
+async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
+  if (!BUILDER_ADDRESS) {
+    console.warn("VITE_BUILDER_ADDRESS not configured — skipping builder fee approval");
+    return false;
+  }
+
+  await syncServerTime();
+  const nonce = getSyncedTimestamp();
+  const signatureChainId = "0xa4b1"; // Arbitrum One
+
+  const domain = {
+    name: "HyperliquidSignTransaction",
+    version: "1",
+    chainId: parseInt(signatureChainId, 16), // 42161
+    verifyingContract: "0x0000000000000000000000000000000000000000",
+  };
+
+  const types = {
+    "HyperliquidTransaction:ApproveBuilderFee": [
+      { name: "hyperliquidChain", type: "string" },
+      { name: "builder", type: "address" },
+      { name: "maxFeeRate", type: "string" },
+      { name: "nonce", type: "uint64" },
+    ],
+  };
+
+  // maxFeeRate of "0.0003" = 0.03% = 3 basis points (the platform earns this from each trade)
+  const message = {
+    hyperliquidChain: "Mainnet",
+    builder: BUILDER_ADDRESS,
+    maxFeeRate: "0.0003",
+    nonce,
+  };
+
+  try {
+    console.log("Requesting builder fee approval signature...");
+    const signature = await signer.signTypedData(domain, types, message);
+
+    const r = signature.slice(0, 66);
+    const s = "0x" + signature.slice(66, 130);
+    const v = parseInt(signature.slice(130, 132), 16);
+
+    const action = {
+      type: "approveBuilderFee",
+      signatureChainId,
+      hyperliquidChain: "Mainnet",
+      builder: BUILDER_ADDRESS,
+      maxFeeRate: "0.0003",
+      nonce,
+    };
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, signature: { r, s, v }, nonce }),
+    });
+
+    const result = await response.json();
+    console.log("approveBuilderFee response:", result);
+    return result.status === "ok";
+  } catch (error) {
+    console.error("approveBuilderFee error:", error);
+    return false;
+  }
+}
+
 export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ privateKey: string; address: string } | null> {
   const userAddress = await signer.getAddress();
   
@@ -205,6 +275,17 @@ export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ private
   const stored = getStoredAgent(userAddress);
   if (stored) {
     console.log("Using existing agent:", stored.address);
+
+    // If builder address is configured and fee hasn't been approved yet, do it now silently
+    if (BUILDER_ADDRESS) {
+      const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
+      if (!localStorage.getItem(feeKey)) {
+        approveBuilderFee(signer).then((ok) => {
+          if (ok) localStorage.setItem(feeKey, "1");
+        }).catch(console.error);
+      }
+    }
+
     return { privateKey: stored.privateKey, address: stored.address };
   }
   
@@ -217,6 +298,16 @@ export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ private
   const authorized = await authorizeAgent(signer, agent.address);
   if (!authorized) {
     return null;
+  }
+
+  // Approve builder fee so the platform earns on this user's trades
+  if (BUILDER_ADDRESS) {
+    const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
+    const feeApproved = await approveBuilderFee(signer);
+    if (feeApproved) {
+      localStorage.setItem(feeKey, "1");
+      console.log("Builder fee approved for", userAddress);
+    }
   }
   
   // Store the agent
