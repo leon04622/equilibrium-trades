@@ -97,20 +97,22 @@ export default function Trading({ visible = true }: TradingProps) {
     if (tickers.length === 0) return;
     const directMatch = tickers.find((t: any) => t.coin === coin);
     if (directMatch) {
-      console.log("[selectedAsset]", { symbol: directMatch.baseName || directMatch.coin, coin: directMatch.coin });
       setIsResolvingCoin(false);
       return;
     }
     // Try matching by baseName (e.g. coin="PURR" → ticker with baseName="PURR" and coin="@0")
     const byBase = tickers.find((t: any) => t.baseName === coin || t.displayName?.startsWith(coin + "-"));
     if (byBase) {
-      console.log("[selectedAsset] resolved spot token", coin, "→", byBase.coin, { symbol: byBase.baseName || byBase.coin, coin: byBase.coin });
       setCoin(byBase.coin);
-    } else {
-      console.log("[selectedAsset] no ticker found for", coin);
     }
     setIsResolvingCoin(false);
   }, [tickers, coin]);
+
+  // Log selected asset only when coin changes (not on every ticker refresh)
+  useEffect(() => {
+    const ticker = tickers.find((t: any) => t.coin === coin);
+    console.log("[selectedAsset]", { symbol: ticker?.baseName || coin, coin });
+  }, [coin]);
 
   // Spot markets use @N identifiers — TradingView has no equivalent, so we
   // use the PatternChart (Hyperliquid native candles) as the primary chart for them.
@@ -551,7 +553,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
       {/* Bottom - Positions and Orders Panel (Hyperliquid style) - hidden in fullscreen on mobile */}
       <div className={cn(isFullscreen && "hidden md:block")}>
-        <BottomTradingPanel coin={coin} />
+        <BottomTradingPanel coin={coin} onCoinChange={setCoin} />
       </div>
 
       {/* Mobile Order Entry Button - positioned above the collapsed bottom panel - hidden in fullscreen */}

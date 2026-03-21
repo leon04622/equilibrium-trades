@@ -273,7 +273,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         openedAt: new Date(),
       }));
       setPositions(convertedPositions);
-      
+      console.log("[positions] fetched from API:", convertedPositions.map(p => ({ coin: p.coin, side: p.side, size: p.size, entryPrice: p.entryPrice, pnl: p.unrealizedPnl })));
+
       // Store open orders from Hyperliquid (includes SL/TP trigger orders via frontendOpenOrders)
       const triggerOrds = (hlOrders || []).filter((o: any) => o.isTrigger || o.triggerPx);
       if (triggerOrds.length > 0) {

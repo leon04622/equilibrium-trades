@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,11 @@ import { X, Pencil, ChevronUp, ChevronDown } from "lucide-react";
 
 interface BottomTradingPanelProps {
   coin?: string;
+  onCoinChange?: (coin: string) => void;
 }
 
 type TabType = "positions" | "orders" | "tpsl" | "trades" | "history";
+type FilterMode = "all" | "current";
 
 interface TPSLDialogState {
   open: boolean;
@@ -25,8 +27,9 @@ interface TPSLDialogState {
   currentSL?: number;
 }
 
-export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
+export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("positions");
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const { positions, openOrders, cancelHLOrder, placeTPSL, connected, currentPrices, closePosition, isClosingPosition } = useTrading();
   const { toast } = useToast();
@@ -42,8 +45,20 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
   const [slPrice, setSlPrice] = useState("");
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
 
-  const filteredPositions = coin ? positions.filter(p => p.coin === coin) : positions;
-  const filteredOrders = coin ? openOrders.filter(o => o.coin === coin) : openOrders;
+  // Debug: log all positions whenever they change
+  useEffect(() => {
+    if (positions.length > 0) {
+      const positionLog = positions.map(p => ({ coin: p.coin, side: p.side, size: p.size, pnl: p.unrealizedPnl }));
+      console.log("[positions] all open:", JSON.stringify(positionLog));
+    }
+  }, [positions]);
+
+  const filteredPositions = (filterMode === "current" && coin)
+    ? positions.filter(p => p.coin === coin)
+    : positions;
+  const filteredOrders = (filterMode === "current" && coin)
+    ? openOrders.filter(o => o.coin === coin)
+    : openOrders;
 
   const handleCancelOrder = async (order: HLOpenOrder) => {
     const result = await cancelHLOrder(order.coin, order.oid);
@@ -308,7 +323,31 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
             "flex items-center gap-2 shrink-0",
             !mobileExpanded && "hidden md:flex"
           )}>
-            <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">Filter</span>
+            {/* All / Current pair toggle */}
+            {coin && (
+              <div className="flex items-center rounded overflow-hidden border border-border text-[10px]" data-testid="toggle-position-filter">
+                <button
+                  onClick={() => setFilterMode("all")}
+                  className={cn(
+                    "px-2 py-0.5 transition-colors",
+                    filterMode === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid="button-filter-all"
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setFilterMode("current")}
+                  className={cn(
+                    "px-2 py-0.5 transition-colors",
+                    filterMode === "current" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid="button-filter-current"
+                >
+                  This Pair
+                </button>
+              </div>
+            )}
             {activeTab === "orders" && filteredOrders.length > 0 && (
               <Button
                 variant="ghost"
@@ -339,6 +378,7 @@ export function BottomTradingPanel({ coin }: BottomTradingPanelProps) {
               onClosePosition={handleClosePosition}
               isClosingPosition={isClosingPosition}
               closingPositionId={closingPositionId}
+              onCoinChange={onCoinChange}
             />
           )}
           {activeTab === "orders" && (
@@ -511,6 +551,7 @@ function PositionsTable({
   onClosePosition,
   isClosingPosition,
   closingPositionId,
+  onCoinChange,
 }: { 
   positions: any[]; 
   currentPrices: Record<string, number>;
@@ -521,6 +562,7 @@ function PositionsTable({
   onClosePosition: (pos: any) => void;
   isClosingPosition: boolean;
   closingPositionId: string | null;
+  onCoinChange?: (coin: string) => void;
 }) {
   if (positions.length === 0) {
     return (
@@ -556,10 +598,18 @@ function PositionsTable({
           return (
             <tr key={i} className="border-b border-border/50 hover:bg-muted/30" data-testid={`position-row-${pos.coin}`}>
               <td className="px-3 py-1.5">
-                <span className="font-medium">{pos.coin}</span>
-                <span className={cn("ml-1 text-[10px]", pos.side === "long" ? "text-bullish" : "text-bearish")}>
-                  {pos.leverage}x
-                </span>
+                <button
+                  className={cn("flex items-center gap-1 text-left", onCoinChange && "hover:text-primary cursor-pointer")}
+                  onClick={() => onCoinChange?.(pos.coin)}
+                  disabled={!onCoinChange}
+                  data-testid={`button-switch-coin-${pos.coin}`}
+                  title={onCoinChange ? `Switch chart to ${pos.coin}` : undefined}
+                >
+                  <span className="font-medium">{pos.coin}</span>
+                  <span className={cn("text-[10px]", pos.side === "long" ? "text-bullish" : "text-bearish")}>
+                    {pos.leverage}x
+                  </span>
+                </button>
               </td>
               <td className={cn("px-3 py-1.5 text-right font-mono", pos.side === "long" ? "text-bullish" : "text-bearish")}>
                 {formatSize(pos.size)} {pos.coin}
