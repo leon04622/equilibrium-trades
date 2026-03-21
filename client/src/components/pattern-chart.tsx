@@ -142,9 +142,14 @@ function PatternChartComponent({
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const priceLineRefs = useRef<IPriceLine[]>([]);
   const isSyncingRef = useRef(false);
-  const isInitialLoadRef = useRef(true);
 
-  // Pane resize state — flex-grow weights
+  // Tracking state for smart setData vs update()
+  const prevSymbolRef = useRef<string>("");
+  const prevCandlesLenRef = useRef<number>(0);
+  const prevLastTimeRef = useRef<number>(0);
+  const chartDataReadyRef = useRef<boolean>(false); // true once setData called with real data
+
+  // Pane resize state
   const [weights, setWeights] = useState([6, 2, 2]);
   const [lastVol, setLastVol] = useState<number | null>(null);
   const [lastRSI, setLastRSI] = useState<number | null>(null);
@@ -157,24 +162,16 @@ function PatternChartComponent({
   const { positions, openOrders } = useTrading();
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
-  // Reset chart fit flag and clear stale indicator values whenever the symbol changes
+  // Reset indicator stats and mark chart as needing a full reload when symbol changes.
+  // Do NOT call setData([]) here — keep old candles visible until new ones arrive.
   useEffect(() => {
-    isInitialLoadRef.current = true;
+    chartDataReadyRef.current = false;
     setLastVol(null);
     setLastRSI(null);
     setLastK(null);
     setLastD(null);
     setSmaStatus(null);
     setActiveSignal(null);
-    // Clear existing series data so old candles don't show while new ones load
-    if (candleSeriesRef.current) candleSeriesRef.current.setData([]);
-    if (sma21SeriesRef.current) sma21SeriesRef.current.setData([]);
-    if (sma200SeriesRef.current) sma200SeriesRef.current.setData([]);
-    if (volumeSeriesRef.current) volumeSeriesRef.current.setData([]);
-    if (volumeSmaSeriesRef.current) volumeSmaSeriesRef.current.setData([]);
-    if (rsiSeriesRef.current) rsiSeriesRef.current.setData([]);
-    if (stochKSeriesRef.current) stochKSeriesRef.current.setData([]);
-    if (stochDSeriesRef.current) stochDSeriesRef.current.setData([]);
   }, [coin]);
 
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
@@ -244,23 +241,25 @@ function PatternChartComponent({
     }
   }, [signals, smaStatus, coin, interval]);
 
-  // ── Chart initialization ──
-  const chartBase = useCallback((isDark: boolean) => ({
-    layout: { background: { type: ColorType.Solid, color: BG }, textColor: TEXT },
-    grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
-    crosshair: { mode: CrosshairMode.Normal },
-    rightPriceScale: { borderColor: BORDER, autoScale: true },
-    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-    handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
-  }), []);
-
+  // ── Chart initialization — runs ONCE on mount, re-runs only if theme/hideIndicators changes ──
   useEffect(() => {
     if (!mainContainerRef.current) return;
     if (!hideIndicators && (!rsiContainerRef.current || !stochContainerRef.current)) return;
 
-    // ── Main ──
+    console.log("[chart] creating chart instance for", coin);
+
+    const chartOpts = {
+      layout: { background: { type: ColorType.Solid, color: BG }, textColor: TEXT },
+      grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: BORDER, autoScale: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+    };
+
+    // ── Main chart ──
     const mainChart = createChart(mainContainerRef.current, {
-      ...chartBase(theme === "dark"),
+      ...chartOpts,
       timeScale: { borderColor: BORDER, timeVisible: true, visible: hideIndicators, rightOffset: 5, barSpacing: 8 },
     });
     mainChartRef.current = mainChart;
@@ -272,15 +271,13 @@ function PatternChartComponent({
     });
     candleSeriesRef.current = candleSeries;
 
-    const sma21 = mainChart.addSeries(LineSeries, {
+    sma21SeriesRef.current = mainChart.addSeries(LineSeries, {
       color: "#ffffff", lineWidth: 2, title: "21", priceLineVisible: false, lastValueVisible: true,
     });
-    sma21SeriesRef.current = sma21;
 
-    const sma200 = mainChart.addSeries(LineSeries, {
+    sma200SeriesRef.current = mainChart.addSeries(LineSeries, {
       color: "#f5e642", lineWidth: 2, title: "200", priceLineVisible: false, lastValueVisible: true,
     });
-    sma200SeriesRef.current = sma200;
 
     const volSeries = mainChart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" }, priceScaleId: "volume",
@@ -288,27 +285,34 @@ function PatternChartComponent({
     volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     volumeSeriesRef.current = volSeries;
 
-    const volSmaSeries = mainChart.addSeries(LineSeries, {
+    volumeSmaSeriesRef.current = mainChart.addSeries(LineSeries, {
       color: "#f59e0b", lineWidth: 1, priceScaleId: "volume",
       priceLineVisible: false, lastValueVisible: false, title: "",
     });
-    volumeSmaSeriesRef.current = volSmaSeries;
 
     const obs = (el: HTMLDivElement, chart: IChartApi) => {
-      const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }));
+      const ro = new ResizeObserver(() => {
+        if (mainChartRef.current || rsiChartRef.current || stochChartRef.current) {
+          try { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch (_) {}
+        }
+      });
       ro.observe(el);
-      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+      try { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch (_) {}
       return ro;
     };
     const r1 = obs(mainContainerRef.current!, mainChart);
-    const cleanups: (() => void)[] = [() => { r1.disconnect(); mainChart.remove(); mainChartRef.current = null; }];
+    const cleanups: (() => void)[] = [];
 
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
-      // ── RSI ──
-      const rsiChart = createChart(rsiContainerRef.current, {
-        ...chartBase(theme === "dark"),
+      const indOpts = {
+        ...chartOpts,
         layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
         grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
+      };
+
+      // ── RSI chart ──
+      const rsiChart = createChart(rsiContainerRef.current, {
+        ...indOpts,
         timeScale: { borderColor: BORDER, visible: false, rightOffset: 5, barSpacing: 8 },
         rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
       });
@@ -322,11 +326,9 @@ function PatternChartComponent({
       rsiSeries.createPriceLine({ price: 50, color: "rgba(255,255,255,0.20)", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
       rsiSeries.createPriceLine({ price: 30, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
-      // ── Stoch RSI ──
+      // ── Stoch RSI chart ──
       const stochChart = createChart(stochContainerRef.current, {
-        ...chartBase(theme === "dark"),
-        layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
-        grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
+        ...indOpts,
         timeScale: { borderColor: BORDER, timeVisible: true, rightOffset: 5, barSpacing: 8 },
         rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
       });
@@ -345,12 +347,12 @@ function PatternChartComponent({
       kSeries.createPriceLine({ price: 80, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
       kSeries.createPriceLine({ price: 20, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
 
-      // ── Time sync ──
+      // ── Time-axis sync ──
       const sync = (src: IChartApi, targets: IChartApi[]) => {
         if (isSyncingRef.current) return;
         isSyncingRef.current = true;
         const r = src.timeScale().getVisibleLogicalRange();
-        if (r) targets.forEach(t => t.timeScale().setVisibleLogicalRange(r));
+        if (r) targets.forEach(t => { try { t.timeScale().setVisibleLogicalRange(r); } catch (_) {} });
         isSyncingRef.current = false;
       };
       mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(mainChart, [rsiChart, stochChart]));
@@ -359,17 +361,43 @@ function PatternChartComponent({
 
       const r2 = obs(rsiContainerRef.current!, rsiChart);
       const r3 = obs(stochContainerRef.current!, stochChart);
-      cleanups.push(() => { r2.disconnect(); r3.disconnect(); rsiChart.remove(); stochChart.remove(); rsiChartRef.current = null; stochChartRef.current = null; });
+      cleanups.push(() => {
+        r2.disconnect(); r3.disconnect();
+        rsiSeriesRef.current = null;
+        stochKSeriesRef.current = null;
+        stochDSeriesRef.current = null;
+        try { rsiChart.remove(); } catch (_) {}
+        try { stochChart.remove(); } catch (_) {}
+        rsiChartRef.current = null;
+        stochChartRef.current = null;
+      });
     }
 
-    isInitialLoadRef.current = true;
+    // Reset data-ready flag when chart is newly created
+    chartDataReadyRef.current = false;
+    prevSymbolRef.current = "";
 
-    return () => cleanups.forEach(fn => fn());
-  }, [theme, chartBase, hideIndicators]);
+    return () => {
+      // Null series refs BEFORE removing chart so in-flight effects don't use disposed objects
+      candleSeriesRef.current = null;
+      sma21SeriesRef.current = null;
+      sma200SeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      volumeSmaSeriesRef.current = null;
+      priceLineRefs.current = [];
+      chartDataReadyRef.current = false;
+      r1.disconnect();
+      try { mainChart.remove(); } catch (_) {}
+      mainChartRef.current = null;
+      cleanups.forEach(fn => fn());
+    };
+  }, [theme, hideIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Data update ──
+  // ── Data update — smart setData vs update() ──
   useEffect(() => {
-    if (!candles || !candleSeriesRef.current || !sma21SeriesRef.current || !sma200SeriesRef.current) return;
+    if (!candles || candles.length === 0) return;
+    if (!candleSeriesRef.current || !mainChartRef.current) return;
+    if (!sma21SeriesRef.current || !sma200SeriesRef.current) return;
     if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
     if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
@@ -377,46 +405,142 @@ function PatternChartComponent({
     const closes = sorted.map(c => parsePrice(c.c));
     const times = sorted.map(c => (c.t / 1000) as Time);
     const vols = sorted.map(c => parsePrice(c.v));
+    const lastCandle = sorted[sorted.length - 1];
+    const lastTime = times[times.length - 1];
 
-    candleSeriesRef.current.setData(sorted.map((c, i) => ({
-      time: times[i], open: parsePrice(c.o), high: parsePrice(c.h),
-      low: parsePrice(c.l), close: parsePrice(c.c),
-    })));
+    const isSymbolChange = prevSymbolRef.current !== coin;
+    const isFirstLoad = !chartDataReadyRef.current;
 
-    const volData = sorted.map((c, i) => ({
-      time: times[i], value: vols[i],
-      color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
-    }));
-    volumeSeriesRef.current.setData(volData);
-    setLastVol(vols[vols.length - 1] ?? null);
+    if (isSymbolChange || isFirstLoad) {
+      // ── Full setData: initial load or symbol switch ──
+      console.log("[chart] setData →", coin, sorted.length, "candles", isSymbolChange ? "(symbol change)" : "(first load)");
 
-    // Volume SMA-20
-    if (vols.length >= 20) {
-      volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-    }
+      try {
+        candleSeriesRef.current.setData(sorted.map((c, i) => ({
+          time: times[i],
+          open: parsePrice(c.o),
+          high: parsePrice(c.h),
+          low: parsePrice(c.l),
+          close: parsePrice(c.c),
+        })));
 
-    if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-    const p200 = Math.min(sorted.length - 1, 200);
-    if (p200 >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200));
+        volumeSeriesRef.current.setData(sorted.map((c, i) => ({
+          time: times[i],
+          value: vols[i],
+          color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+        })));
+        setLastVol(vols[vols.length - 1] ?? null);
 
-    if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
-      const rsiData = calcRSI(closes, times, 14);
-      if (rsiData.length > 0) {
-        rsiSeriesRef.current.setData(rsiData);
-        setLastRSI(rsiData[rsiData.length - 1].value);
+        if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
+        if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
+        const p200 = Math.min(sorted.length - 1, 200);
+        if (p200 >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200));
+
+        if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+          const rsiData = calcRSI(closes, times, 14);
+          if (rsiData.length > 0) {
+            rsiSeriesRef.current.setData(rsiData);
+            setLastRSI(rsiData[rsiData.length - 1].value);
+          }
+          if (rsiData.length >= 14) {
+            const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+            if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
+            if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
+          }
+        }
+
+        // Fit content on first data load for this symbol
+        mainChartRef.current.timeScale().fitContent();
+      } catch (e) {
+        console.warn("[chart] setData error:", e);
+        return;
       }
-      if (rsiData.length >= 14) {
-        const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
-        if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
-        if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
-      }
-    }
 
-    if (mainChartRef.current && isInitialLoadRef.current) {
-      mainChartRef.current.timeScale().fitContent();
-      isInitialLoadRef.current = false;
+      prevSymbolRef.current = coin;
+      prevCandlesLenRef.current = sorted.length;
+      prevLastTimeRef.current = lastCandle.t;
+      chartDataReadyRef.current = true;
+    } else {
+      // ── Live update: same symbol, use update() to avoid full redraw ──
+      const lenChanged = sorted.length !== prevCandlesLenRef.current;
+      const timeChanged = lastCandle.t !== prevLastTimeRef.current;
+
+      // If many new candles arrived at once, fall back to setData
+      if (sorted.length - prevCandlesLenRef.current > 2) {
+        console.log("[chart] setData (bulk update) →", coin, sorted.length, "candles");
+        try {
+          candleSeriesRef.current.setData(sorted.map((c, i) => ({
+            time: times[i], open: parsePrice(c.o), high: parsePrice(c.h),
+            low: parsePrice(c.l), close: parsePrice(c.c),
+          })));
+          volumeSeriesRef.current.setData(sorted.map((c, i) => ({
+            time: times[i], value: vols[i],
+            color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+          })));
+          if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
+          if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
+          const p200b = Math.min(sorted.length - 1, 200);
+          if (p200b >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200b));
+          setLastVol(vols[vols.length - 1] ?? null);
+        } catch (e) {
+          console.warn("[chart] bulk setData error:", e);
+        }
+      } else {
+        // Single candle update or in-progress bar update
+        console.log("[chart] update → last candle", lastTime, lenChanged ? "(new bar)" : "(in-progress bar)");
+        try {
+          candleSeriesRef.current.update({
+            time: lastTime,
+            open: parsePrice(lastCandle.o),
+            high: parsePrice(lastCandle.h),
+            low: parsePrice(lastCandle.l),
+            close: parsePrice(lastCandle.c),
+          });
+
+          volumeSeriesRef.current.update({
+            time: lastTime,
+            value: parsePrice(lastCandle.v),
+            color: parsePrice(lastCandle.c) >= parsePrice(lastCandle.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+          });
+          setLastVol(parsePrice(lastCandle.v));
+
+          // Update SMA last points (incremental — avoids full series redraw)
+          if (sorted.length >= 21) {
+            const s21 = calcSMA(closes, times, 21);
+            if (s21.length > 0) sma21SeriesRef.current.update(s21[s21.length - 1]);
+          }
+          const p200u = Math.min(sorted.length - 1, 200);
+          if (p200u >= 10) {
+            const s200 = calcSMA(closes, times, p200u);
+            if (s200.length > 0) sma200SeriesRef.current.update(s200[s200.length - 1]);
+          }
+          if (vols.length >= 20) {
+            const vs = calcSMA(vols, times, 20);
+            if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]);
+          }
+
+          // Update indicators
+          if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+            const rsiData = calcRSI(closes, times, 14);
+            if (rsiData.length > 0) {
+              rsiSeriesRef.current.update(rsiData[rsiData.length - 1]);
+              setLastRSI(rsiData[rsiData.length - 1].value);
+            }
+            if (rsiData.length >= 14) {
+              const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+              if (k.length > 0) { stochKSeriesRef.current.update(k[k.length - 1]); setLastK(k[k.length - 1].value); }
+              if (d.length > 0) { stochDSeriesRef.current.update(d[d.length - 1]); setLastD(d[d.length - 1].value); }
+            }
+          }
+        } catch (e) {
+          console.warn("[chart] update error:", e);
+        }
+      }
+
+      prevCandlesLenRef.current = sorted.length;
+      prevLastTimeRef.current = lastCandle.t;
     }
-  }, [candles, parsePrice, hideIndicators]);
+  }, [candles, parsePrice, hideIndicators, coin]);
 
   // ── TP/SL/Entry/Liq price lines ──
   useEffect(() => {
@@ -426,8 +550,10 @@ function PatternChartComponent({
     priceLineRefs.current = [];
 
     const add = (price: number, color: string, title: string) => {
-      if (!price || isNaN(price) || price <= 0) return;
-      priceLineRefs.current.push(series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title }));
+      if (!price || isNaN(price) || price <= 0 || !candleSeriesRef.current) return;
+      try {
+        priceLineRefs.current.push(series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title }));
+      } catch (_) {}
     };
 
     const pos = positions.find(p => p.coin === coin);
@@ -461,7 +587,7 @@ function PatternChartComponent({
       <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative overflow-hidden">
         <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
 
-        {/* Loading overlay when switching assets */}
+        {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
         {candlesLoading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2">
