@@ -157,7 +157,27 @@ function PatternChartComponent({
   const { positions, openOrders } = useTrading();
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
-  const { data: candles } = useQuery<CandleData[]>({
+  // Reset chart fit flag and clear stale indicator values whenever the symbol changes
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+    setLastVol(null);
+    setLastRSI(null);
+    setLastK(null);
+    setLastD(null);
+    setSmaStatus(null);
+    setActiveSignal(null);
+    // Clear existing series data so old candles don't show while new ones load
+    if (candleSeriesRef.current) candleSeriesRef.current.setData([]);
+    if (sma21SeriesRef.current) sma21SeriesRef.current.setData([]);
+    if (sma200SeriesRef.current) sma200SeriesRef.current.setData([]);
+    if (volumeSeriesRef.current) volumeSeriesRef.current.setData([]);
+    if (volumeSmaSeriesRef.current) volumeSmaSeriesRef.current.setData([]);
+    if (rsiSeriesRef.current) rsiSeriesRef.current.setData([]);
+    if (stochKSeriesRef.current) stochKSeriesRef.current.setData([]);
+    if (stochDSeriesRef.current) stochDSeriesRef.current.setData([]);
+  }, [coin]);
+
+  const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
     queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}`],
     refetchInterval: 10000,
   });
@@ -440,6 +460,26 @@ function PatternChartComponent({
       {/* ── Main chart pane ── */}
       <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative overflow-hidden">
         <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
+
+        {/* Loading overlay when switching assets */}
+        {candlesLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <svg className="animate-spin h-7 w-7 text-[#b2b5be]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              <span className="text-[11px] text-[#b2b5be]">Loading chart…</span>
+            </div>
+          </div>
+        )}
+
+        {/* No data fallback */}
+        {!candlesLoading && (!candles || candles.length === 0) && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
+            <p className="text-[#b2b5be] text-sm">No chart data available</p>
+          </div>
+        )}
 
         {/* Volume label */}
         <div className="absolute top-1 left-1 z-10 pointer-events-none flex items-center gap-1">

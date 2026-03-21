@@ -51,6 +51,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [showIndicators, setShowIndicators] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isResolvingCoin, setIsResolvingCoin] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
   const { hasAccess, isConnected, isPro, isLoading: subLoading } = useSubscription();
@@ -61,12 +62,12 @@ export default function Trading({ visible = true }: TradingProps) {
   // we check startsWith and parse coin from the location string directly.
   useEffect(() => {
     if (!location.startsWith("/trading")) return;
-    // Parse query string from the wouter location (which includes it)
     const qIndex = location.indexOf("?");
     const search = qIndex !== -1 ? location.slice(qIndex) : window.location.search;
     const params = new URLSearchParams(search);
     const coinParam = params.get("coin");
     if (coinParam) {
+      setIsResolvingCoin(true);
       setCoin(coinParam);
     }
   }, [location]);
@@ -83,25 +84,49 @@ export default function Trading({ visible = true }: TradingProps) {
     }
   }, [canShowIndicatorChart, showAIChart]);
 
-  // Spot markets use @N identifiers — TradingView has no equivalent, so we
-  // use the PatternChart (Hyperliquid native candles) as the primary chart for them.
-  const isSpot = coin.startsWith("@");
-  const tvSymbol = isSpot ? "" : `BINANCE:${coin}USDT`;
-
-  const handleOrderSubmit = (order: any) => {
-    toast({
-      title: `${order.side === "buy" ? "Long" : "Short"} Order Submitted`,
-      description: `${order.quantity} ${coin} at $${order.price?.toLocaleString() || "market"}`,
-    });
-  };
-
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
     refetchInterval: visible ? 3000 : false,
     enabled: visible,
   });
 
-  const currentTicker = tickers.find((t) => t.coin === coin);
+  // Resolve coin name → @N spot identifier if needed.
+  // Spot balances from Hyperliquid return token names (e.g. "PURR"), but tickers
+  // use the @N format (e.g. "@0"). When tickers load, normalise the coin.
+  useEffect(() => {
+    if (tickers.length === 0) return;
+    const directMatch = tickers.find((t: any) => t.coin === coin);
+    if (directMatch) {
+      console.log("[selectedAsset]", { symbol: directMatch.baseName || directMatch.coin, coin: directMatch.coin });
+      setIsResolvingCoin(false);
+      return;
+    }
+    // Try matching by baseName (e.g. coin="PURR" → ticker with baseName="PURR" and coin="@0")
+    const byBase = tickers.find((t: any) => t.baseName === coin || t.displayName?.startsWith(coin + "-"));
+    if (byBase) {
+      console.log("[selectedAsset] resolved spot token", coin, "→", byBase.coin, { symbol: byBase.baseName || byBase.coin, coin: byBase.coin });
+      setCoin(byBase.coin);
+    } else {
+      console.log("[selectedAsset] no ticker found for", coin);
+    }
+    setIsResolvingCoin(false);
+  }, [tickers, coin]);
+
+  // Spot markets use @N identifiers — TradingView has no equivalent, so we
+  // use the PatternChart (Hyperliquid native candles) as the primary chart for them.
+  const isSpot = coin.startsWith("@");
+  const tvSymbol = isSpot ? "" : `BINANCE:${coin}USDT`;
+
+  // Derive display name for spot coins (e.g. "@0" → "PURR")
+  const currentTicker = tickers.find((t: any) => t.coin === coin);
+  const displaySymbol = currentTicker?.baseName || (isSpot ? coin : coin);
+
+  const handleOrderSubmit = (order: any) => {
+    toast({
+      title: `${order.side === "buy" ? "Long" : "Short"} Order Submitted`,
+      description: `${order.quantity} ${displaySymbol} at $${order.price?.toLocaleString() || "market"}`,
+    });
+  };
   const price = currentTicker ? parseFloat(currentTicker.markPx) : 0;
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const priceChange = prevPrice > 0 ? price - prevPrice : 0;
@@ -134,6 +159,18 @@ export default function Trading({ visible = true }: TradingProps) {
     if (v >= 1e3) return `$${(v / 1e3).toFixed(2)}K`;
     return `$${v.toFixed(0)}`;
   };
+
+  // Show loading spinner while resolving coin from URL (e.g. spot token name → @N id)
+  if (isResolvingCoin) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <p className="text-sm">Loading asset...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Show loading spinner while checking subscription (prevents bypass during load)
   if (subLoading && isConnected) {
@@ -534,7 +571,7 @@ export default function Trading({ visible = true }: TradingProps) {
           </SheetTrigger>
           <SheetContent side="bottom" className="h-[80vh] rounded-t-xl">
             <SheetHeader className="pb-2">
-              <SheetTitle className="text-center">Trade {coin}</SheetTitle>
+              <SheetTitle className="text-center">Trade {displaySymbol}</SheetTitle>
             </SheetHeader>
             <div className="overflow-y-auto h-full pb-8">
               <div className="space-y-4 px-2">
