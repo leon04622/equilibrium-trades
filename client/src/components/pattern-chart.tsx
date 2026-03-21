@@ -149,6 +149,9 @@ function PatternChartComponent({
   const prevCandlesLenRef = useRef<number>(0);
   const prevLastTimeRef = useRef<number>(0);
   const chartDataReadyRef = useRef<boolean>(false); // true once setData called with real data
+  // Incremented each time the chart is (re)created — causes the data effect to re-run even
+  // when candles/coin/interval haven't changed, so the fresh chart always gets populated.
+  const [chartVersion, setChartVersion] = useState(0);
 
   // Pane resize state
   const [weights, setWeights] = useState([6, 2, 2]);
@@ -378,6 +381,10 @@ function PatternChartComponent({
     chartDataReadyRef.current = false;
     prevDataKeyRef.current = "";
 
+    // Signal the data effect that a fresh chart is ready — even if candles/coin/interval
+    // haven't changed, the effect will re-run and call setData on the blank canvas.
+    setChartVersion(v => v + 1);
+
     return () => {
       // Null series refs BEFORE removing chart so in-flight effects don't use disposed objects
       candleSeriesRef.current = null;
@@ -387,6 +394,8 @@ function PatternChartComponent({
       volumeSmaSeriesRef.current = null;
       priceLineRefs.current = [];
       chartDataReadyRef.current = false;
+      // Reset prevDataKeyRef so the next data effect treats incoming candles as a key change
+      prevDataKeyRef.current = "";
       r1.disconnect();
       try { mainChart.remove(); } catch (_) {}
       mainChartRef.current = null;
@@ -545,7 +554,7 @@ function PatternChartComponent({
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
     }
-  }, [candles, parsePrice, hideIndicators, coin, interval]);
+  }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
 
   // ── TP/SL/Entry/Liq price lines ──
   useEffect(() => {
