@@ -269,6 +269,15 @@ export async function registerRoutes(
     }
   });
 
+  // Pre-warm all timeframes for a coin (fire-and-forget, so switching timeframes is instant)
+  app.post("/api/hyperliquid/candles/:coin/prewarm", async (req: Request, res: Response) => {
+    const coin = req.params.coin;
+    const ALL_INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
+    // Fire all in parallel, don't await — respond immediately
+    Promise.all(ALL_INTERVALS.map(tf => getCandles(coin, tf))).catch(() => {});
+    res.json({ ok: true });
+  });
+
   // ============ EDUCATIONAL PATTERN SCANNER ============
 
   // Scan for educational patterns (no entry/SL/TP - for learning)

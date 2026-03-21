@@ -13,7 +13,7 @@ import {
   type Time,
 } from "lightweight-charts";
 import { useTheme } from "@/lib/theme";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -164,7 +164,23 @@ function PatternChartComponent({
 
   const { theme } = useTheme();
   const { positions, openOrders } = useTrading();
+  const queryClient = useQueryClient();
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
+
+  // Pre-warm all timeframes on the server in parallel when coin changes
+  // so that switching timeframes is instant (data is already cached server-side)
+  useEffect(() => {
+    fetch(`/api/hyperliquid/candles/${coin}/prewarm`, { method: "POST" }).catch(() => {});
+    // Also prime the React Query cache for all timeframes
+    const ALL_INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
+    ALL_INTERVALS.forEach((tf) => {
+      if (tf === interval) return;
+      queryClient.prefetchQuery({
+        queryKey: [`/api/hyperliquid/candles/${coin}?interval=${tf}`],
+        staleTime: 30000,
+      });
+    });
+  }, [coin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset indicator stats and mark chart as needing a full reload when symbol OR interval changes.
   // Do NOT call setData([]) here — keep old candles visible until new ones arrive.
@@ -181,6 +197,7 @@ function PatternChartComponent({
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
     queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}`],
     refetchInterval: 10000,
+    staleTime: 8000,
   });
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({

@@ -276,6 +276,22 @@ export async function getOrderBook(coin: string): Promise<HyperliquidOrderBook |
   }
 }
 
+// In-memory candle cache: key → { data, expiresAt }
+const candleCache = new Map<string, { data: HyperliquidCandle[]; expiresAt: number }>();
+
+// TTL per interval — shorter candles refresh more often
+const CANDLE_CACHE_TTL: Record<string, number> = {
+  "1m":  8_000,
+  "3m":  12_000,
+  "5m":  15_000,
+  "15m": 20_000,
+  "30m": 25_000,
+  "1h":  30_000,
+  "2h":  40_000,
+  "4h":  50_000,
+  "1d":  60_000,
+};
+
 // Get candle data for charting
 export async function getCandles(
   coin: string,
@@ -300,11 +316,20 @@ export async function getCandles(
       "1d": 24 * 60 * 60 * 1000,
     };
     
-    // Get 400 candles so the 200 SMA has enough history to draw a full line
-    const candleCount = 400;
+    // Get 500 candles so SMAs have enough history
+    const candleCount = 500;
     const msPerCandle = intervalMs[interval] || 60 * 1000;
     const defaultRange = msPerCandle * candleCount;
     const start = startTime || end - defaultRange;
+
+    // Return cached data if still fresh (only when no explicit time bounds given)
+    const cacheKey = `${coin}:${interval}`;
+    if (!startTime && !endTime) {
+      const cached = candleCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+    }
     
     const response = await fetch(HYPERLIQUID_API_URL, {
       method: "POST",
@@ -319,9 +344,20 @@ export async function getCandles(
       throw new Error(`HTTP error: ${response.status}`);
     }
     
-    return await response.json();
+    const data: HyperliquidCandle[] = await response.json();
+
+    // Cache result
+    if (!startTime && !endTime && data.length > 0) {
+      const ttl = CANDLE_CACHE_TTL[interval] || 15_000;
+      candleCache.set(cacheKey, { data, expiresAt: Date.now() + ttl });
+    }
+
+    return data;
   } catch (error) {
     console.error("Error fetching candles:", error);
+    // Return stale cache if available rather than empty array
+    const cached = candleCache.get(`${coin}:${interval}`);
+    if (cached) return cached.data;
     return [];
   }
 }
