@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useSubscription } from "@/hooks/use-subscription";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Zap } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Zap, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
@@ -56,14 +56,17 @@ export default function Trading({ visible = true }: TradingProps) {
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
-  // update the selected coin. The component stays always-mounted so we watch the URL.
+  // update the selected coin. Wouter includes query string in location, so
+  // we check startsWith and parse coin from the location string directly.
   useEffect(() => {
-    if (location === "/trading") {
-      const params = new URLSearchParams(window.location.search);
-      const coinParam = params.get("coin");
-      if (coinParam) {
-        setCoin(coinParam);
-      }
+    if (!location.startsWith("/trading")) return;
+    // Parse query string from the wouter location (which includes it)
+    const qIndex = location.indexOf("?");
+    const search = qIndex !== -1 ? location.slice(qIndex) : window.location.search;
+    const params = new URLSearchParams(search);
+    const coinParam = params.get("coin");
+    if (coinParam) {
+      setCoin(coinParam);
     }
   }, [location]);
   
@@ -130,6 +133,18 @@ export default function Trading({ visible = true }: TradingProps) {
     if (v >= 1e3) return `$${(v / 1e3).toFixed(2)}K`;
     return `$${v.toFixed(0)}`;
   };
+
+  // Show loading spinner while checking subscription (prevents bypass during load)
+  if (subLoading && isConnected) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <p className="text-sm">Checking subscription...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Show subscription gate if wallet connected but no active Pro subscription
   if (!subLoading && isConnected && !isPro) {
@@ -391,7 +406,7 @@ export default function Trading({ visible = true }: TradingProps) {
               isFullscreen && "chart-wrapper-mobile"
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
-                <div className="flex-1 min-h-[300px] relative">
+                <div className="flex-1 relative" style={{ minHeight: 'calc(100dvh - 16rem)' }}>
                   {(canShowIndicatorChart && showAIChart) || isSpot ? (
                     <PatternChart 
                       symbol={coin} 
@@ -403,9 +418,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       className="absolute inset-0" 
                     />
                   ) : (
-                    <>
-                      <TradingViewChart symbol={tvSymbol} interval={timeframe} className="absolute inset-0" />
-                    </>
+                    <TradingViewChart symbol={tvSymbol} interval={timeframe} hideVolume className="absolute inset-0" />
                   )}
                 </div>
               )}

@@ -7,6 +7,7 @@ interface TradingViewChartProps {
   interval?: string;
   className?: string;
   currentPrice?: number;
+  hideVolume?: boolean;
 }
 
 function TradingViewChartComponent({ 
@@ -14,6 +15,7 @@ function TradingViewChartComponent({
   interval = "1",
   className = "",
   currentPrice = 0,
+  hideVolume = false,
 }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -92,7 +94,7 @@ function TradingViewChartComponent({
       enable_publishing: false,
       allow_symbol_change: false,
       calendar: false,
-      hide_volume: false,
+      hide_volume: hideVolume,
       hide_top_toolbar: false,
       hide_legend: false,
       hide_side_toolbar: false,
@@ -111,7 +113,7 @@ function TradingViewChartComponent({
         containerRef.current.innerHTML = "";
       }
     };
-  }, [symbol, interval, theme, JSON.stringify(enabledIndicators.map(i => ({ id: i.id, enabled: i.enabled, settings: i.settings })))]);
+  }, [symbol, interval, theme, hideVolume, JSON.stringify(enabledIndicators.map(i => ({ id: i.id, enabled: i.enabled, settings: i.settings })))]);
 
   return (
     <div 

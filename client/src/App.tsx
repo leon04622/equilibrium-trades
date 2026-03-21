@@ -65,7 +65,7 @@ function App() {
             <TooltipProvider delayDuration={200}>
               <WalletGate>
               <SidebarProvider style={style as React.CSSProperties}>
-                <div className="flex h-screen w-full overflow-hidden">
+                <div className="flex w-full overflow-hidden" style={{ height: '100dvh' }}>
                   <AppSidebar />
                   <SidebarInset className="flex flex-col flex-1 min-w-0 overflow-hidden">
                     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-2 md:px-4 sticky top-0 z-50 bg-background">
@@ -102,11 +102,12 @@ function App() {
 
 function TradingLayout() {
   const [location] = useLocation();
-  const isTrading = location === "/trading";
+  // Match /trading and /trading?coin=XYZ (wouter includes query string in location)
+  const isTrading = location === "/trading" || location.startsWith("/trading?");
 
   return (
     <>
-      {/* Trading page: fixed-height container so the chart fills the screen properly on mobile */}
+      {/* Trading page: fixed-height container using dvh for correct mobile viewport height */}
       <div
         className="flex-1 min-h-0 overflow-hidden"
         style={{ display: isTrading ? "flex" : "none", flexDirection: "column" }}

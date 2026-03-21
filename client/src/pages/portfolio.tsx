@@ -448,15 +448,15 @@ export default function Portfolio() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-          <p className="text-muted-foreground">Your Hyperliquid holdings and positions</p>
+          <p className="text-muted-foreground text-sm">Your Hyperliquid holdings and positions</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio">
-            <RefreshCw className="h-4 w-4 mr-2" />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio" className="h-8 px-2 text-xs">
+            <RefreshCw className="h-3 w-3 mr-1" />
             Refresh
           </Button>
           <Button
@@ -464,8 +464,9 @@ export default function Portfolio() {
             size="sm"
             onClick={() => openTransferDialog(true)}
             data-testid="button-transfer-funds"
+            className="h-8 px-2 text-xs"
           >
-            <ArrowRightLeft className="h-4 w-4 mr-2" />
+            <ArrowRightLeft className="h-3 w-3 mr-1" />
             Transfer
           </Button>
           <Button
@@ -473,22 +474,24 @@ export default function Portfolio() {
             size="sm"
             onClick={openDepositDialog}
             data-testid="button-deposit"
+            className="h-8 px-2 text-xs"
           >
-            <ArrowDownToLine className="h-4 w-4 mr-2" />
+            <ArrowDownToLine className="h-3 w-3 mr-1" />
             Deposit
           </Button>
           <Button
             size="sm"
             onClick={openWithdrawDialog}
             data-testid="button-withdraw"
+            className="h-8 px-2 text-xs"
           >
-            <ArrowUpFromLine className="h-4 w-4 mr-2" />
+            <ArrowUpFromLine className="h-3 w-3 mr-1" />
             Withdraw
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
         <Card data-testid="card-total-equity">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Equity</CardTitle>
