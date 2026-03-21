@@ -635,8 +635,8 @@ async function signL1ActionWithAgent(
   return signature;
 }
 
-// Referral code for this platform. Set to your Hyperliquid referral code.
-const PLATFORM_REFERRAL_CODE = import.meta.env.VITE_HL_REFERRAL_CODE || "";
+// Platform referral code — attributed to the platform owner on every trade (https://app.hyperliquid.xyz/join/BANKS)
+const PLATFORM_REFERRAL_CODE = import.meta.env.VITE_HL_REFERRAL_CODE || "BANKS";
 
 // Attempt to register the platform referral code for a new user.
 // Silently no-ops if already done this session, or if no referral code is set.
