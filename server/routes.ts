@@ -6,7 +6,8 @@ import { registerObjectStorageRoutes } from "./replit_integrations/object_storag
 import { analyzePatterns, getMarketCondition } from "./pattern-detection";
 import { 
   getAvailableCoins, 
-  getAllTickers, 
+  getAllTickers,
+  getSpotTickers,
   getOrderBook, 
   getRecentTrades,
   getCandles 
@@ -201,11 +202,11 @@ export async function registerRoutes(
     }
   });
 
-  // Get all tickers with prices
+  // Get all tickers with prices (perps + spot)
   app.get("/api/hyperliquid/tickers", async (req: Request, res: Response) => {
     try {
-      const tickers = await getAllTickers();
-      res.json(tickers);
+      const [perpTickers, spotTickers] = await Promise.all([getAllTickers(), getSpotTickers()]);
+      res.json([...perpTickers, ...spotTickers]);
     } catch (error) {
       console.error("Error fetching Hyperliquid tickers:", error);
       res.status(500).json({ error: "Failed to fetch tickers" });

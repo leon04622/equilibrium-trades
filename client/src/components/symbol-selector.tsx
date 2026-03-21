@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 
 interface Ticker {
   coin: string;
+  displayName?: string;
+  baseName?: string;
+  isSpot?: boolean;
   markPx: string;
   midPx: string;
   prevDayPx: string;
@@ -25,7 +28,7 @@ interface SymbolSelectorProps {
 
 type SortKey = "vol" | "oi" | "change" | "price" | "funding";
 type SortDir = "desc" | "asc";
-type Category = "all" | "trending" | "favorites";
+type Category = "all" | "perps" | "spot" | "trending" | "favorites";
 
 const FAVORITES_KEY = "hl_favorites";
 
@@ -81,6 +84,13 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
   const currentLeverage = currentTicker?.maxLeverage || 50;
+  const isCurrentSpot = currentTicker?.isSpot || false;
+
+  function getTickerLabel(t: Ticker): string {
+    if (t.displayName) return t.displayName;
+    if (t.isSpot) return t.coin;
+    return `${t.coin}-USDC`;
+  }
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -127,7 +137,14 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
 
   const filtered = processed
     .filter(t => {
-      if (search) return t.coin.toLowerCase().includes(search.toLowerCase());
+      if (search) {
+        const q = search.toLowerCase();
+        return t.coin.toLowerCase().includes(q) ||
+          (t.displayName || "").toLowerCase().includes(q) ||
+          (t.baseName || "").toLowerCase().includes(q);
+      }
+      if (category === "perps") return !t.isSpot;
+      if (category === "spot") return !!t.isSpot;
       if (category === "trending") return t.vol > 1_000_000;
       if (category === "favorites") return favorites.has(t.coin);
       return true;
@@ -170,13 +187,20 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
       >
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20">
           <span className="text-[11px] font-bold text-primary">
-            {currentSymbol?.slice(0, 1) || "B"}
+            {(currentTicker?.baseName || currentSymbol)?.slice(0, 1) || "B"}
           </span>
         </div>
         <div className="text-left">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-bold">{currentSymbol || "BTC"}-USDC</span>
-            <span className="text-[10px] font-semibold text-muted-foreground border border-border rounded px-1 py-0">{currentLeverage}x</span>
+            <span className="text-sm font-bold">
+              {currentTicker ? getTickerLabel(currentTicker) : `${currentSymbol || "BTC"}-USDC`}
+            </span>
+            {!isCurrentSpot && (
+              <span className="text-[10px] font-semibold text-muted-foreground border border-border rounded px-1 py-0">{currentLeverage}x</span>
+            )}
+            {isCurrentSpot && (
+              <span className="text-[10px] font-semibold text-blue-400 border border-blue-400/30 bg-blue-400/10 rounded px-1 py-0">Spot</span>
+            )}
             <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
           </div>
         </div>
@@ -207,18 +231,24 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
 
             {/* Category tabs */}
             <div className="flex items-center gap-0 px-2 pb-0">
-              {(["all", "trending", "favorites"] as Category[]).map(cat => (
+              {([
+                { id: "all", label: "All" },
+                { id: "perps", label: "Perps" },
+                { id: "spot", label: "Spot" },
+                { id: "trending", label: "🔥 Trending" },
+                { id: "favorites", label: "⭐ Favorites" },
+              ] as { id: Category; label: string }[]).map(({ id, label }) => (
                 <button
-                  key={cat}
-                  onClick={() => { setCategory(cat); setSearch(""); }}
+                  key={id}
+                  onClick={() => { setCategory(id); setSearch(""); }}
                   className={cn(
-                    "px-3 py-2 text-xs font-medium capitalize border-b-2 transition-colors",
-                    category === cat && !search
+                    "px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
+                    category === id && !search
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {cat === "trending" ? "🔥 Trending" : cat === "favorites" ? "⭐ Favorites" : "All"}
+                  {label}
                 </button>
               ))}
               <div className="ml-auto pr-1 text-[10px] text-muted-foreground">
@@ -273,17 +303,23 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
                     <Star className="h-3 w-3" fill={favorites.has(ticker.coin) ? "currentColor" : "none"} />
                   </span>
 
-                  {/* Symbol + leverage */}
+                  {/* Symbol + leverage / spot badge */}
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="font-mono text-sm font-semibold truncate">{ticker.coin}-USDC</span>
-                    <span className={cn(
-                      "shrink-0 text-[10px] font-medium px-1 rounded border",
-                      ticker.onlyIsolated
-                        ? "text-orange-400 border-orange-400/30 bg-orange-400/10"
-                        : "text-primary border-primary/30 bg-primary/10"
-                    )}>
-                      {ticker.maxLeverage || 50}x
-                    </span>
+                    <span className="font-mono text-sm font-semibold truncate">{getTickerLabel(ticker)}</span>
+                    {ticker.isSpot ? (
+                      <span className="shrink-0 text-[10px] font-medium px-1 rounded border text-blue-400 border-blue-400/30 bg-blue-400/10">
+                        Spot
+                      </span>
+                    ) : (
+                      <span className={cn(
+                        "shrink-0 text-[10px] font-medium px-1 rounded border",
+                        ticker.onlyIsolated
+                          ? "text-orange-400 border-orange-400/30 bg-orange-400/10"
+                          : "text-primary border-primary/30 bg-primary/10"
+                      )}>
+                        {ticker.maxLeverage || 50}x
+                      </span>
+                    )}
                   </div>
 
                   {/* Last Price */}

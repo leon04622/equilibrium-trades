@@ -14,6 +14,9 @@ export interface HyperliquidMeta {
 
 export interface HyperliquidTicker {
   coin: string;
+  displayName?: string;
+  baseName?: string;
+  isSpot?: boolean;
   markPx: string;
   midPx: string;
   prevDayPx: string;
@@ -122,8 +125,11 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
       const currentPrice = parseFloat(mids[coin.name] || "0");
       const assetCtx = assetCtxs[index] || {};
       
+      const perpLabel = PERP_LABELS[coin.name];
       return {
         coin: coin.name,
+        displayName: perpLabel ? `${coin.name}-USDC (${perpLabel.split(" ")[0]})` : undefined,
+        isSpot: false,
         markPx: mids[coin.name] || "0",
         midPx: mids[coin.name] || "0",
         prevDayPx: assetCtx.prevDayPx || String(currentPrice),
@@ -156,6 +162,93 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
       maxLeverage: coin === "BTC" || coin === "ETH" ? 50 : 20,
       szDecimals: coin === "BTC" ? 5 : coin === "ETH" ? 4 : 2,
     }));
+  }
+}
+
+// Known labels for PERP coins
+const PERP_LABELS: Record<string, string> = {
+  "PAXG": "Gold (PAXG)",
+};
+
+// Known real-world asset labels for spot markets
+const SPOT_ASSET_LABELS: Record<string, string> = {
+  "SLV": "Silver",
+  "XAUT0": "Gold (XAUT)",
+  "MSFT": "Microsoft",
+  "AMZN": "Amazon",
+  "QQQ": "QQQ ETF",
+  "AAPL": "Apple",
+  "GOOGL": "Google",
+  "TSLA": "Tesla",
+  "NVDA": "NVIDIA",
+  "SPY": "S&P 500 ETF",
+  "PURR": "PURR",
+  "HFUN": "HFUN",
+  "WOW": "WOW",
+  "USOL": "Synthetic SOL",
+  "VORTX": "Synthetic BTC",
+  "MMOVE": "Synthetic ETH",
+  "ANZ": "ANZ",
+};
+
+// Minimum daily volume in USD for a spot market to be included
+const SPOT_MIN_VOL = 50_000;
+
+// Fetch spot market tickers and return them with @index coin identifiers
+export async function getSpotTickers(): Promise<HyperliquidTicker[]> {
+  try {
+    const response = await fetch(HYPERLIQUID_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "spotMetaAndAssetCtxs" }),
+    });
+    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+    const [spotMeta, spotCtxs] = await response.json();
+    const tokens: any[] = spotMeta.tokens || [];
+
+    return (spotMeta.universe as any[])
+      .map((pair: any, index: number) => {
+        const ctx = spotCtxs[index] || {};
+        const vol = parseFloat(ctx.dayNtlVlm || "0");
+        const px = parseFloat(ctx.markPx || "0");
+        if (vol < SPOT_MIN_VOL || px === 0) return null;
+
+        const baseToken = tokens[pair.tokens?.[0]] as any;
+        const quoteToken = tokens[pair.tokens?.[1]] as any;
+        const baseName: string = baseToken?.name || "";
+        const quoteName: string = quoteToken?.name || "USDC";
+
+        // Human-readable name: prefer pair's own name, else baseName-quoteName
+        const rawName: string = pair.name && !pair.name.startsWith("@")
+          ? pair.name.replace("/", "-")
+          : `${baseName}-${quoteName}`;
+
+        // Override with known labels
+        const label = SPOT_ASSET_LABELS[baseName];
+        const displayName = label ? `${rawName} (${label})` : rawName;
+
+        return {
+          coin: `@${index}`,
+          displayName,
+          baseName,
+          isSpot: true,
+          markPx: ctx.markPx || "0",
+          midPx: ctx.midPx || ctx.markPx || "0",
+          prevDayPx: ctx.prevDayPx || ctx.markPx || "0",
+          dayNtlVlm: ctx.dayNtlVlm || "0",
+          premium: "0",
+          openInterest: ctx.circulatingSupply || "0",
+          funding: "0",
+          maxLeverage: 1,
+          szDecimals: baseToken?.szDecimals ?? 2,
+          onlyIsolated: false,
+        } as HyperliquidTicker;
+      })
+      .filter((t): t is HyperliquidTicker => t !== null);
+  } catch (error) {
+    console.error("Error fetching spot tickers:", error);
+    return [];
   }
 }
 
