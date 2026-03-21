@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
@@ -15,10 +15,11 @@ import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useSubscription } from "@/hooks/use-subscription";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2 } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Zap } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 
 const timeframes = [
@@ -51,7 +52,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
-  const { hasAccess, isConnected } = useSubscription();
+  const { hasAccess, isConnected, isPro, isLoading: subLoading } = useSubscription();
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
@@ -129,6 +130,66 @@ export default function Trading({ visible = true }: TradingProps) {
     if (v >= 1e3) return `$${(v / 1e3).toFixed(2)}K`;
     return `$${v.toFixed(0)}`;
   };
+
+  // Show subscription gate if wallet connected but no active Pro subscription
+  if (!subLoading && isConnected && !isPro) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-background p-6">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
+              <Lock className="h-7 w-7 text-primary" />
+            </div>
+            <CardTitle className="text-xl">Pro Access Required</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Subscribe to Equilibrium Pro to access the live trading platform.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <div className="rounded-lg bg-muted/50 p-4 text-sm text-left space-y-2">
+              <p className="font-medium text-foreground">Pro Access includes:</p>
+              <ul className="text-muted-foreground space-y-1">
+                <li>✓ Live trading on Hyperliquid</li>
+                <li>✓ AI pattern detection signals</li>
+                <li>✓ 200+ perpetual and spot markets</li>
+                <li>✓ Real-time order book &amp; positions</li>
+              </ul>
+            </div>
+            <Link href="/pricing">
+              <Button className="w-full" size="lg" data-testid="button-subscribe-trading">
+                <Zap className="mr-2 h-4 w-4" />
+                Subscribe — £50/month
+              </Button>
+            </Link>
+            <p className="text-xs text-muted-foreground">
+              Already subscribed? Make sure you connected the same wallet used during checkout.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show connect wallet prompt if wallet not connected
+  if (!subLoading && !isConnected) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-background p-6">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl">Connect Your Wallet</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Connect your wallet to access the trading platform.
+            </p>
+          </CardHeader>
+          <CardContent className="text-center">
+            <p className="text-sm text-muted-foreground">
+              Use the Connect button in the top right corner to get started.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className={cn(
@@ -330,7 +391,7 @@ export default function Trading({ visible = true }: TradingProps) {
               isFullscreen && "chart-wrapper-mobile"
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
-                <div className="flex-1 min-h-0 relative">
+                <div className="flex-1 min-h-[300px] relative">
                   {(canShowIndicatorChart && showAIChart) || isSpot ? (
                     <PatternChart 
                       symbol={coin} 

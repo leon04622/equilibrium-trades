@@ -30,35 +30,23 @@ import Candles from "@/pages/candles";
 import Admin from "@/pages/admin";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-function Router() {
-  const [location] = useLocation();
-  
+function OtherRoutes() {
   return (
-    <>
-      {/* Keep Trading page always mounted to preserve chart drawings */}
-      <div style={{ display: location === "/trading" ? "block" : "none", height: "100%" }}>
-        <Trading visible={location === "/trading"} />
-      </div>
-      
-      {/* Other routes unmount normally */}
-      {location !== "/trading" && (
-        <Switch>
-          <Route path="/" component={Dashboard} />
-          <Route path="/patterns" component={Patterns} />
-          <Route path="/candles" component={Candles} />
-          <Route path="/learn" component={Learn} />
-          <Route path="/signals" component={Signals} />
-          <Route path="/heatmap" component={Heatmap} />
-          <Route path="/hyperliquid" component={Hyperliquid} />
-          <Route path="/pricing" component={Pricing} />
-          <Route path="/settings" component={Settings} />
-          <Route path="/portfolio" component={Portfolio} />
-          <Route path="/videos" component={Videos} />
-          <Route path="/admin" component={Admin} />
-          <Route component={NotFound} />
-        </Switch>
-      )}
-    </>
+    <Switch>
+      <Route path="/" component={Dashboard} />
+      <Route path="/patterns" component={Patterns} />
+      <Route path="/candles" component={Candles} />
+      <Route path="/learn" component={Learn} />
+      <Route path="/signals" component={Signals} />
+      <Route path="/heatmap" component={Heatmap} />
+      <Route path="/hyperliquid" component={Hyperliquid} />
+      <Route path="/pricing" component={Pricing} />
+      <Route path="/settings" component={Settings} />
+      <Route path="/portfolio" component={Portfolio} />
+      <Route path="/videos" component={Videos} />
+      <Route path="/admin" component={Admin} />
+      <Route component={NotFound} />
+    </Switch>
   );
 }
 
@@ -79,7 +67,7 @@ function App() {
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex h-screen w-full overflow-hidden">
                   <AppSidebar />
-                  <SidebarInset className="flex flex-col flex-1 min-w-0">
+                  <SidebarInset className="flex flex-col flex-1 min-w-0 overflow-hidden">
                     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-2 md:px-4 sticky top-0 z-50 bg-background">
                       <div className="flex items-center gap-2">
                         <SidebarTrigger 
@@ -93,14 +81,12 @@ function App() {
                         <ThemeToggle />
                       </div>
                     </header>
-                  <ScrollArea className="flex-1">
-                    <main className="min-h-0 pb-16 md:pb-0">
-                      <Router />
-                    </main>
-                  </ScrollArea>
-                </SidebarInset>
-              </div>
-              <MobileBottomNav />
+
+                    {/* Trading page: always-mounted, gets its own flex-1 container so h-full works on mobile */}
+                    <TradingLayout />
+                  </SidebarInset>
+                </div>
+                <MobileBottomNav />
               </SidebarProvider>
               <LiveChat />
               <Toaster />
@@ -111,6 +97,32 @@ function App() {
         </WalletProvider>
       </ThemeProvider>
     </QueryClientProvider>
+  );
+}
+
+function TradingLayout() {
+  const [location] = useLocation();
+  const isTrading = location === "/trading";
+
+  return (
+    <>
+      {/* Trading page: fixed-height container so the chart fills the screen properly on mobile */}
+      <div
+        className="flex-1 min-h-0 overflow-hidden"
+        style={{ display: isTrading ? "flex" : "none", flexDirection: "column" }}
+      >
+        <Trading visible={isTrading} />
+      </div>
+
+      {/* All other pages: scrollable */}
+      {!isTrading && (
+        <ScrollArea className="flex-1">
+          <main className="min-h-0 pb-16 md:pb-0">
+            <OtherRoutes />
+          </main>
+        </ScrollArea>
+      )}
+    </>
   );
 }
 
