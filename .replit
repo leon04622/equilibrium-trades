@@ -44,3 +44,8 @@ integrations = ["javascript_openai_ai_integrations:2.0.0", "javascript_object_st
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 60000
+
+[userenv]
+
+[userenv.shared]
+VITE_BUILDER_ADDRESS = "0xad9be64fd7a35d99a138b87cb212baefbcdcf045"
