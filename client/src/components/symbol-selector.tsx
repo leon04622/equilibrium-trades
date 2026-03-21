@@ -17,6 +17,7 @@ interface Ticker {
   markPx: string;
   midPx: string;
   prevDayPx: string;
+  dayNtlVlm?: string;
 }
 
 interface SymbolSelectorProps {
@@ -38,9 +39,13 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
 
-  const filteredTickers = tickers.filter(t => 
-    t.coin.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredTickers = tickers
+    .filter(t => t.coin.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const volA = parseFloat(a.dayNtlVlm || "0");
+      const volB = parseFloat(b.dayNtlVlm || "0");
+      return volB - volA;
+    });
 
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });

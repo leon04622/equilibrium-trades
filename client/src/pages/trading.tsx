@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
@@ -38,7 +39,10 @@ interface TradingProps {
 type MobileTab = "chart" | "orderbook" | "trades";
 
 export default function Trading({ visible = true }: TradingProps) {
-  const [coin, setCoin] = useState("BTC");
+  const [coin, setCoin] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("coin") || "BTC";
+  });
   const [timeframe, setTimeframe] = useState("5");
   const [showOrderBook, setShowOrderBook] = useState(false);
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
@@ -48,6 +52,19 @@ export default function Trading({ visible = true }: TradingProps) {
   const { toast } = useToast();
   const { updatePrices } = useTrading();
   const { hasAccess, isConnected } = useSubscription();
+  const [location] = useLocation();
+
+  // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
+  // update the selected coin. The component stays always-mounted so we watch the URL.
+  useEffect(() => {
+    if (location === "/trading") {
+      const params = new URLSearchParams(window.location.search);
+      const coinParam = params.get("coin");
+      if (coinParam) {
+        setCoin(coinParam);
+      }
+    }
+  }, [location]);
   
   // Chart with indicators (Volume/RSI/Stoch RSI) is free for all connected users
   const canShowIndicatorChart = isConnected;
