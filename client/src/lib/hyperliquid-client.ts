@@ -428,12 +428,23 @@ async function refreshAssetCache(): Promise<void> {
 }
 
 async function getAssetIndex(coin: string): Promise<number | null> {
+  // Spot market coins use "@N" format; their asset index is 10000 + N
+  if (coin.startsWith("@")) {
+    const n = parseInt(coin.slice(1), 10);
+    return isNaN(n) ? null : 10000 + n;
+  }
   await refreshAssetCache();
   return assetCache?.get(coin) ?? null;
 }
 
 function getAssetMeta(coin: string): { szDecimals: number; maxLeverage: number } {
+  // Spot markets have no leverage
+  if (coin.startsWith("@")) return { szDecimals: 2, maxLeverage: 1 };
   return assetMetaCache?.get(coin) ?? { szDecimals: 3, maxLeverage: 50 };
+}
+
+export function isSpotCoin(coin: string): boolean {
+  return coin.startsWith("@");
 }
 
 async function getMidPrice(coin: string): Promise<number | null> {

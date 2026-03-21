@@ -78,7 +78,10 @@ export default function Trading({ visible = true }: TradingProps) {
     }
   }, [canShowIndicatorChart, showAIChart]);
 
-  const tvSymbol = `BINANCE:${coin}USDT`;
+  // Spot markets use @N identifiers — TradingView has no equivalent, so we
+  // use the PatternChart (Hyperliquid native candles) as the primary chart for them.
+  const isSpot = coin.startsWith("@");
+  const tvSymbol = isSpot ? "" : `BINANCE:${coin}USDT`;
 
   const handleOrderSubmit = (order: any) => {
     toast({
@@ -168,20 +171,31 @@ export default function Trading({ visible = true }: TradingProps) {
             <p className="font-mono">{formatVolume(volume24h)}</p>
           </div>
           
-          <div className="hidden lg:block shrink-0">
-            <span className="text-muted-foreground">Open Interest</span>
-            <p className="font-mono">{formatVolume(openInterest)}</p>
-          </div>
+          {!isSpot && (
+            <div className="hidden lg:block shrink-0">
+              <span className="text-muted-foreground">Open Interest</span>
+              <p className="font-mono">{formatVolume(openInterest)}</p>
+            </div>
+          )}
           
-          <div className="hidden lg:block shrink-0">
-            <span className="text-muted-foreground">Funding</span>
-            <p className={cn(
-              "font-mono",
-              fundingRate >= 0 ? "text-bullish" : "text-bearish"
-            )}>
-              {(fundingRate * 100).toFixed(4)}%
-            </p>
-          </div>
+          {!isSpot && (
+            <div className="hidden lg:block shrink-0">
+              <span className="text-muted-foreground">Funding</span>
+              <p className={cn(
+                "font-mono",
+                fundingRate >= 0 ? "text-bullish" : "text-bearish"
+              )}>
+                {(fundingRate * 100).toFixed(4)}%
+              </p>
+            </div>
+          )}
+
+          {isSpot && (
+            <div className="hidden lg:block shrink-0">
+              <span className="text-muted-foreground">Type</span>
+              <p className="font-mono text-blue-400">Spot</p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -317,14 +331,14 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 min-h-0 relative">
-                  {canShowIndicatorChart && showAIChart ? (
+                  {(canShowIndicatorChart && showAIChart) || isSpot ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
                         { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                       }
                       currentPrice={price}
-                      showSignals={canUseAIPatterns}
+                      showSignals={canUseAIPatterns && !isSpot}
                       className="absolute inset-0" 
                     />
                   ) : (
@@ -348,14 +362,14 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {/* Desktop: Chart */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              {canShowIndicatorChart && showAIChart ? (
+              {(canShowIndicatorChart && showAIChart) || isSpot ? (
                 <PatternChart 
                   symbol={coin} 
                   interval={
                     { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
                   }
                   currentPrice={price}
-                  showSignals={canUseAIPatterns}
+                  showSignals={canUseAIPatterns && !isSpot}
                   className="h-full" 
                 />
               ) : (

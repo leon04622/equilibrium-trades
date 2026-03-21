@@ -10,6 +10,7 @@ import {
   trySetReferrer,
   setLeverage,
   getCoinMaxLeverage,
+  isSpotCoin,
 } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -34,17 +35,19 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const [leverage, setLeverage_] = useState(10);
   const [maxLev, setMaxLev] = useState(50);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSpot = isSpotCoin(coin);
 
   const { balance, refreshAccount, placeTPSL } = useTrading();
   const { isConnected, signer, connect } = useWallet();
   const { toast } = useToast();
 
   useEffect(() => {
+    if (isSpot) { setMaxLev(1); setLeverage_(1); return; }
     getCoinMaxLeverage(coin).then(max => {
       setMaxLev(max);
       setLeverage_(prev => Math.min(prev, max));
     });
-  }, [coin]);
+  }, [coin, isSpot]);
 
   const getExecPrice = () => {
     if (orderType === "market") return currentPrice;
@@ -58,7 +61,9 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   };
 
   const setPercent = (pct: number) => {
-    const maxQty = (balance * leverage) / Math.max(currentPrice, 1);
+    // Spot: can only spend available balance (no leverage); perps: leverage multiplied
+    const effectiveLeverage = isSpot ? 1 : leverage;
+    const maxQty = (balance * effectiveLeverage) / Math.max(currentPrice, 1);
     setSize((maxQty * pct / 100).toFixed(4));
   };
 
@@ -89,13 +94,16 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       }
     }
 
+    const isSpot = isSpotCoin(coin);
     setIsSubmitting(true);
     try {
       // Register referral code (best-effort, won't block order)
       await trySetReferrer(signer);
 
-      // Set leverage before placing order
-      await setLeverage(signer, coin, leverage, true);
+      // Set leverage before placing order (perps only — spot has no leverage)
+      if (!isSpot) {
+        await setLeverage(signer, coin, leverage, true);
+      }
 
       const result = await placeHyperliquidOrder(signer, {
         coin,
@@ -117,8 +125,10 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
 
       const fillPrice = result.avgPrice || getExecPrice();
       toast({
-        title: `${isBuy ? "Long" : "Short"} ${result.status === "filled" ? "Filled" : "Placed"}`,
-        description: `${qty} ${coin} @ $${fmt(fillPrice)} · ${leverage}x`,
+        title: `${isBuy ? "Buy" : "Sell"} ${result.status === "filled" ? "Filled" : "Placed"}`,
+        description: isSpot
+          ? `${qty} @ $${fmt(fillPrice)}`
+          : `${qty} ${coin} @ $${fmt(fillPrice)} · ${leverage}x`,
       });
 
       await refreshAccount();
@@ -166,7 +176,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   };
 
   const notionalValue = getSizeNum() * getExecPrice();
-  const marginRequired = leverage > 0 ? notionalValue / leverage : notionalValue;
+  const effectiveLeverage = isSpot ? 1 : leverage;
+  const marginRequired = effectiveLeverage > 0 ? notionalValue / effectiveLeverage : notionalValue;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -244,37 +255,46 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         </div>
       )}
 
-      {/* Leverage */}
-      <div className="space-y-1">
-        <div className="flex justify-between text-[11px]">
-          <span className="text-muted-foreground">Leverage</span>
-          <span className="text-[10px] text-muted-foreground">max {maxLev}x</span>
+      {/* Leverage — hidden for spot markets */}
+      {!isSpot && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[11px]">
+            <span className="text-muted-foreground">Leverage</span>
+            <span className="text-[10px] text-muted-foreground">max {maxLev}x</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="1"
+              max={maxLev}
+              value={leverage}
+              onChange={e => {
+                const v = parseInt(e.target.value);
+                if (!isNaN(v) && v >= 1 && v <= maxLev) setLeverage_(v);
+              }}
+              className="h-9 font-mono text-right w-20 shrink-0"
+              data-testid="input-leverage"
+            />
+            <span className="text-xs text-muted-foreground">x</span>
+            <input
+              type="range"
+              min="1"
+              max={maxLev}
+              value={leverage}
+              onChange={e => setLeverage_(parseInt(e.target.value))}
+              className="flex-1 accent-primary"
+              data-testid="slider-leverage"
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            min="1"
-            max={maxLev}
-            value={leverage}
-            onChange={e => {
-              const v = parseInt(e.target.value);
-              if (!isNaN(v) && v >= 1 && v <= maxLev) setLeverage_(v);
-            }}
-            className="h-9 font-mono text-right w-20 shrink-0"
-            data-testid="input-leverage"
-          />
-          <span className="text-xs text-muted-foreground">x</span>
-          <input
-            type="range"
-            min="1"
-            max={maxLev}
-            value={leverage}
-            onChange={e => setLeverage_(parseInt(e.target.value))}
-            className="flex-1 accent-primary"
-            data-testid="slider-leverage"
-          />
+      )}
+
+      {/* Spot info banner */}
+      {isSpot && (
+        <div className="rounded-md bg-blue-500/10 border border-blue-500/20 px-3 py-2 text-[11px] text-blue-400">
+          Spot market — buying/selling the actual token, no leverage.
         </div>
-      </div>
+      )}
 
       {/* TP / SL */}
       <div className="grid grid-cols-2 gap-2">
@@ -326,7 +346,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
           disabled={isSubmitting}
           data-testid="button-buy-long"
         >
-          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Buy / Long"}
+          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : isSpot ? "Buy" : "Buy / Long"}
         </Button>
         <Button
           className="h-11 font-semibold bg-bearish hover:bg-bearish/90 text-white"
@@ -334,7 +354,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
           disabled={isSubmitting}
           data-testid="button-sell-short"
         >
-          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sell / Short"}
+          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : isSpot ? "Sell" : "Sell / Short"}
         </Button>
       </div>
 
