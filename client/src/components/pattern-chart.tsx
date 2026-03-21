@@ -41,6 +41,7 @@ interface PatternChartProps {
   className?: string;
   currentPrice?: number;
   showSignals?: boolean;
+  hideIndicators?: boolean;
 }
 
 interface CandleData {
@@ -120,6 +121,7 @@ function PatternChartComponent({
   className = "",
   currentPrice = 0,
   showSignals = false,
+  hideIndicators = false,
 }: PatternChartProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -233,12 +235,13 @@ function PatternChartComponent({
   }), []);
 
   useEffect(() => {
-    if (!mainContainerRef.current || !rsiContainerRef.current || !stochContainerRef.current) return;
+    if (!mainContainerRef.current) return;
+    if (!hideIndicators && (!rsiContainerRef.current || !stochContainerRef.current)) return;
 
     // ── Main ──
     const mainChart = createChart(mainContainerRef.current, {
       ...chartBase(theme === "dark"),
-      timeScale: { borderColor: BORDER, timeVisible: true, visible: false, rightOffset: 5, barSpacing: 8 },
+      timeScale: { borderColor: BORDER, timeVisible: true, visible: hideIndicators, rightOffset: 5, barSpacing: 8 },
     });
     mainChartRef.current = mainChart;
 
@@ -271,60 +274,6 @@ function PatternChartComponent({
     });
     volumeSmaSeriesRef.current = volSmaSeries;
 
-    // ── RSI ──
-    const rsiChart = createChart(rsiContainerRef.current, {
-      ...chartBase(theme === "dark"),
-      layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
-      grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
-      timeScale: { borderColor: BORDER, visible: false, rightOffset: 5, barSpacing: 8 },
-      rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
-    });
-    rsiChartRef.current = rsiChart;
-
-    const rsiSeries = rsiChart.addSeries(LineSeries, {
-      color: "#7b5ea7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
-    });
-    rsiSeriesRef.current = rsiSeries;
-    rsiSeries.createPriceLine({ price: 70, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 50, color: "rgba(255,255,255,0.20)", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
-    rsiSeries.createPriceLine({ price: 30, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-
-    // ── Stoch RSI ──
-    const stochChart = createChart(stochContainerRef.current, {
-      ...chartBase(theme === "dark"),
-      layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
-      grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
-      timeScale: { borderColor: BORDER, timeVisible: true, rightOffset: 5, barSpacing: 8 },
-      rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
-    });
-    stochChartRef.current = stochChart;
-
-    const kSeries = stochChart.addSeries(LineSeries, {
-      color: "#2962ff", lineWidth: 2, title: "K", priceLineVisible: false, lastValueVisible: true,
-    });
-    stochKSeriesRef.current = kSeries;
-
-    const dSeries = stochChart.addSeries(LineSeries, {
-      color: "#ff6d00", lineWidth: 2, title: "D", priceLineVisible: false, lastValueVisible: true,
-    });
-    stochDSeriesRef.current = dSeries;
-
-    kSeries.createPriceLine({ price: 80, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-    kSeries.createPriceLine({ price: 20, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
-
-    // ── Time sync ──
-    const sync = (src: IChartApi, targets: IChartApi[]) => {
-      if (isSyncingRef.current) return;
-      isSyncingRef.current = true;
-      const r = src.timeScale().getVisibleLogicalRange();
-      if (r) targets.forEach(t => t.timeScale().setVisibleLogicalRange(r));
-      isSyncingRef.current = false;
-    };
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(mainChart, [rsiChart, stochChart]));
-    rsiChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(rsiChart, [mainChart, stochChart]));
-    stochChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(stochChart, [mainChart, rsiChart]));
-
-    // ── Resize observers ──
     const obs = (el: HTMLDivElement, chart: IChartApi) => {
       const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }));
       ro.observe(el);
@@ -332,22 +281,77 @@ function PatternChartComponent({
       return ro;
     };
     const r1 = obs(mainContainerRef.current!, mainChart);
-    const r2 = obs(rsiContainerRef.current!, rsiChart);
-    const r3 = obs(stochContainerRef.current!, stochChart);
+    const cleanups: (() => void)[] = [() => { r1.disconnect(); mainChart.remove(); mainChartRef.current = null; }];
+
+    if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
+      // ── RSI ──
+      const rsiChart = createChart(rsiContainerRef.current, {
+        ...chartBase(theme === "dark"),
+        layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
+        grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
+        timeScale: { borderColor: BORDER, visible: false, rightOffset: 5, barSpacing: 8 },
+        rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      });
+      rsiChartRef.current = rsiChart;
+
+      const rsiSeries = rsiChart.addSeries(LineSeries, {
+        color: "#7b5ea7", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+      });
+      rsiSeriesRef.current = rsiSeries;
+      rsiSeries.createPriceLine({ price: 70, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+      rsiSeries.createPriceLine({ price: 50, color: "rgba(255,255,255,0.20)", lineWidth: 1, lineStyle: LineStyle.Dotted, title: "", axisLabelVisible: false });
+      rsiSeries.createPriceLine({ price: 30, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+
+      // ── Stoch RSI ──
+      const stochChart = createChart(stochContainerRef.current, {
+        ...chartBase(theme === "dark"),
+        layout: { background: { type: ColorType.Solid, color: BG_IND }, textColor: TEXT },
+        grid: { vertLines: { color: "#252a40" }, horzLines: { color: "#252a40" } },
+        timeScale: { borderColor: BORDER, timeVisible: true, rightOffset: 5, barSpacing: 8 },
+        rightPriceScale: { borderColor: BORDER, autoScale: true, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      });
+      stochChartRef.current = stochChart;
+
+      const kSeries = stochChart.addSeries(LineSeries, {
+        color: "#2962ff", lineWidth: 2, title: "K", priceLineVisible: false, lastValueVisible: true,
+      });
+      stochKSeriesRef.current = kSeries;
+
+      const dSeries = stochChart.addSeries(LineSeries, {
+        color: "#ff6d00", lineWidth: 2, title: "D", priceLineVisible: false, lastValueVisible: true,
+      });
+      stochDSeriesRef.current = dSeries;
+
+      kSeries.createPriceLine({ price: 80, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+      kSeries.createPriceLine({ price: 20, color: "rgba(255,255,255,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, title: "", axisLabelVisible: false });
+
+      // ── Time sync ──
+      const sync = (src: IChartApi, targets: IChartApi[]) => {
+        if (isSyncingRef.current) return;
+        isSyncingRef.current = true;
+        const r = src.timeScale().getVisibleLogicalRange();
+        if (r) targets.forEach(t => t.timeScale().setVisibleLogicalRange(r));
+        isSyncingRef.current = false;
+      };
+      mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(mainChart, [rsiChart, stochChart]));
+      rsiChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(rsiChart, [mainChart, stochChart]));
+      stochChart.timeScale().subscribeVisibleLogicalRangeChange(() => sync(stochChart, [mainChart, rsiChart]));
+
+      const r2 = obs(rsiContainerRef.current!, rsiChart);
+      const r3 = obs(stochContainerRef.current!, stochChart);
+      cleanups.push(() => { r2.disconnect(); r3.disconnect(); rsiChart.remove(); stochChart.remove(); rsiChartRef.current = null; stochChartRef.current = null; });
+    }
+
     isInitialLoadRef.current = true;
 
-    return () => {
-      r1.disconnect(); r2.disconnect(); r3.disconnect();
-      mainChart.remove(); rsiChart.remove(); stochChart.remove();
-      mainChartRef.current = null; rsiChartRef.current = null; stochChartRef.current = null;
-    };
-  }, [theme, chartBase]);
+    return () => cleanups.forEach(fn => fn());
+  }, [theme, chartBase, hideIndicators]);
 
   // ── Data update ──
   useEffect(() => {
     if (!candles || !candleSeriesRef.current || !sma21SeriesRef.current || !sma200SeriesRef.current) return;
-    if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current || !rsiSeriesRef.current) return;
-    if (!stochKSeriesRef.current || !stochDSeriesRef.current) return;
+    if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
+    if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
     const sorted = [...candles].sort((a, b) => a.t - b.t);
     const closes = sorted.map(c => parsePrice(c.c));
@@ -375,23 +379,24 @@ function PatternChartComponent({
     const p200 = Math.min(sorted.length - 1, 200);
     if (p200 >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200));
 
-    const rsiData = calcRSI(closes, times, 14);
-    if (rsiData.length > 0) {
-      rsiSeriesRef.current.setData(rsiData);
-      setLastRSI(rsiData[rsiData.length - 1].value);
-    }
-
-    if (rsiData.length >= 14) {
-      const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
-      if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
-      if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
+    if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+      const rsiData = calcRSI(closes, times, 14);
+      if (rsiData.length > 0) {
+        rsiSeriesRef.current.setData(rsiData);
+        setLastRSI(rsiData[rsiData.length - 1].value);
+      }
+      if (rsiData.length >= 14) {
+        const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+        if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
+        if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
+      }
     }
 
     if (mainChartRef.current && isInitialLoadRef.current) {
       mainChartRef.current.timeScale().fitContent();
       isInitialLoadRef.current = false;
     }
-  }, [candles, parsePrice]);
+  }, [candles, parsePrice, hideIndicators]);
 
   // ── TP/SL/Entry/Liq price lines ──
   useEffect(() => {
@@ -489,44 +494,56 @@ function PatternChartComponent({
         ) : null}
       </div>
 
-      {/* ── Drag handle 1 ── */}
-      <div
-        onMouseDown={startDrag(0)}
-        className="flex-shrink-0 cursor-row-resize group"
-        style={{ height: HANDLE_PX, background: BORDER }}
-      >
-        <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
-      </div>
+      {!hideIndicators && (
+        <>
+          {/* ── Drag handle 1 ── */}
+          <div
+            onMouseDown={startDrag(0)}
+            className="flex-shrink-0 cursor-row-resize group"
+            style={{ height: HANDLE_PX, background: BORDER }}
+          >
+            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
+          </div>
 
-      {/* ── RSI pane ── */}
-      <div style={{ flexGrow: weights[1], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
-        <div ref={rsiContainerRef} className="absolute inset-0" />
-        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
-          <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
-          <span className="text-[10px] text-[#b2b5be] font-mono">14</span>
-          {lastRSI !== null && <span className="text-[10px] font-mono" style={{ color: "#a78bfa" }}>{lastRSI.toFixed(2)}</span>}
+          {/* ── RSI pane ── */}
+          <div style={{ flexGrow: weights[1], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
+            <div ref={rsiContainerRef} className="absolute inset-0" />
+            <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+              <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
+              <span className="text-[10px] text-[#b2b5be] font-mono">14</span>
+              {lastRSI !== null && <span className="text-[10px] font-mono" style={{ color: "#a78bfa" }}>{lastRSI.toFixed(2)}</span>}
+            </div>
+          </div>
+
+          {/* ── Drag handle 2 ── */}
+          <div
+            onMouseDown={startDrag(1)}
+            className="flex-shrink-0 cursor-row-resize group"
+            style={{ height: HANDLE_PX, background: BORDER }}
+          >
+            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
+          </div>
+
+          {/* ── Stoch RSI pane ── */}
+          <div style={{ flexGrow: weights[2], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
+            <div ref={stochContainerRef} className="absolute inset-0" />
+            <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+              <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
+              <span className="text-[10px] text-[#b2b5be] font-mono">14 14 3 3</span>
+              {lastK !== null && <span className="text-[10px] font-mono" style={{ color: "#2962ff" }}>{lastK.toFixed(2)}</span>}
+              {lastD !== null && <span className="text-[10px] font-mono" style={{ color: "#ff6d00" }}>{lastD.toFixed(2)}</span>}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Hidden RSI/Stoch containers — kept in DOM so refs are always mounted */}
+      {hideIndicators && (
+        <div style={{ display: "none" }}>
+          <div ref={rsiContainerRef} />
+          <div ref={stochContainerRef} />
         </div>
-      </div>
-
-      {/* ── Drag handle 2 ── */}
-      <div
-        onMouseDown={startDrag(1)}
-        className="flex-shrink-0 cursor-row-resize group"
-        style={{ height: HANDLE_PX, background: BORDER }}
-      >
-        <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
-      </div>
-
-      {/* ── Stoch RSI pane ── */}
-      <div style={{ flexGrow: weights[2], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
-        <div ref={stochContainerRef} className="absolute inset-0" />
-        <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
-          <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
-          <span className="text-[10px] text-[#b2b5be] font-mono">14 14 3 3</span>
-          {lastK !== null && <span className="text-[10px] font-mono" style={{ color: "#2962ff" }}>{lastK.toFixed(2)}</span>}
-          {lastD !== null && <span className="text-[10px] font-mono" style={{ color: "#ff6d00" }}>{lastD.toFixed(2)}</span>}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

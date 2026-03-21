@@ -47,7 +47,8 @@ export default function Trading({ visible = true }: TradingProps) {
   const [timeframe, setTimeframe] = useState("5");
   const [showOrderBook, setShowOrderBook] = useState(false);
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
-  const [showAIChart, setShowAIChart] = useState(false);
+  const [showAIChart, setShowAIChart] = useState(true);
+  const [showIndicators, setShowIndicators] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
@@ -364,25 +365,28 @@ export default function Trading({ visible = true }: TradingProps) {
             
             <div className="hidden md:flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                {canShowIndicatorChart ? (
-                  <>
-                    <Switch 
-                      checked={showAIChart} 
-                      onCheckedChange={setShowAIChart}
-                      id="ai-chart-toggle"
-                    />
-                    <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
-                      <Brain className="h-3 w-3" />
-                      AI Patterns
-                    </label>
-                  </>
-                ) : (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Brain className="h-3 w-3" />
-                    AI Patterns
-                  </span>
-                )}
+                <Switch 
+                  checked={showAIChart} 
+                  onCheckedChange={setShowAIChart}
+                  id="ai-chart-toggle"
+                />
+                <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                  <Brain className="h-3 w-3" />
+                  AI Chart
+                </label>
               </div>
+              {showAIChart && (
+                <div className="flex items-center gap-1.5">
+                  <Switch 
+                    checked={showIndicators} 
+                    onCheckedChange={setShowIndicators}
+                    id="indicators-toggle"
+                  />
+                  <label htmlFor="indicators-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                    RSI / Stoch
+                  </label>
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
                 <Switch 
                   checked={showOrderBook} 
@@ -407,7 +411,7 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 relative" style={{ minHeight: 'calc(100dvh - 16rem)' }}>
-                  {(canShowIndicatorChart && showAIChart) || isSpot ? (
+                  {showAIChart || isSpot ? (
                     <PatternChart 
                       symbol={coin} 
                       interval={
@@ -415,6 +419,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       }
                       currentPrice={price}
                       showSignals={canUseAIPatterns && !isSpot}
+                      hideIndicators={!showIndicators}
                       className="absolute inset-0" 
                     />
                   ) : (
@@ -436,7 +441,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {/* Desktop: Chart */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              {(canShowIndicatorChart && showAIChart) || isSpot ? (
+              {showAIChart || isSpot ? (
                 <PatternChart 
                   symbol={coin} 
                   interval={
@@ -444,12 +449,11 @@ export default function Trading({ visible = true }: TradingProps) {
                   }
                   currentPrice={price}
                   showSignals={canUseAIPatterns && !isSpot}
+                  hideIndicators={!showIndicators}
                   className="h-full" 
                 />
               ) : (
-                <>
-                  <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
-                </>
+                <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
               )}
             </div>
             
