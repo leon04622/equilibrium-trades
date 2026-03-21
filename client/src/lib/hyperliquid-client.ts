@@ -388,6 +388,9 @@ export interface OpenOrder {
 }
 
 let assetCache: Map<string, number> | null = null;
+let assetCacheTime = 0;
+let assetMetaCache: Map<string, { szDecimals: number; maxLeverage: number }> | null = null;
+const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes — picks up any new markets Hyperliquid lists
 
 // Monotonic nonce generator - ensures each nonce is unique and increasing
 let lastNonce = 0;
@@ -398,28 +401,39 @@ function getUniqueNonce(): number {
   return lastNonce;
 }
 
-async function getAssetIndex(coin: string): Promise<number | null> {
-  if (!assetCache) {
-    try {
-      const response = await fetch(INFO_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "meta" }),
+async function refreshAssetCache(): Promise<void> {
+  const now = Date.now();
+  if (assetCache && now - assetCacheTime < ASSET_CACHE_TTL) return;
+  try {
+    const response = await fetch(INFO_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "meta" }),
+    });
+    if (!response.ok) return;
+    const meta = await response.json();
+    assetCache = new Map();
+    assetMetaCache = new Map();
+    meta.universe.forEach((asset: any, index: number) => {
+      assetCache!.set(asset.name, index);
+      assetMetaCache!.set(asset.name, {
+        szDecimals: asset.szDecimals ?? 3,
+        maxLeverage: asset.maxLeverage ?? 50,
       });
-      
-      if (!response.ok) return null;
-      
-      const meta = await response.json();
-      assetCache = new Map();
-      meta.universe.forEach((asset: any, index: number) => {
-        assetCache!.set(asset.name, index);
-      });
-    } catch {
-      return null;
-    }
+    });
+    assetCacheTime = now;
+  } catch {
+    // keep existing cache if refresh fails
   }
-  
-  return assetCache.get(coin) ?? null;
+}
+
+async function getAssetIndex(coin: string): Promise<number | null> {
+  await refreshAssetCache();
+  return assetCache?.get(coin) ?? null;
+}
+
+function getAssetMeta(coin: string): { szDecimals: number; maxLeverage: number } {
+  return assetMetaCache?.get(coin) ?? { szDecimals: 3, maxLeverage: 50 };
 }
 
 async function getMidPrice(coin: string): Promise<number | null> {
@@ -520,28 +534,9 @@ export async function getPositions(address: string): Promise<Position[]> {
     }));
 }
 
-let cachedMeta: { universe: Array<{ name: string; maxLeverage: number; szDecimals: number }> } | null = null;
-let metaFetchTime = 0;
-
 export async function getCoinMaxLeverage(coin: string): Promise<number> {
-  const now = Date.now();
-  if (!cachedMeta || now - metaFetchTime > 5 * 60 * 1000) {
-    try {
-      const response = await fetch(INFO_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "meta" }),
-      });
-      if (response.ok) {
-        cachedMeta = await response.json();
-        metaFetchTime = now;
-      }
-    } catch {
-      return 50;
-    }
-  }
-  const coinInfo = cachedMeta?.universe.find(u => u.name === coin);
-  return coinInfo?.maxLeverage ?? 50;
+  await refreshAssetCache();
+  return getAssetMeta(coin).maxLeverage;
 }
 
 export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
@@ -584,15 +579,12 @@ function floatToWire(x: number): string {
 
 // Format price for a specific coin - each coin has a specific tick size
 function formatPrice(price: number, coin: string): string {
-  // BTC uses tick size of 1 (whole numbers only)
-  if (coin === "BTC") {
-    return Math.round(price).toString();
-  }
-  // ETH uses tick size of 0.1
-  if (coin === "ETH") {
-    return (Math.round(price * 10) / 10).toString();
-  }
-  // Other coins use standard 5 sig fig formatting
+  // Use live metadata from Hyperliquid to determine tick size per coin.
+  // szDecimals drives size precision; Hyperliquid prices use 5 significant figures.
+  // High-price coins (BTC) round to whole numbers; mid-price coins use 1dp;
+  // low-price coins use floatToWire (5 sig figs). This matches the exchange rules.
+  if (price >= 10000) return Math.round(price).toString();
+  if (price >= 1000) return (Math.round(price * 10) / 10).toString();
   return floatToWire(price);
 }
 
@@ -728,11 +720,17 @@ export async function placeOrder(
     const nonce = getUniqueNonce();
     console.log("Using nonce:", nonce);
 
-    const action = {
+    const action: Record<string, any> = {
       type: "order",
       orders: [orderWire],
       grouping: "na",
     };
+
+    // Include builder fee in every order so the platform earns on each trade
+    // (requires the user to have approved the builder fee via approveBuilderFee)
+    if (BUILDER_ADDRESS) {
+      action.builder = { b: BUILDER_ADDRESS, f: 3 }; // f=3 means 0.03% (3 ten-thousandths)
+    }
 
     console.log("Requesting signature for action:", action);
     const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);

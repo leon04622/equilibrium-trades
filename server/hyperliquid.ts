@@ -21,6 +21,9 @@ export interface HyperliquidTicker {
   premium: string;
   openInterest: string;
   funding: string;
+  maxLeverage: number;
+  szDecimals: number;
+  onlyIsolated?: boolean;
 }
 
 export interface OrderBookLevel {
@@ -114,7 +117,7 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
     const meta = metaAndAssetCtxs[0];
     const assetCtxs = metaAndAssetCtxs[1] || [];
     
-    // Combine into ticker format with 24h change
+    // Combine into ticker format with 24h change and market metadata
     return meta.universe.map((coin: any, index: number) => {
       const currentPrice = parseFloat(mids[coin.name] || "0");
       const assetCtx = assetCtxs[index] || {};
@@ -123,11 +126,14 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
         coin: coin.name,
         markPx: mids[coin.name] || "0",
         midPx: mids[coin.name] || "0",
-        prevDayPx: assetCtx.prevDayPx || String(currentPrice), // Use real prevDayPx from API
+        prevDayPx: assetCtx.prevDayPx || String(currentPrice),
         dayNtlVlm: assetCtx.dayNtlVlm || "0",
         premium: assetCtx.premium || "0",
         openInterest: assetCtx.openInterest || "0",
         funding: assetCtx.funding || "0",
+        maxLeverage: coin.maxLeverage || 50,
+        szDecimals: coin.szDecimals ?? 3,
+        onlyIsolated: coin.onlyIsolated || false,
       };
     });
   } catch (error) {
@@ -147,6 +153,8 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
       premium: "0",
       openInterest: "0",
       funding: "0",
+      maxLeverage: coin === "BTC" || coin === "ETH" ? 50 : 20,
+      szDecimals: coin === "BTC" ? 5 : coin === "ETH" ? 4 : 2,
     }));
   }
 }

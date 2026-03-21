@@ -18,6 +18,8 @@ interface Ticker {
   midPx: string;
   prevDayPx: string;
   dayNtlVlm?: string;
+  maxLeverage?: number;
+  onlyIsolated?: boolean;
 }
 
 interface SymbolSelectorProps {
@@ -135,7 +137,9 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
                       </div>
                       <div className="text-left">
                         <p className="font-mono font-medium text-sm">{ticker.coin}/USDC</p>
-                        <p className="text-xs text-muted-foreground">Perpetual</p>
+                        <p className="text-xs text-muted-foreground">
+                          {ticker.onlyIsolated ? "Isolated" : "Perp"} · {ticker.maxLeverage || 50}x max
+                        </p>
                       </div>
                     </div>
                     <div className="text-right">
