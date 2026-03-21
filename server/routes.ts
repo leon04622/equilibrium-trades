@@ -17,6 +17,18 @@ import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
 
+// ── Simple in-memory cache ──
+interface CacheEntry { data: any; expires: number; }
+const cache = new Map<string, CacheEntry>();
+function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const entry = cache.get(key);
+  if (entry && Date.now() < entry.expires) return Promise.resolve(entry.data as T);
+  return fn().then(data => {
+    cache.set(key, { data, expires: Date.now() + ttlMs });
+    return data;
+  });
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -191,10 +203,10 @@ export async function registerRoutes(
 
   // ============ HYPERLIQUID API ROUTES ============
 
-  // Get available coins from Hyperliquid
-  app.get("/api/hyperliquid/coins", async (req: Request, res: Response) => {
+  // Get available coins from Hyperliquid — cached 60 s (coin list changes rarely)
+  app.get("/api/hyperliquid/coins", async (_req: Request, res: Response) => {
     try {
-      const meta = await getAvailableCoins();
+      const meta = await cached("hl:coins", 60_000, () => getAvailableCoins());
       res.json(meta.universe);
     } catch (error) {
       console.error("Error fetching Hyperliquid coins:", error);
@@ -202,10 +214,12 @@ export async function registerRoutes(
     }
   });
 
-  // Get all tickers with prices (perps + spot)
-  app.get("/api/hyperliquid/tickers", async (req: Request, res: Response) => {
+  // Get all tickers with prices (perps + spot) — cached 3 s
+  app.get("/api/hyperliquid/tickers", async (_req: Request, res: Response) => {
     try {
-      const [perpTickers, spotTickers] = await Promise.all([getAllTickers(), getSpotTickers()]);
+      const [perpTickers, spotTickers] = await cached("hl:tickers", 3_000, () =>
+        Promise.all([getAllTickers(), getSpotTickers()])
+      );
       res.json([...perpTickers, ...spotTickers]);
     } catch (error) {
       console.error("Error fetching Hyperliquid tickers:", error);

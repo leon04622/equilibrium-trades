@@ -49,3 +49,5 @@ timeoutMs = 60000
 
 [userenv.shared]
 VITE_BUILDER_ADDRESS = "0xad9be64fd7a35d99a138b87cb212baefbcdcf045"
+HYPERLIQUID_API_URL = "https://api.hyperliquid.xyz"
+CHAIN_ID = "42161"

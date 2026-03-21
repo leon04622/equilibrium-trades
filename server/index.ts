@@ -138,16 +138,21 @@ async function initStripe() {
     next();
   });
 
+  // ── Health check (required by Replit autoscale) ──
+  app.get("/health", (_req, res) => {
+    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   await registerRoutes(httpServer, app);
 
   heatmapWSManager.initialize(httpServer);
 
+  // ── Global error handler ──
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
+    console.error(`[error] ${status} ${message}`, err.stack || "");
     res.status(status).json({ message });
-    throw err;
   });
 
   if (process.env.NODE_ENV === "production") {
