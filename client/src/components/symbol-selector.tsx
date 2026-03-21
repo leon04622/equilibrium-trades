@@ -1,14 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, ChevronDown, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, ChevronDown, Star, ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +12,8 @@ interface Ticker {
   midPx: string;
   prevDayPx: string;
   dayNtlVlm?: string;
+  openInterest?: string;
+  funding?: string;
   maxLeverage?: number;
   onlyIsolated?: boolean;
 }
@@ -27,142 +23,305 @@ interface SymbolSelectorProps {
   onSymbolChange: (symbol: string) => void;
 }
 
+type SortKey = "vol" | "oi" | "change" | "price" | "funding";
+type SortDir = "desc" | "asc";
+type Category = "all" | "trending" | "favorites";
+
+const FAVORITES_KEY = "hl_favorites";
+
+function loadFavorites(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set(["BTC", "ETH", "SOL"]);
+  } catch {
+    return new Set(["BTC", "ETH", "SOL"]);
+  }
+}
+
+function saveFavorites(favs: Set<string>) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favs]));
+}
+
+function fmtPrice(p: number) {
+  if (p >= 10000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (p >= 100) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(3);
+  if (p >= 0.001) return p.toFixed(4);
+  return p.toFixed(6);
+}
+
+function fmtVol(v: number) {
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v.toFixed(0)}`;
+}
+
+function fmtFunding(f: number) {
+  return `${f >= 0 ? "+" : ""}${(f * 100).toFixed(4)}%`;
+}
+
 export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [category, setCategory] = useState<Category>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("vol");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const { data: tickers = [], isLoading } = useQuery<Ticker[]>({
     queryKey: ["/api/hyperliquid/tickers"],
-    refetchInterval: 5000,
+    refetchInterval: 3000,
   });
 
   const currentTicker = tickers.find(t => t.coin === currentSymbol);
   const price = currentTicker ? parseFloat(currentTicker.markPx) : 0;
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+  const currentLeverage = currentTicker?.maxLeverage || 50;
 
-  const filteredTickers = tickers
-    .filter(t => t.coin.toLowerCase().includes(search.toLowerCase()))
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (
+        panelRef.current && !panelRef.current.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => d === "desc" ? "asc" : "desc");
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  function toggleFavorite(e: React.MouseEvent, coin: string) {
+    e.stopPropagation();
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (next.has(coin)) next.delete(coin);
+      else next.add(coin);
+      saveFavorites(next);
+      return next;
+    });
+  }
+
+  const processed = tickers.map(t => {
+    const px = parseFloat(t.markPx) || 0;
+    const prev = parseFloat(t.prevDayPx) || px;
+    const chg = prev > 0 ? ((px - prev) / prev) * 100 : 0;
+    const vol = parseFloat(t.dayNtlVlm || "0");
+    const oi = parseFloat(t.openInterest || "0");
+    const fund = parseFloat(t.funding || "0");
+    return { ...t, px, chg, vol, oi, fund };
+  });
+
+  const filtered = processed
+    .filter(t => {
+      if (search) return t.coin.toLowerCase().includes(search.toLowerCase());
+      if (category === "trending") return t.vol > 1_000_000;
+      if (category === "favorites") return favorites.has(t.coin);
+      return true;
+    })
     .sort((a, b) => {
-      const volA = parseFloat(a.dayNtlVlm || "0");
-      const volB = parseFloat(b.dayNtlVlm || "0");
-      return volB - volA;
+      let av = 0, bv = 0;
+      if (sortKey === "vol") { av = a.vol; bv = b.vol; }
+      else if (sortKey === "oi") { av = a.oi; bv = b.oi; }
+      else if (sortKey === "change") { av = a.chg; bv = b.chg; }
+      else if (sortKey === "price") { av = a.px; bv = b.px; }
+      else if (sortKey === "funding") { av = a.fund; bv = b.fund; }
+      return sortDir === "desc" ? bv - av : av - bv;
     });
 
-  const formatPrice = (p: number) => {
-    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    if (p >= 1) return p.toFixed(2);
-    return p.toFixed(4);
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
+    return sortDir === "desc"
+      ? <ArrowDown className="h-3 w-3 text-primary" />
+      : <ArrowUp className="h-3 w-3 text-primary" />;
   };
 
+  const ColHeader = ({ label, col, className }: { label: string; col: SortKey; className?: string }) => (
+    <button
+      onClick={() => toggleSort(col)}
+      className={cn("flex items-center gap-0.5 text-[10px] text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors", className)}
+    >
+      {label}
+      <SortIcon col={col} />
+    </button>
+  );
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button 
-          variant="ghost" 
-          className="h-auto py-1 px-2 gap-2 font-mono hover-elevate"
-          data-testid="button-symbol-selector"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10">
-            <span className="text-xs font-bold text-primary">
-              {currentSymbol?.slice(0, 1) || "B"}
-            </span>
-          </div>
-          <div className="text-left">
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold">{currentSymbol || "BTC"}-USDC</span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            </div>
-            {isLoading ? (
-              <Skeleton className="h-4 w-24" />
-            ) : (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-semibold">{formatPrice(price)}</span>
-                <span className={cn(
-                  "text-xs",
-                  change >= 0 ? "text-bullish" : "text-bearish"
-                )}>
-                  {change >= 0 ? "+" : ""}{change.toFixed(2)}%
-                </span>
-              </div>
-            )}
-          </div>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
-        <div className="p-3 border-b">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search markets..."
-              className="pl-8"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              data-testid="input-symbol-search"
-            />
+    <div className="relative">
+      {/* Trigger button */}
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent transition-colors"
+        data-testid="button-symbol-selector"
+      >
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20">
+          <span className="text-[11px] font-bold text-primary">
+            {currentSymbol?.slice(0, 1) || "B"}
+          </span>
+        </div>
+        <div className="text-left">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-bold">{currentSymbol || "BTC"}-USDC</span>
+            <span className="text-[10px] font-semibold text-muted-foreground border border-border rounded px-1 py-0">{currentLeverage}x</span>
+            <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
           </div>
         </div>
-        <ScrollArea className="h-80">
-          <div className="p-2">
+      </button>
+
+      {/* Market panel */}
+      {open && (
+        <div
+          ref={panelRef}
+          className="absolute top-full left-0 mt-1 z-50 w-[680px] rounded-lg border border-border bg-card shadow-2xl overflow-hidden"
+          style={{ maxHeight: "calc(100vh - 120px)" }}
+        >
+          {/* Search bar + category tabs */}
+          <div className="border-b border-border">
+            <div className="flex items-center gap-2 p-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search markets..."
+                  className="pl-8 h-8 text-sm bg-background"
+                  value={search}
+                  onChange={e => { setSearch(e.target.value); if (e.target.value) setCategory("all"); }}
+                  data-testid="input-symbol-search"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Category tabs */}
+            <div className="flex items-center gap-0 px-2 pb-0">
+              {(["all", "trending", "favorites"] as Category[]).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => { setCategory(cat); setSearch(""); }}
+                  className={cn(
+                    "px-3 py-2 text-xs font-medium capitalize border-b-2 transition-colors",
+                    category === cat && !search
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {cat === "trending" ? "🔥 Trending" : cat === "favorites" ? "⭐ Favorites" : "All"}
+                </button>
+              ))}
+              <div className="ml-auto pr-1 text-[10px] text-muted-foreground">
+                {filtered.length} markets
+              </div>
+            </div>
+          </div>
+
+          {/* Table header */}
+          <div className="grid grid-cols-[20px_1fr_100px_90px_80px_100px_110px] items-center gap-1 px-3 py-2 border-b border-border/50 bg-muted/30">
+            <div />
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Symbol</span>
+            <ColHeader label="Last Price" col="price" className="justify-end" />
+            <ColHeader label="24h Change" col="change" className="justify-end" />
+            <ColHeader label="Funding" col="funding" className="justify-end" />
+            <ColHeader label="Volume" col="vol" className="justify-end" />
+            <ColHeader label="Open Interest" col="oi" className="justify-end" />
+          </div>
+
+          {/* Rows */}
+          <div className="overflow-y-auto" style={{ maxHeight: "420px" }}>
             {isLoading ? (
-              <div className="space-y-2 p-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <Skeleton key={i} className="h-9 w-full" />
                 ))}
               </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                No markets found
+              </div>
             ) : (
-              filteredTickers.map((ticker) => {
-                const tickerPrice = parseFloat(ticker.markPx);
-                const tickerPrevPrice = parseFloat(ticker.prevDayPx) || tickerPrice;
-                const tickerChange = tickerPrevPrice > 0 
-                  ? ((tickerPrice - tickerPrevPrice) / tickerPrevPrice) * 100 
-                  : 0;
-
-                return (
-                  <button
-                    key={ticker.coin}
+              filtered.map(ticker => (
+                <button
+                  key={ticker.coin}
+                  className={cn(
+                    "w-full grid grid-cols-[20px_1fr_100px_90px_80px_100px_110px] items-center gap-1 px-3 py-2 text-left hover:bg-accent/50 transition-colors",
+                    currentSymbol === ticker.coin && "bg-primary/10 hover:bg-primary/15"
+                  )}
+                  onClick={() => { onSymbolChange(ticker.coin); setOpen(false); }}
+                  data-testid={`symbol-${ticker.coin}`}
+                >
+                  {/* Star */}
+                  <span
+                    onClick={e => toggleFavorite(e, ticker.coin)}
                     className={cn(
-                      "w-full flex items-center justify-between p-2 rounded-md hover-elevate transition-colors",
-                      currentSymbol === ticker.coin && "bg-accent"
+                      "flex items-center justify-center cursor-pointer transition-colors",
+                      favorites.has(ticker.coin) ? "text-yellow-400" : "text-muted-foreground/30 hover:text-yellow-300"
                     )}
-                    onClick={() => {
-                      onSymbolChange(ticker.coin);
-                      setOpen(false);
-                    }}
-                    data-testid={`symbol-${ticker.coin}`}
+                    data-testid={`star-${ticker.coin}`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                        {ticker.coin.slice(0, 2)}
-                      </div>
-                      <div className="text-left">
-                        <p className="font-mono font-medium text-sm">{ticker.coin}/USDC</p>
-                        <p className="text-xs text-muted-foreground">
-                          {ticker.onlyIsolated ? "Isolated" : "Perp"} · {ticker.maxLeverage || 50}x max
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-sm">${formatPrice(tickerPrice)}</p>
-                      <div className={cn(
-                        "flex items-center justify-end gap-0.5 text-xs",
-                        tickerChange >= 0 ? "text-bullish" : "text-bearish"
-                      )}>
-                        {tickerChange >= 0 ? (
-                          <TrendingUp className="h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3" />
-                        )}
-                        <span>{tickerChange >= 0 ? "+" : ""}{tickerChange.toFixed(2)}%</span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
+                    <Star className="h-3 w-3" fill={favorites.has(ticker.coin) ? "currentColor" : "none"} />
+                  </span>
+
+                  {/* Symbol + leverage */}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono text-sm font-semibold truncate">{ticker.coin}-USDC</span>
+                    <span className={cn(
+                      "shrink-0 text-[10px] font-medium px-1 rounded border",
+                      ticker.onlyIsolated
+                        ? "text-orange-400 border-orange-400/30 bg-orange-400/10"
+                        : "text-primary border-primary/30 bg-primary/10"
+                    )}>
+                      {ticker.maxLeverage || 50}x
+                    </span>
+                  </div>
+
+                  {/* Last Price */}
+                  <span className="font-mono text-sm text-right">
+                    {fmtPrice(ticker.px)}
+                  </span>
+
+                  {/* 24h Change */}
+                  <span className={cn(
+                    "font-mono text-sm text-right",
+                    ticker.chg >= 0 ? "text-bullish" : "text-bearish"
+                  )}>
+                    {ticker.chg >= 0 ? "+" : ""}{ticker.chg.toFixed(2)}%
+                  </span>
+
+                  {/* Funding */}
+                  <span className={cn(
+                    "font-mono text-xs text-right",
+                    ticker.fund >= 0 ? "text-bullish" : "text-bearish"
+                  )}>
+                    {fmtFunding(ticker.fund)}
+                  </span>
+
+                  {/* Volume */}
+                  <span className="font-mono text-xs text-right text-muted-foreground">
+                    {fmtVol(ticker.vol)}
+                  </span>
+
+                  {/* Open Interest */}
+                  <span className="font-mono text-xs text-right text-muted-foreground">
+                    {fmtVol(ticker.oi)}
+                  </span>
+                </button>
+              ))
             )}
           </div>
-        </ScrollArea>
-      </PopoverContent>
-    </Popover>
+        </div>
+      )}
+    </div>
   );
 }
