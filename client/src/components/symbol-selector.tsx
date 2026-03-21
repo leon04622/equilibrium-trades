@@ -32,6 +32,47 @@ type Category = "all" | "perps" | "spot" | "trending" | "favorites";
 
 const FAVORITES_KEY = "hl_favorites";
 
+// Search aliases: common terms → API coin identifiers (trading always uses the coin ID, not the alias)
+const SEARCH_ALIASES: Record<string, string[]> = {
+  gold:       ["PAXG", "XAUT0"],
+  silver:     ["SLV"],
+  bitcoin:    ["BTC"],
+  btc:        ["BTC"],
+  ethereum:   ["ETH"],
+  eth:        ["ETH"],
+  solana:     ["SOL"],
+  sol:        ["SOL"],
+  dogecoin:   ["DOGE"],
+  doge:       ["DOGE"],
+  ripple:     ["XRP"],
+  xrp:        ["XRP"],
+  chainlink:  ["LINK"],
+  avalanche:  ["AVAX"],
+  avax:       ["AVAX"],
+  arbitrum:   ["ARB"],
+  optimism:   ["OP"],
+  nasdaq:     ["QQQ"],
+  amazon:     ["AMZN"],
+  microsoft:  ["MSFT"],
+  apple:      ["AAPL"],
+  nvidia:     ["NVDA"],
+  tesla:      ["TSLA"],
+  sui:        ["SUI"],
+  pepe:       ["PEPE"],
+};
+
+/** Returns the set of coins boosted to the top for the given query (or empty set). */
+function getAliasCoins(query: string): Set<string> {
+  const q = query.trim().toLowerCase();
+  const result = new Set<string>();
+  for (const [alias, coins] of Object.entries(SEARCH_ALIASES)) {
+    if (alias.startsWith(q) || q.startsWith(alias)) {
+      coins.forEach(c => result.add(c));
+    }
+  }
+  return result;
+}
+
 function loadFavorites(): Set<string> {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY);
@@ -135,13 +176,19 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
     return { ...t, px, chg, vol, oi, fund };
   });
 
+  // Resolve alias coins for the current search term so they bubble up first
+  const aliasBoosted = search ? getAliasCoins(search) : new Set<string>();
+
   const filtered = processed
     .filter(t => {
       if (search) {
         const q = search.toLowerCase();
-        return t.coin.toLowerCase().includes(q) ||
+        const textMatch =
+          t.coin.toLowerCase().includes(q) ||
           (t.displayName || "").toLowerCase().includes(q) ||
           (t.baseName || "").toLowerCase().includes(q);
+        // Also include any alias-boosted coin even if its text doesn't literally contain the query
+        return textMatch || aliasBoosted.has(t.coin);
       }
       if (category === "perps") return !t.isSpot;
       if (category === "spot") return !!t.isSpot;
@@ -150,6 +197,12 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
       return true;
     })
     .sort((a, b) => {
+      // Alias-boosted results always come first when searching
+      if (search) {
+        const aBoost = aliasBoosted.has(a.coin) ? 0 : 1;
+        const bBoost = aliasBoosted.has(b.coin) ? 0 : 1;
+        if (aBoost !== bBoost) return aBoost - bBoost;
+      }
       let av = 0, bv = 0;
       if (sortKey === "vol") { av = a.vol; bv = b.vol; }
       else if (sortKey === "oi") { av = a.oi; bv = b.oi; }
@@ -306,6 +359,11 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
                   {/* Symbol + leverage / spot badge */}
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="font-mono text-sm font-semibold truncate">{getTickerLabel(ticker)}</span>
+                    {search && aliasBoosted.has(ticker.coin) && (
+                      <span className="shrink-0 text-[9px] font-medium px-1 rounded border text-amber-400 border-amber-400/30 bg-amber-400/10">
+                        alias
+                      </span>
+                    )}
                     {ticker.isSpot ? (
                       <span className="shrink-0 text-[10px] font-medium px-1 rounded border text-blue-400 border-blue-400/30 bg-blue-400/10">
                         Spot
