@@ -290,10 +290,12 @@ export async function getCandles(
     // Need enough candles to display patterns (at least 100-200 candles)
     const intervalMs: Record<string, number> = {
       "1m": 60 * 1000,
+      "3m": 3 * 60 * 1000,
       "5m": 5 * 60 * 1000,
       "15m": 15 * 60 * 1000,
       "30m": 30 * 60 * 1000,
       "1h": 60 * 60 * 1000,
+      "2h": 2 * 60 * 60 * 1000,
       "4h": 4 * 60 * 60 * 1000,
       "1d": 24 * 60 * 60 * 1000,
     };

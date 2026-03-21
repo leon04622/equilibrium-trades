@@ -29,6 +29,7 @@ const timeframes = [
   { value: "15", label: "15m" },
   { value: "30", label: "30m" },
   { value: "60", label: "1h" },
+  { value: "120", label: "2h" },
   { value: "240", label: "4h" },
   { value: "D", label: "1D" },
 ];
@@ -454,7 +455,7 @@ export default function Trading({ visible = true }: TradingProps) {
                     <PatternChart 
                       symbol={coin} 
                       interval={
-                        { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
+                        { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
                       }
                       currentPrice={price}
                       showSignals={canUseAIPatterns && !isSpot}
@@ -484,7 +485,7 @@ export default function Trading({ visible = true }: TradingProps) {
                 <PatternChart 
                   symbol={coin} 
                   interval={
-                    { "1": "1m", "3": "1m", "5": "5m", "15": "15m", "30": "15m", "60": "1h", "240": "4h", "D": "1h" }[timeframe] || "5m"
+                    { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
                   }
                   currentPrice={price}
                   showSignals={canUseAIPatterns && !isSpot}

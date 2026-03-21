@@ -144,7 +144,8 @@ function PatternChartComponent({
   const isSyncingRef = useRef(false);
 
   // Tracking state for smart setData vs update()
-  const prevSymbolRef = useRef<string>("");
+  // Key combines coin + interval so any change to either triggers a full reload
+  const prevDataKeyRef = useRef<string>("");
   const prevCandlesLenRef = useRef<number>(0);
   const prevLastTimeRef = useRef<number>(0);
   const chartDataReadyRef = useRef<boolean>(false); // true once setData called with real data
@@ -162,7 +163,7 @@ function PatternChartComponent({
   const { positions, openOrders } = useTrading();
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
 
-  // Reset indicator stats and mark chart as needing a full reload when symbol changes.
+  // Reset indicator stats and mark chart as needing a full reload when symbol OR interval changes.
   // Do NOT call setData([]) here — keep old candles visible until new ones arrive.
   useEffect(() => {
     chartDataReadyRef.current = false;
@@ -172,7 +173,7 @@ function PatternChartComponent({
     setLastD(null);
     setSmaStatus(null);
     setActiveSignal(null);
-  }, [coin]);
+  }, [coin, interval]);
 
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
     queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}`],
@@ -375,7 +376,7 @@ function PatternChartComponent({
 
     // Reset data-ready flag when chart is newly created
     chartDataReadyRef.current = false;
-    prevSymbolRef.current = "";
+    prevDataKeyRef.current = "";
 
     return () => {
       // Null series refs BEFORE removing chart so in-flight effects don't use disposed objects
@@ -408,12 +409,13 @@ function PatternChartComponent({
     const lastCandle = sorted[sorted.length - 1];
     const lastTime = times[times.length - 1];
 
-    const isSymbolChange = prevSymbolRef.current !== coin;
+    const dataKey = `${coin}:${interval}`;
+    const isKeyChange = prevDataKeyRef.current !== dataKey;
     const isFirstLoad = !chartDataReadyRef.current;
 
-    if (isSymbolChange || isFirstLoad) {
-      // ── Full setData: initial load or symbol switch ──
-      console.log("[chart] setData →", coin, sorted.length, "candles", isSymbolChange ? "(symbol change)" : "(first load)");
+    if (isKeyChange || isFirstLoad) {
+      // ── Full setData: initial load, symbol switch, or interval switch ──
+      console.log("[chart] setData →", dataKey, sorted.length, "candles", isKeyChange ? "(key change)" : "(first load)");
 
       try {
         candleSeriesRef.current.setData(sorted.map((c, i) => ({
@@ -456,18 +458,21 @@ function PatternChartComponent({
         return;
       }
 
-      prevSymbolRef.current = coin;
+      prevDataKeyRef.current = dataKey;
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
       chartDataReadyRef.current = true;
     } else {
-      // ── Live update: same symbol, use update() to avoid full redraw ──
+      // ── Live update: same symbol+interval, use update() to avoid full redraw ──
       const lenChanged = sorted.length !== prevCandlesLenRef.current;
-      const timeChanged = lastCandle.t !== prevLastTimeRef.current;
 
-      // If many new candles arrived at once, fall back to setData
-      if (sorted.length - prevCandlesLenRef.current > 2) {
-        console.log("[chart] setData (bulk update) →", coin, sorted.length, "candles");
+      // Guard: if the new last-candle time is EARLIER than what's already in the series,
+      // it means the API returned slightly stale data. Fall back to setData to recover.
+      const timeWentBackward = lastCandle.t < prevLastTimeRef.current;
+
+      // If many new candles arrived at once, OR time went backward, fall back to setData
+      if (sorted.length - prevCandlesLenRef.current > 2 || timeWentBackward) {
+        console.log("[chart] setData (fallback) →", coin, sorted.length, "candles", timeWentBackward ? "(time went backward)" : "(bulk update)");
         try {
           candleSeriesRef.current.setData(sorted.map((c, i) => ({
             time: times[i], open: parsePrice(c.o), high: parsePrice(c.h),
@@ -540,7 +545,7 @@ function PatternChartComponent({
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
     }
-  }, [candles, parsePrice, hideIndicators, coin]);
+  }, [candles, parsePrice, hideIndicators, coin, interval]);
 
   // ── TP/SL/Entry/Liq price lines ──
   useEffect(() => {
