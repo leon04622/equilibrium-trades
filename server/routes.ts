@@ -994,8 +994,16 @@ export async function registerRoutes(
       }
 
       // Determine if this is a subscription or one-time payment
-      const price = await stripeService.getPrice(priceId);
-      const mode = (price as any)?.recurring ? 'subscription' : 'payment';
+      // Default to 'subscription' — safer than defaulting to 'payment' for recurring prices
+      let mode: 'subscription' | 'payment' = 'subscription';
+      try {
+        const price = await stripeService.getPrice(priceId);
+        if (price && !(price as any)?.recurring) {
+          mode = 'payment';
+        }
+      } catch {
+        // Keep default 'subscription' mode
+      }
 
       // Create checkout session
       const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
