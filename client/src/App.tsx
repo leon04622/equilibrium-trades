@@ -14,6 +14,9 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { WalletGate } from "@/components/wallet-gate";
+import { BuilderCodeModal } from "@/components/builder-code-modal";
+import { PaywallModal } from "@/components/paywall-modal";
+import { PaywallProvider } from "@/lib/paywall-context";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
@@ -64,6 +67,9 @@ function App() {
             <ChatProvider>
             <TooltipProvider delayDuration={200}>
               <WalletGate>
+              <PaywallProvider>
+              <BuilderCodeModal />
+              <PaywallModal />
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex w-full overflow-hidden" style={{ height: '100dvh' }}>
                   <AppSidebar />
@@ -90,6 +96,7 @@ function App() {
               </SidebarProvider>
               <LiveChat />
               <Toaster />
+              </PaywallProvider>
               </WalletGate>
             </TooltipProvider>
             </ChatProvider>

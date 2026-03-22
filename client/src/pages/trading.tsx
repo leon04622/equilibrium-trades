@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation, Link } from "wouter";
+import { useLocation } from "wouter";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
@@ -15,11 +15,10 @@ import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useSubscription } from "@/hooks/use-subscription";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Zap, Loader2 } from "lucide-react";
+import { usePaywall } from "@/lib/paywall-context";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
-import type { MarketCondition } from "@shared/schema";
 import { cn } from "@/lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 
 const timeframes = [
@@ -55,7 +54,8 @@ export default function Trading({ visible = true }: TradingProps) {
   const [isResolvingCoin, setIsResolvingCoin] = useState(false);
   const { toast } = useToast();
   const { updatePrices } = useTrading();
-  const { hasAccess, isConnected, isPro, isLoading: subLoading } = useSubscription();
+  const { openPaywall } = usePaywall();
+  const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
@@ -73,17 +73,26 @@ export default function Trading({ visible = true }: TradingProps) {
     }
   }, [location]);
   
-  // Chart with indicators (Volume/RSI/Stoch RSI) is free for all connected users
+  // Basic charting is free for all connected wallets
   const canShowIndicatorChart = isConnected;
-  // AI pattern signal cards are Pro-only
+  // AI pattern signals and SMA overlays are Pro-only (both gated together)
   const canUseAIPatterns = isConnected && hasAccess('ai_signals');
-  
+
   // Reset AI chart if user disconnects
   useEffect(() => {
     if (!canShowIndicatorChart && showAIChart) {
       setShowAIChart(false);
     }
   }, [canShowIndicatorChart, showAIChart]);
+
+  // Handler: toggle AI chart with paywall gate
+  const handleAIChartToggle = (checked: boolean) => {
+    if (checked && !canUseAIPatterns) {
+      openPaywall("AI Pattern Recognition");
+      return;
+    }
+    setShowAIChart(checked);
+  };
 
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
@@ -187,65 +196,7 @@ export default function Trading({ visible = true }: TradingProps) {
     );
   }
 
-  // Show subscription gate if wallet connected but no active Pro subscription
-  if (!subLoading && isConnected && !isPro) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center bg-background p-6">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-              <Lock className="h-7 w-7 text-primary" />
-            </div>
-            <CardTitle className="text-xl">Pro Access Required</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              Subscribe to Equilibrium Pro to access the live trading platform.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4 text-center">
-            <div className="rounded-lg bg-muted/50 p-4 text-sm text-left space-y-2">
-              <p className="font-medium text-foreground">Pro Access includes:</p>
-              <ul className="text-muted-foreground space-y-1">
-                <li>✓ Live trading on Hyperliquid</li>
-                <li>✓ AI pattern detection signals</li>
-                <li>✓ 200+ perpetual and spot markets</li>
-                <li>✓ Real-time order book &amp; positions</li>
-              </ul>
-            </div>
-            <Link href="/pricing">
-              <Button className="w-full" size="lg" data-testid="button-subscribe-trading">
-                <Zap className="mr-2 h-4 w-4" />
-                Subscribe — £50/month
-              </Button>
-            </Link>
-            <p className="text-xs text-muted-foreground">
-              Already subscribed? Make sure you connected the same wallet used during checkout.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Show connect wallet prompt if wallet not connected
-  if (!subLoading && !isConnected) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center bg-background p-6">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <CardTitle className="text-xl">Connect Your Wallet</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              Connect your wallet to access the trading platform.
-            </p>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-sm text-muted-foreground">
-              Use the Connect button in the top right corner to get started.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // Wallet gate is handled by WalletGate in App.tsx — no need to re-check here
 
   return (
     <div className={cn(
@@ -407,12 +358,18 @@ export default function Trading({ visible = true }: TradingProps) {
               <div className="flex items-center gap-1.5">
                 <Switch 
                   checked={showAIChart} 
-                  onCheckedChange={setShowAIChart}
+                  onCheckedChange={handleAIChartToggle}
                   id="ai-chart-toggle"
+                  data-testid="toggle-ai-chart"
                 />
-                <label htmlFor="ai-chart-toggle" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                <label
+                  htmlFor="ai-chart-toggle"
+                  className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1"
+                  onClick={() => !canUseAIPatterns && openPaywall("AI Pattern Recognition")}
+                >
                   <Brain className="h-3 w-3" />
                   AI Chart
+                  {!canUseAIPatterns && <Lock className="h-3 w-3 text-muted-foreground/60" />}
                 </label>
               </div>
               {showAIChart && (

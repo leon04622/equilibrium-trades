@@ -49,17 +49,24 @@ None provided.
 - **PostgreSQL (Neon)**: For persistent data storage, including video metadata, user information, and support chat messages.
 - **Stripe**: For subscription payment processing and management using stripe-replit-sync package.
 
-## Subscription System
-- **Tiers**: Free (Starter), AI Pro (£24.99/month), Elite Mentoring (£500/month)
+## Access System (Dual-Layer)
+
+### Layer 1: Wallet Gate
+- Full-screen modal blocks all app content until wallet is connected
+- On first connection, `BuilderCodeModal` appears (non-dismissable) requiring EIP-191 signature
+- Signature approves Equilibrium as Hyperliquid builder; stored in DB as `builderCodeApproved`
+- All connected wallet users get FREE access to: basic charting (TradingView), order execution
+
+### Layer 2: Subscription Gate (£50/month)
+- **Tiers**: Free (connected wallet), Pro (£50/month Stripe subscription)
+- **PaywallModal**: Triggered globally via `usePaywall()` hook when any locked feature is clicked
+- **Pro Features**: SMA overlays, AI pattern recognition, Trade Journal, Signals, Heatmap
+- **Admin Bypass**: Hardcoded admin wallet addresses bypass to elite tier automatically
 - **Stripe Products**: AI Pro (prod_TpGvzRznydzDhy), Elite Mentoring (prod_TpGvGOpqOoE8xL)
-- **Subscription Gating**: Premium features gated by subscription tier using `useSubscription` hook and `SubscriptionGate` component
-  - AI Pattern Detection: Requires AI Pro or Elite
-  - Liquidity Heatmap: Requires Elite only
-  - Advanced Education: Requires AI Pro or Elite
-  - 1-on-1 Coaching: Requires Elite only
-- **Architecture**: Uses stripe-replit-sync package for webhook handling and data sync - NEVER insert directly into stripe schema
+- **Architecture**: Uses stripe-replit-sync package for webhook handling - NEVER insert directly into stripe schema
 - **Frontend Hook**: `client/src/hooks/use-subscription.ts` provides `hasAccess(feature)` function
 - **Frontend Gate**: `client/src/components/subscription-gate.tsx` wraps premium feature content
+- **Paywall Context**: `client/src/lib/paywall-context.tsx` + `client/src/components/paywall-modal.tsx`
 
 ## Caching Strategy
 - **HTML Pages**: Never cached (`no-cache, no-store, must-revalidate`) - ensures users always get the latest version

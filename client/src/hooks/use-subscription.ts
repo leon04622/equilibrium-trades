@@ -7,6 +7,15 @@ export interface SubscriptionStatus {
   expiresAt: string | null;
 }
 
+export type PremiumFeature =
+  | 'ai_signals'
+  | 'heatmap'
+  | 'advanced_education'
+  | 'coaching'
+  | 'sma_overlays'
+  | 'live_trading'
+  | 'trade_journal';
+
 export function useSubscription() {
   const { address, isConnected } = useWallet();
 
@@ -21,18 +30,19 @@ export function useSubscription() {
   const isElite = subscription?.active && subscription.tier === 'elite';
   const isFree = !subscription?.active || subscription?.tier === 'free';
 
-  const hasAccess = (feature: 'ai_signals' | 'heatmap' | 'advanced_education' | 'coaching') => {
-    if (!subscription?.active) return false;
-    
+  const hasAccess = (feature: PremiumFeature): boolean => {
     switch (feature) {
+      // Pro features
       case 'ai_signals':
-        return isPro || isElite;
-      case 'heatmap':
-        return isElite;
       case 'advanced_education':
-        return isPro || isElite;
+      case 'sma_overlays':
+      case 'live_trading':
+      case 'trade_journal':
+        return !!(isPro || isElite);
+      // Elite features
+      case 'heatmap':
       case 'coaching':
-        return isElite;
+        return !!isElite;
       default:
         return false;
     }

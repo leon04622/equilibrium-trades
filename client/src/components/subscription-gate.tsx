@@ -1,28 +1,33 @@
-import { Link } from "wouter";
 import { Lock, Zap, Crown, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
+import { usePaywall } from "@/lib/paywall-context";
+import type { PremiumFeature } from "@/hooks/use-subscription";
 
 interface SubscriptionGateProps {
-  feature: 'ai_signals' | 'heatmap' | 'advanced_education' | 'coaching';
+  feature: PremiumFeature;
   children: React.ReactNode;
   title?: string;
   description?: string;
 }
 
-const featureRequirements: Record<string, { tier: string; icon: React.ReactNode; name: string }> = {
+const featureRequirements: Record<PremiumFeature, { tier: 'pro' | 'elite'; icon: React.ReactNode; name: string }> = {
   ai_signals: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'AI Pattern Detection' },
-  heatmap: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: 'Liquidity Heatmap' },
+  sma_overlays: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'SMA Strategy Overlays' },
+  live_trading: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Live Trading' },
+  trade_journal: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Trade Journal' },
   advanced_education: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Advanced Education' },
+  heatmap: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: 'Liquidity Heatmap' },
   coaching: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: '1-on-1 Coaching' },
 };
 
 export function SubscriptionGate({ feature, children, title, description }: SubscriptionGateProps) {
   const { hasAccess, isLoading, tier } = useSubscription();
-  const { isConnected, address } = useWallet();
+  const { isConnected } = useWallet();
+  const { openPaywall } = usePaywall();
 
   if (isLoading) {
     return (
@@ -59,7 +64,6 @@ export function SubscriptionGate({ feature, children, title, description }: Subs
   const requirement = featureRequirements[feature];
   const requiredTier = requirement?.tier || 'pro';
   const featureName = requirement?.name || 'Premium Feature';
-  const FeatureIcon = requirement?.icon || <Lock className="h-5 w-5" />;
 
   return (
     <div className="flex items-center justify-center h-full p-8">
@@ -68,8 +72,7 @@ export function SubscriptionGate({ feature, children, title, description }: Subs
           <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-2">
             <Lock className="h-6 w-6 text-primary" />
           </div>
-          <CardTitle className="text-lg flex items-center justify-center gap-2">
-            {FeatureIcon}
+          <CardTitle className="text-lg">
             {title || featureName}
           </CardTitle>
           {requiredTier === 'elite' ? (
@@ -78,36 +81,38 @@ export function SubscriptionGate({ feature, children, title, description }: Subs
             </Badge>
           ) : (
             <Badge variant="secondary" className="mx-auto bg-primary/10 text-primary border-primary/30">
-              AI Pro Required
+              Pro Required
             </Badge>
           )}
         </CardHeader>
         <CardContent className="text-center space-y-4">
           <p className="text-sm text-muted-foreground">
-            {description || `Upgrade to ${requiredTier === 'elite' ? 'Elite Mentoring' : 'AI Pro'} to unlock ${featureName.toLowerCase()}.`}
+            {description || `Unlock ${featureName.toLowerCase()} with a Pro subscription.`}
           </p>
-          
+
           {tier !== 'free' && (
             <p className="text-xs text-muted-foreground">
               Current plan: <span className="font-medium capitalize">{tier}</span>
             </p>
           )}
 
-          <Link href="/pricing">
-            <Button className="w-full" data-testid="button-upgrade-subscription">
-              {requiredTier === 'elite' ? (
-                <>
-                  <Crown className="mr-2 h-4 w-4" />
-                  Upgrade to Elite
-                </>
-              ) : (
-                <>
-                  <Zap className="mr-2 h-4 w-4" />
-                  Upgrade to AI Pro
-                </>
-              )}
-            </Button>
-          </Link>
+          <Button
+            className="w-full"
+            onClick={() => openPaywall(featureName)}
+            data-testid="button-upgrade-subscription"
+          >
+            {requiredTier === 'elite' ? (
+              <>
+                <Crown className="mr-2 h-4 w-4" />
+                Upgrade to Elite
+              </>
+            ) : (
+              <>
+                <Zap className="mr-2 h-4 w-4" />
+                Unlock Full Platform — £50/month
+              </>
+            )}
+          </Button>
         </CardContent>
       </Card>
     </div>
