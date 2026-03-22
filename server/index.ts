@@ -75,6 +75,15 @@ async function initStripe() {
 (async () => {
   await initStripe();
 
+  // Redirect apex domain to www only
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const host = req.headers.host;
+    if (host === 'equilibrium-trading.xyz') {
+      return res.redirect(301, `https://www.equilibrium-trading.xyz${req.url}`);
+    }
+    next();
+  });
+
   app.post(
     '/api/stripe/webhook',
     express.raw({ type: 'application/json' }),
