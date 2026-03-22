@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePaywall } from "@/lib/paywall-context";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import {
   Lock,
   Zap,
@@ -18,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
 
 const PREMIUM_FEATURES = [
   {
@@ -42,39 +43,11 @@ const PREMIUM_FEATURES = [
   },
 ];
 
-interface StripeProduct {
-  id: string;
-  name: string;
-  prices: { id: string; unit_amount: number; currency: string; recurring: any }[];
-  metadata: { tier?: string };
-}
-
 export function PaywallModal() {
   const { isOpen, triggerFeature, closePaywall } = usePaywall();
   const { address, isConnected, connect } = useWallet();
   const { toast } = useToast();
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const [priceId, setPriceId] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchProPriceId() {
-      try {
-        const res = await fetch("/api/stripe/products");
-        if (!res.ok) return;
-        const data = await res.json();
-        const products: StripeProduct[] = data.data || [];
-        const pro = products.find(
-          (p) => p.name === "AI Pro" || p.metadata?.tier === "pro"
-        );
-        if (pro && pro.prices.length > 0) {
-          setPriceId(pro.prices[0].id);
-        }
-      } catch {
-        // Fail silently — button will redirect to /pricing as fallback
-      }
-    }
-    if (isOpen) fetchProPriceId();
-  }, [isOpen]);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const handleSubscribe = async () => {
     if (!isConnected) {
@@ -90,33 +63,11 @@ export function PaywallModal() {
       }
     }
 
-    if (!priceId) {
-      window.location.href = "/pricing";
-      return;
-    }
-
-    setIsCheckingOut(true);
-    try {
-      const res = await apiRequest("POST", "/api/stripe/checkout", {
-        priceId,
-        walletAddress: address,
-        tier: "pro",
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error("No checkout URL");
-      }
-    } catch {
-      toast({
-        title: "Checkout Failed",
-        description: "Could not start checkout. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsCheckingOut(false);
-    }
+    setIsRedirecting(true);
+    const url = address
+      ? `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`
+      : PRO_STRIPE_LINK;
+    window.location.href = url;
   };
 
   return (
@@ -183,14 +134,14 @@ export function PaywallModal() {
         <div className="px-6 pb-6 space-y-3">
           <Button
             onClick={handleSubscribe}
-            disabled={isCheckingOut}
+            disabled={isRedirecting}
             className="w-full h-12 text-base font-semibold gap-2"
             data-testid="button-paywall-subscribe"
           >
-            {isCheckingOut ? (
+            {isRedirecting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Starting checkout...
+                Redirecting to checkout...
               </>
             ) : (
               <>

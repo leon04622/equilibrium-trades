@@ -1,16 +1,20 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useWallet } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, ExternalLink, AlertCircle } from "lucide-react";
 
+const PUBLIC_PATHS = ["/pricing"];
+
 export function WalletGate({ children }: { children: React.ReactNode }) {
+  const [location] = useLocation();
   const { isConnected, isConnecting, connect, isMobile, openInWalletBrowser, detectedWallets, connectError } = useWallet();
   const [email, setEmail] = useState("");
   const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
 
-  if (isConnected) return <>{children}</>;
+  if (isConnected || PUBLIC_PATHS.includes(location)) return <>{children}</>;
 
   const handleEmailCapture = async (e: React.FormEvent) => {
     e.preventDefault();
