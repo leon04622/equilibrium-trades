@@ -165,9 +165,30 @@ export class StripeService {
         `
       );
       
-      if (customerResult.rows.length === 0) return null;
-      
-      const customerId = (customerResult.rows[0] as any).id as string;
+      let customerId: string;
+
+      if (customerResult.rows.length > 0) {
+        customerId = (customerResult.rows[0] as any).id as string;
+      } else {
+        // Fallback: find customer via checkout session client_reference_id (payment links)
+        const sessionResult = await db.execute(
+          sql`
+            SELECT customer FROM stripe.checkout_sessions
+            WHERE LOWER(client_reference_id) = LOWER(${walletAddress})
+              AND status = 'complete'
+              AND customer IS NOT NULL
+            ORDER BY created DESC
+            LIMIT 1
+          `
+        );
+        if (sessionResult.rows.length === 0) return null;
+        customerId = (sessionResult.rows[0] as any).customer as string;
+        // Backfill walletAddress onto the customer so future lookups use the faster path
+        try {
+          const stripe = await getUncachableStripeClient();
+          await stripe.customers.update(customerId, { metadata: { walletAddress } });
+        } catch { /* non-fatal */ }
+      }
 
       // Get active subscriptions with their product info via items
       const subResult = await db.execute(
