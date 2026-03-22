@@ -144,24 +144,9 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
     });
   } catch (error) {
     console.error("Error fetching tickers:", error);
-    // Return fallback data with estimated prices
-    const fallbackCoins = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP", "WIF"];
-    const fallbackPrices: Record<string, number> = {
-      BTC: 92000, ETH: 3200, SOL: 180, DOGE: 0.32, AVAX: 35, LINK: 22, ARB: 1.8, SUI: 4.5, OP: 2.1, WIF: 2.5
-    };
-    
-    return fallbackCoins.map(coin => ({
-      coin,
-      markPx: String(fallbackPrices[coin] || 0),
-      midPx: String(fallbackPrices[coin] || 0),
-      prevDayPx: String((fallbackPrices[coin] || 0) * 0.995),
-      dayNtlVlm: "0",
-      premium: "0",
-      openInterest: "0",
-      funding: "0",
-      maxLeverage: coin === "BTC" || coin === "ETH" ? 50 : 20,
-      szDecimals: coin === "BTC" ? 5 : coin === "ETH" ? 4 : 2,
-    }));
+    // Return empty array on failure — callers guard against empty results.
+    // Returning stale hardcoded prices would corrupt live PNL calculations.
+    return [];
   }
 }
 

@@ -669,12 +669,14 @@ export async function analyzeCoinForSignals(
 ): Promise<CrossoverSignal | null> {
   try {
     const intervalMap: Record<string, string> = {
-      "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+      "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+      "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1d",
     };
     
     const interval = intervalMap[timeframe] || "1m";
     const candleMinutes: Record<string, number> = {
-      "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+      "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+      "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
     };
     
     const minutes = candleMinutes[timeframe] || 1;
@@ -890,10 +892,12 @@ function getEducationalContent(
 // Helper function to get SMA data for a specific timeframe
 async function getSMAForTimeframe(coin: string, timeframe: string): Promise<SMAValues | null> {
   const intervalMap: Record<string, string> = {
-    "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+    "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+    "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1d",
   };
   const candleMinutes: Record<string, number> = {
-    "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
   };
   
   const interval = intervalMap[timeframe] || "1m";
@@ -918,12 +922,14 @@ export async function analyzeForEducationalPatterns(
 ): Promise<EducationalPatternSignal | null> {
   try {
     const intervalMap: Record<string, string> = {
-      "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+      "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+      "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1d",
     };
     
     const interval = intervalMap[timeframe] || "1m";
     const candleMinutes: Record<string, number> = {
-      "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+      "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+      "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
     };
     
     const minutes = candleMinutes[timeframe] || 1;
@@ -1143,12 +1149,14 @@ export async function getSMAStatus(
 } | null> {
   try {
     const intervalMap: Record<string, string> = {
-      "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d",
+      "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+      "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1d",
     };
     const interval = intervalMap[timeframe] || "1m";
     
     const candleMinutes: Record<string, number> = {
-      "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440,
+      "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+      "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
     };
     const minutes = candleMinutes[timeframe] || 1;
     const requiredCandles = 250;
