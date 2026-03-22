@@ -248,30 +248,49 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   
   if (recentHighs.length < 2 || recentLows.length < 2) return null;
   
-  // Calculate trendlines
-  const highSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
-  const lowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
-  
   const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+  const avgPrice = currentPrice;
+  
+  // Normalize slopes as % of price per candle so thresholds work on any asset price
+  const rawHighSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
+  const rawLowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
+  
+  // Slopes as % of price per candle — price-relative so they work for BTC, altcoins, etc.
+  const highSlopePct = rawHighSlope / avgPrice; // e.g. -0.0003 = falling 0.03% per candle
+  const lowSlopePct = rawLowSlope / avgPrice;
+  
+  // "Flat" means changing < 0.03% per candle
+  const FLAT_THRESHOLD = 0.0003;
+  const isHighFlat = Math.abs(highSlopePct) < FLAT_THRESHOLD;
+  const isLowFlat = Math.abs(lowSlopePct) < FLAT_THRESHOLD;
+  const isHighFalling = highSlopePct < -FLAT_THRESHOLD;
+  const isLowRising = lowSlopePct > FLAT_THRESHOLD;
+  
   const resistance = recentHighs[recentHighs.length - 1].price;
   const support = recentLows[recentLows.length - 1].price;
   const range = resistance - support;
+  
+  // Range must be meaningful relative to price
+  if ((range / avgPrice) * 100 < thresholds.minMovePercent) return null;
+  
+  // Lines must be converging (not already crossed)
+  if (resistance <= support) return null;
   
   let patternName: PatternName | null = null;
   let displayName = "";
   
   // Ascending Triangle: flat resistance, rising support
-  if (Math.abs(highSlope) < 0.001 && lowSlope > 0) {
+  if (isHighFlat && isLowRising) {
     patternName = "ascending_triangle";
     displayName = "Ascending Triangle";
   }
   // Descending Triangle: falling resistance, flat support
-  else if (highSlope < 0 && Math.abs(lowSlope) < 0.001) {
+  else if (isHighFalling && isLowFlat) {
     patternName = "descending_triangle";
     displayName = "Descending Triangle";
   }
-  // Symmetrical Triangle: converging lines
-  else if (highSlope < 0 && lowSlope > 0) {
+  // Symmetrical Triangle: both lines converging (falling highs, rising lows)
+  else if (isHighFalling && isLowRising) {
     patternName = "symmetrical_triangle";
     displayName = "Symmetrical Triangle";
   }
@@ -293,10 +312,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = support - (range * 0.1);
     takeProfit = resistance + range;
-    // For bullish patterns, TP MUST be above entry
-    if (takeProfit <= entryPrice) {
-      takeProfit = entryPrice + range;
-    }
+    if (takeProfit <= entryPrice) takeProfit = entryPrice + range;
   } else if (!isBullish && (patternName === "descending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = support;
     const breakoutPercent = ((support - currentPrice) / support) * 100;
@@ -306,10 +322,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = resistance + (range * 0.1);
     takeProfit = support - range;
-    // For bearish patterns, TP MUST be below entry
-    if (takeProfit >= entryPrice) {
-      takeProfit = entryPrice - range;
-    }
+    if (takeProfit >= entryPrice) takeProfit = entryPrice - range;
   } else {
     return null;
   }
@@ -327,103 +340,149 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   };
 }
 
-// Detect Double Top/Bottom patterns
+// Detect Double Top/Bottom patterns — strict, real-TA criteria
 function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
-  if (candles.length < 50) return null;
-  
+  if (candles.length < 80) return null;
+
   const thresholds = getThresholds(timeframe);
-  const recentCandles = candles.slice(-50);
-  const { highs, lows } = findSwingPoints(recentCandles, 4);
-  
-  if (isBullish && lows.length >= 2) {
-    // Double Bottom - bullish reversal
-    const lastTwoLows = lows.slice(-2);
-    const priceDiff = Math.abs(lastTwoLows[0].price - lastTwoLows[1].price);
-    const avgLow = (lastTwoLows[0].price + lastTwoLows[1].price) / 2;
-    
-    if ((priceDiff / avgLow) * 100 < 1) { // Lows within 1%
-      // Find highs between the two lows for neckline
-      const highsBetween = highs.filter(h => h.idx > lastTwoLows[0].idx && h.idx < lastTwoLows[1].idx);
-      if (highsBetween.length === 0) return null; // No valid neckline
-      
-      const neckline = Math.max(...highsBetween.map(h => h.price));
-      const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
-      const patternHeight = neckline - avgLow;
-      
-      if (patternHeight <= 0) return null; // Invalid pattern
-      
-      let status: DetectedPattern["status"] = "forming";
-      const breakoutPercent = ((currentPrice - neckline) / neckline) * 100;
-      if (breakoutPercent > thresholds.minBreakoutPercent) {
-        status = "breakout_confirmed";
+
+  // Use last 80 candles with a larger lookback to find significant swings only
+  const recentCandles = candles.slice(-80);
+
+  // Use lookback=6 for higher timeframes (fewer, more meaningful swings)
+  const swingLookback = ["1h", "4h", "1d"].includes(timeframe) ? 7 : 5;
+  const { highs, lows } = findSwingPoints(recentCandles, swingLookback);
+
+  const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
+
+  // ─── DOUBLE TOP (bearish reversal) ───────────────────────────────────────────
+  // Only detect Double Top when the CURRENT timeframe's SMA structure is bearish
+  // (reversal patterns work regardless of multi-TF, but we still need context)
+  if (!isBullish && highs.length >= 2) {
+    // Find the two highest swing highs (not just the last two) that are separated in time
+    const sortedByPrice = [...highs].sort((a, b) => b.price - a.price);
+
+    // Try pairs of the top swing highs (by price) until a valid double top is found
+    for (let i = 0; i < Math.min(sortedByPrice.length, 5); i++) {
+      for (let j = i + 1; j < Math.min(sortedByPrice.length, 6); j++) {
+        const h1 = sortedByPrice[i].idx < sortedByPrice[j].idx ? sortedByPrice[i] : sortedByPrice[j];
+        const h2 = sortedByPrice[i].idx < sortedByPrice[j].idx ? sortedByPrice[j] : sortedByPrice[i];
+
+        const avgHigh = (h1.price + h2.price) / 2;
+        const priceDiffPct = (Math.abs(h1.price - h2.price) / avgHigh) * 100;
+        const candlesBetween = h2.idx - h1.idx;
+
+        // Strict criteria:
+        // 1. Two peaks within 0.5% of each other (much tighter than before)
+        // 2. At least 8 candles apart so they're truly separate tops
+        // 3. At most 60 candles apart so they're in the same price structure
+        if (priceDiffPct > 0.5) continue;
+        if (candlesBetween < 8 || candlesBetween > 60) continue;
+
+        // Find the neckline: lowest low BETWEEN the two tops
+        const lowsBetween = lows.filter(l => l.idx > h1.idx && l.idx < h2.idx);
+        if (lowsBetween.length === 0) continue;
+
+        const neckline = Math.min(...lowsBetween.map(l => l.price));
+        const patternHeight = avgHigh - neckline;
+
+        // 4. Valley must be at least 1.5% below the tops — otherwise it's just noise
+        const valleyDepthPct = (patternHeight / avgHigh) * 100;
+        if (valleyDepthPct < 1.5) continue;
+
+        // 5. Pattern height must meet the timeframe's minimum move threshold
+        if ((patternHeight / avgHigh) * 100 < thresholds.minMovePercent) continue;
+
+        // 6. Current price must be within the pattern range (not far away)
+        // Price should be at or below the neckline, or between neckline and tops
+        if (currentPrice > avgHigh * 1.01) continue; // Price already broke above — not a double top
+        if (currentPrice < neckline * 0.95) continue; // Price already ran too far down — old pattern
+
+        let status: DetectedPattern["status"] = "forming";
+        const breakoutPercent = ((neckline - currentPrice) / neckline) * 100;
+        if (breakoutPercent > thresholds.minBreakoutPercent) {
+          status = "breakout_confirmed";
+        } else if (currentPrice < neckline) {
+          status = "breakout_pending";
+        }
+
+        const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
+        let takeProfit = neckline - patternHeight;
+        if (takeProfit >= entryPrice) takeProfit = entryPrice - patternHeight;
+
+        return {
+          name: "double_top",
+          displayName: "Double Top",
+          status,
+          entryPrice,
+          stopLoss: avgHigh + patternHeight * 0.1,
+          takeProfit,
+          breakoutLevel: neckline,
+          currentPrice,
+          confidence: status === "breakout_confirmed" ? 75 : status === "breakout_pending" ? 62 : 48,
+        };
       }
-      
-      const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
-      // For bullish patterns, TP MUST be above entry
-      // Base TP on pattern height from entry, not just neckline
-      let takeProfit = neckline + patternHeight;
-      if (takeProfit <= entryPrice) {
-        // If price has broken out strongly, project from entry instead
-        takeProfit = entryPrice + patternHeight;
-      }
-      
-      return {
-        name: "double_bottom",
-        displayName: "Double Bottom",
-        status,
-        entryPrice,
-        stopLoss: avgLow - (patternHeight * 0.1),
-        takeProfit,
-        breakoutLevel: neckline,
-        currentPrice,
-        confidence: status === "breakout_confirmed" ? 75 : 50,
-      };
-    }
-  } else if (!isBullish && highs.length >= 2) {
-    // Double Top - bearish reversal
-    const lastTwoHighs = highs.slice(-2);
-    const priceDiff = Math.abs(lastTwoHighs[0].price - lastTwoHighs[1].price);
-    const avgHigh = (lastTwoHighs[0].price + lastTwoHighs[1].price) / 2;
-    
-    if ((priceDiff / avgHigh) * 100 < 1) {
-      // Find lows between the two highs for neckline
-      const lowsBetween = lows.filter(l => l.idx > lastTwoHighs[0].idx && l.idx < lastTwoHighs[1].idx);
-      if (lowsBetween.length === 0) return null; // No valid neckline
-      
-      const neckline = Math.min(...lowsBetween.map(l => l.price));
-      const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
-      const patternHeight = avgHigh - neckline;
-      
-      if (patternHeight <= 0) return null; // Invalid pattern
-      
-      let status: DetectedPattern["status"] = "forming";
-      const breakoutPercent = ((neckline - currentPrice) / neckline) * 100;
-      if (breakoutPercent > thresholds.minBreakoutPercent) {
-        status = "breakout_confirmed";
-      }
-      
-      const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
-      // For bearish patterns, TP MUST be below entry
-      let takeProfit = neckline - patternHeight;
-      if (takeProfit >= entryPrice) {
-        // If price has broken down strongly, project from entry instead
-        takeProfit = entryPrice - patternHeight;
-      }
-      
-      return {
-        name: "double_top",
-        displayName: "Double Top",
-        status,
-        entryPrice,
-        stopLoss: avgHigh + (patternHeight * 0.1),
-        takeProfit,
-        breakoutLevel: neckline,
-        currentPrice,
-        confidence: status === "breakout_confirmed" ? 75 : 50,
-      };
     }
   }
-  
+
+  // ─── DOUBLE BOTTOM (bullish reversal) ────────────────────────────────────────
+  if (isBullish && lows.length >= 2) {
+    const sortedByPrice = [...lows].sort((a, b) => a.price - b.price); // lowest first
+
+    for (let i = 0; i < Math.min(sortedByPrice.length, 5); i++) {
+      for (let j = i + 1; j < Math.min(sortedByPrice.length, 6); j++) {
+        const l1 = sortedByPrice[i].idx < sortedByPrice[j].idx ? sortedByPrice[i] : sortedByPrice[j];
+        const l2 = sortedByPrice[i].idx < sortedByPrice[j].idx ? sortedByPrice[j] : sortedByPrice[i];
+
+        const avgLow = (l1.price + l2.price) / 2;
+        const priceDiffPct = (Math.abs(l1.price - l2.price) / avgLow) * 100;
+        const candlesBetween = l2.idx - l1.idx;
+
+        if (priceDiffPct > 0.5) continue;
+        if (candlesBetween < 8 || candlesBetween > 60) continue;
+
+        const highsBetween = highs.filter(h => h.idx > l1.idx && h.idx < l2.idx);
+        if (highsBetween.length === 0) continue;
+
+        const neckline = Math.max(...highsBetween.map(h => h.price));
+        const patternHeight = neckline - avgLow;
+
+        const valleyHeightPct = (patternHeight / avgLow) * 100;
+        if (valleyHeightPct < 1.5) continue;
+
+        if ((patternHeight / avgLow) * 100 < thresholds.minMovePercent) continue;
+
+        // Price must still be within pattern range
+        if (currentPrice < avgLow * 0.99) continue; // Already broke below — not a double bottom
+        if (currentPrice > neckline * 1.05) continue; // Already ran too far up — old pattern
+
+        let status: DetectedPattern["status"] = "forming";
+        const breakoutPercent = ((currentPrice - neckline) / neckline) * 100;
+        if (breakoutPercent > thresholds.minBreakoutPercent) {
+          status = "breakout_confirmed";
+        } else if (currentPrice > neckline) {
+          status = "breakout_pending";
+        }
+
+        const entryPrice = status === "breakout_confirmed" ? currentPrice : neckline;
+        let takeProfit = neckline + patternHeight;
+        if (takeProfit <= entryPrice) takeProfit = entryPrice + patternHeight;
+
+        return {
+          name: "double_bottom",
+          displayName: "Double Bottom",
+          status,
+          entryPrice,
+          stopLoss: avgLow - patternHeight * 0.1,
+          takeProfit,
+          breakoutLevel: neckline,
+          currentPrice,
+          confidence: status === "breakout_confirmed" ? 75 : status === "breakout_pending" ? 62 : 48,
+        };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -476,8 +535,9 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
     };
   }
   
-  // Falling Wedge (bullish) - both lines falling, converging
-  if (highSlope < 0 && lowSlope < 0 && highSlope > lowSlope && isBullish) {
+  // Falling Wedge (bullish) - both lines falling, upper falls faster → converging
+  // highSlope < lowSlope means upper trendline falls faster (more negative), so lines converge
+  if (highSlope < 0 && lowSlope < 0 && highSlope < lowSlope && isBullish) {
     let status: DetectedPattern["status"] = "forming";
     const breakoutPercent = ((currentPrice - resistance) / resistance) * 100;
     if (breakoutPercent > thresholds.minBreakoutPercent) {
