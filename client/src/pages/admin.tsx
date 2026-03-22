@@ -317,9 +317,10 @@ export default function Admin() {
                   <TableRow>
                     <TableHead>Wallet Address</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Subscription</TableHead>
+                    <TableHead>Plan</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Onboarded</TableHead>
+                    <TableHead>Subscribed On</TableHead>
+                    <TableHead>Expires</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -329,24 +330,27 @@ export default function Admin() {
                       <TableCell className="font-mono text-xs">
                         {user.walletAddress.slice(0, 6)}...{user.walletAddress.slice(-4)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-muted-foreground text-xs">
                         {user.email || "—"}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {getTierIcon(user.subscriptionTier)}
-                          <span className="capitalize">{user.subscriptionTier === 'pro' ? 'AI Pro' : user.subscriptionTier}</span>
+                          <span className="capitalize text-xs">{user.subscriptionTier === 'pro' ? 'AI Pro' : user.subscriptionTier}</span>
                         </div>
                       </TableCell>
                       <TableCell>
                         {getTierBadge(user.subscriptionTier, user.subscriptionActive)}
                       </TableCell>
-                      <TableCell>
-                        {user.builderCodeApproved ? (
-                          <Check className="h-4 w-4 text-success" />
-                        ) : (
-                          <X className="h-4 w-4 text-muted-foreground" />
-                        )}
+                      <TableCell className="text-xs text-muted-foreground">
+                        {user.subscribedAt
+                          ? new Date(user.subscribedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {user.subscriptionExpiresAt
+                          ? new Date(user.subscriptionExpiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : "—"}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

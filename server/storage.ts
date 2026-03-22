@@ -371,6 +371,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscribedAt: user.subscribedAt ?? null,
       createdAt: user.createdAt ?? new Date(),
       updatedAt: user.updatedAt ?? new Date(),
     };
@@ -386,6 +387,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscribedAt: user.subscribedAt ?? null,
       createdAt: user.createdAt ?? new Date(),
       updatedAt: user.updatedAt ?? new Date(),
     }));
@@ -408,6 +410,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (newUser.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: newUser.subscriptionActive ?? false,
       subscriptionExpiresAt: newUser.subscriptionExpiresAt,
+      subscribedAt: newUser.subscribedAt ?? null,
       createdAt: newUser.createdAt ?? new Date(),
       updatedAt: newUser.updatedAt ?? new Date(),
     };
@@ -428,6 +431,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscribedAt: user.subscribedAt ?? null,
       createdAt: user.createdAt ?? new Date(),
       updatedAt: user.updatedAt ?? new Date(),
     };
@@ -448,6 +452,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscribedAt: user.subscribedAt ?? null,
       createdAt: user.createdAt ?? new Date(),
       updatedAt: user.updatedAt ?? new Date(),
     };
@@ -460,12 +465,17 @@ export class MemStorage implements IStorage {
     expiresAt?: Date | null
   ): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
+    // Fetch current record to determine if subscribedAt should be set
+    const [existing] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
+    const now = new Date();
+    const setSubscribedAt = active && existing && !existing.subscribedAt ? now : (existing?.subscribedAt ?? null);
     const [user] = await db.update(walletUsers)
       .set({ 
         subscriptionTier: tier, 
         subscriptionActive: active, 
         subscriptionExpiresAt: expiresAt ?? null,
-        updatedAt: new Date() 
+        subscribedAt: setSubscribedAt,
+        updatedAt: now,
       })
       .where(eq(walletUsers.walletAddress, normalizedAddress))
       .returning();
@@ -478,6 +488,7 @@ export class MemStorage implements IStorage {
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
+      subscribedAt: user.subscribedAt ?? null,
       createdAt: user.createdAt ?? new Date(),
       updatedAt: user.updatedAt ?? new Date(),
     };

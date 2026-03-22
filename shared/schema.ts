@@ -129,6 +129,7 @@ export const walletUsers = pgTable("wallet_users", {
   subscriptionTier: text("subscription_tier").default("free"),
   subscriptionActive: boolean("subscription_active").default(false),
   subscriptionExpiresAt: timestamp("subscription_expires_at"),
+  subscribedAt: timestamp("subscribed_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -249,6 +250,7 @@ export interface WalletUser {
   subscriptionTier: 'free' | 'pro' | 'elite';
   subscriptionActive: boolean;
   subscriptionExpiresAt: Date | null;
+  subscribedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

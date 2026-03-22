@@ -84,6 +84,31 @@ export class StripeService {
     return result.rows;
   }
 
+  async listProductsWithPricesFromStripe() {
+    const stripe = await getUncachableStripeClient();
+    const [products, prices] = await Promise.all([
+      stripe.products.list({ active: true, limit: 20 }),
+      stripe.prices.list({ active: true, limit: 100 }),
+    ]);
+    return products.data.map(product => ({
+      product_id: product.id,
+      product_name: product.name,
+      product_description: product.description ?? null,
+      product_active: product.active,
+      product_metadata: product.metadata,
+      prices: prices.data
+        .filter(p => p.product === product.id)
+        .map(p => ({
+          price_id: p.id,
+          unit_amount: p.unit_amount,
+          currency: p.currency,
+          recurring: p.recurring,
+          price_active: p.active,
+          price_metadata: p.metadata,
+        })),
+    }));
+  }
+
   async getPrice(priceId: string) {
     const result = await db.execute(
       sql`SELECT * FROM stripe.prices WHERE id = ${priceId}`

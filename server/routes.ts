@@ -633,6 +633,12 @@ export async function registerRoutes(
         return res.json({ tier: 'free', active: false, expiresAt: null });
       }
 
+      // If Stripe shows no active subscription but DB says active, revoke access
+      if (user.subscriptionActive && user.subscriptionTier !== 'free') {
+        await storage.updateWalletUserSubscription(walletAddress, 'free', false, null);
+        return res.json({ tier: 'free', active: false, expiresAt: null });
+      }
+
       res.json({
         tier: user.subscriptionTier,
         active: user.subscriptionActive,
@@ -882,8 +888,29 @@ export async function registerRoutes(
   // Get available Stripe products and prices
   app.get("/api/stripe/products", async (req: Request, res: Response) => {
     try {
-      const rows = await stripeService.listProductsWithPrices();
-      
+      let rows = await stripeService.listProductsWithPrices();
+
+      // If the synced DB table is empty, fall back to querying Stripe directly
+      if (!rows || rows.length === 0) {
+        const directProducts = await stripeService.listProductsWithPricesFromStripe();
+        const data = directProducts.map((p: any) => ({
+          id: p.product_id,
+          name: p.product_name,
+          description: p.product_description,
+          active: p.product_active,
+          metadata: p.product_metadata,
+          prices: p.prices.map((pr: any) => ({
+            id: pr.price_id,
+            unit_amount: pr.unit_amount,
+            currency: pr.currency,
+            recurring: pr.recurring,
+            active: pr.price_active,
+            metadata: pr.price_metadata,
+          })),
+        }));
+        return res.json({ data });
+      }
+
       const productsMap = new Map();
       for (const row of rows as any[]) {
         if (!productsMap.has(row.product_id)) {
