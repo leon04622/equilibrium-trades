@@ -503,7 +503,7 @@ export default function Admin() {
                     <SelectItem value="pro">
                       <div className="flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
-                        AI Pro (£24.99/mo)
+                        AI Pro (£50/mo)
                       </div>
                     </SelectItem>
                     <SelectItem value="elite">

@@ -107,7 +107,7 @@ export const pricingTiers: PricingTier[] = [
   {
     id: "pro",
     name: "AI Pro",
-    price: 24.99,
+    price: 50,
     period: "month",
     description: "AI-powered pattern detection and alerts",
     icon: "pro",
