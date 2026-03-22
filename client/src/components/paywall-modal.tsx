@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { usePaywall } from "@/lib/paywall-context";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import {
   Lock,
   Zap,
@@ -17,8 +18,6 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
 
 const PREMIUM_FEATURES = [
   {
@@ -47,27 +46,45 @@ export function PaywallModal() {
   const { isOpen, triggerFeature, closePaywall } = usePaywall();
   const { address, isConnected, connect } = useWallet();
   const { toast } = useToast();
-  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const handleSubscribe = async () => {
-    if (!isConnected) {
+    // Prompt wallet connection first — address won't be available synchronously
+    // after connect(), so stop here and let the user click again once connected.
+    if (!isConnected || !address) {
       try {
         await connect();
       } catch {
         toast({
           title: "Wallet Required",
-          description: "Connect your wallet first, then subscribe.",
+          description: "Connect your wallet, then click Subscribe again.",
           variant: "destructive",
         });
-        return;
       }
+      return;
     }
 
-    setIsRedirecting(true);
-    const url = address
-      ? `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`
-      : PRO_STRIPE_LINK;
-    window.location.href = url;
+    setIsCheckingOut(true);
+    try {
+      const res = await apiRequest("POST", "/api/stripe/checkout", {
+        walletAddress: address,
+        tier: "pro",
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || "No checkout URL returned");
+      }
+    } catch (err: any) {
+      toast({
+        title: "Checkout Failed",
+        description: err.message || "Could not start checkout. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   return (
@@ -134,14 +151,14 @@ export function PaywallModal() {
         <div className="px-6 pb-6 space-y-3">
           <Button
             onClick={handleSubscribe}
-            disabled={isRedirecting}
+            disabled={isCheckingOut}
             className="w-full h-12 text-base font-semibold gap-2"
             data-testid="button-paywall-subscribe"
           >
-            {isRedirecting ? (
+            {isCheckingOut ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Redirecting to checkout...
+                Starting checkout...
               </>
             ) : (
               <>

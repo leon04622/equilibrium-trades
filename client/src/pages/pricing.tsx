@@ -1,14 +1,14 @@
-import { useEffect } from "react";
-import { Check, Sparkles, Crown, ArrowRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Sparkles, Crown, ArrowRight, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
+import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
 const MENTORING_STRIPE_LINK = "https://buy.stripe.com/eVqeVc3Prc326BI6XH0oM04";
-const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
 
 const proFeatures = [
   "AI-powered pattern detection",
@@ -34,6 +34,7 @@ const mentoringFeatures = [
 export default function Pricing() {
   const { toast } = useToast();
   const { address, isConnected, connect } = useWallet();
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -57,23 +58,43 @@ export default function Pricing() {
   }, [toast]);
 
   const handleProCheckout = async () => {
-    if (!isConnected) {
+    // If wallet not connected, prompt connection first — address won't be
+    // available synchronously after connect(), so we stop here and let the
+    // user click again once their wallet is connected.
+    if (!isConnected || !address) {
       try {
         await connect();
       } catch {
         toast({
           title: "Wallet Required",
-          description: "Please connect your wallet to subscribe.",
+          description: "Please connect your wallet, then click 'Get Pro Access' again.",
           variant: "destructive",
         });
-        return;
       }
+      return;
     }
-    // Build link — include wallet address so we can match the subscription after payment
-    const url = address
-      ? `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`
-      : PRO_STRIPE_LINK;
-    window.location.href = url;
+
+    setIsCheckingOut(true);
+    try {
+      const res = await apiRequest("POST", "/api/stripe/checkout", {
+        walletAddress: address,
+        tier: "pro",
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || "No checkout URL returned");
+      }
+    } catch (err: any) {
+      toast({
+        title: "Checkout Failed",
+        description: err.message || "Could not start checkout. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const handleMentoringCheckout = () => {
@@ -140,10 +161,20 @@ export default function Pricing() {
               className="w-full"
               size="lg"
               onClick={handleProCheckout}
+              disabled={isCheckingOut}
               data-testid="button-subscribe-pro"
             >
-              Get Pro Access
-              <ArrowRight className="h-4 w-4 ml-2" />
+              {isCheckingOut ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Starting checkout...
+                </>
+              ) : (
+                <>
+                  Get Pro Access
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </>
+              )}
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               Cancel anytime. No lock-in.

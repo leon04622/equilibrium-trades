@@ -967,10 +967,29 @@ export async function registerRoutes(
   // Create checkout session for subscription
   app.post("/api/stripe/checkout", async (req: Request, res: Response) => {
     try {
-      const { priceId, walletAddress, email, tier } = req.body;
+      let { priceId, walletAddress, email, tier } = req.body;
       
-      if (!priceId || !walletAddress) {
-        return res.status(400).json({ error: "Price ID and wallet address are required" });
+      if (!walletAddress) {
+        return res.status(400).json({ error: "Wallet address is required" });
+      }
+
+      // Auto-select the correct £50 price for AI Pro if no priceId provided
+      if (!priceId) {
+        const PRO_PRODUCT_ID = 'prod_TpGvzRznydzDhy';
+        try {
+          const stripe = await getUncachableStripeClient();
+          const prices = await stripe.prices.list({ product: PRO_PRODUCT_ID, active: true, limit: 10 });
+          // Prefer £50 (5000 pence), then highest amount as fallback
+          const sorted = prices.data.sort((a, b) => (b.unit_amount || 0) - (a.unit_amount || 0));
+          const monthly = sorted.find(p => p.recurring?.interval === 'month') || sorted[0];
+          if (monthly) priceId = monthly.id;
+        } catch (e) {
+          console.error('Failed to auto-select price:', e);
+        }
+      }
+
+      if (!priceId) {
+        return res.status(400).json({ error: "No active price found for Pro plan" });
       }
 
       // Get or create wallet user
