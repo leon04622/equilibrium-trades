@@ -750,34 +750,31 @@ export async function registerRoutes(
       return { valid: false, isAdmin: false, error: "Admin access required" };
     }
     
-    // Admin wallets are trusted (hardcoded list)
     if (isAdmin) {
       return { valid: true, isAdmin: true };
     }
     
-    // For regular users, just having a connected wallet is enough to use chat
-    // No need to require onboarding for chat functionality
     return { valid: true, isAdmin: false };
   }
 
   // Support Chat API
-  // Get messages for a conversation - users can only access their own conversation, admins can access all
+  // Get messages for a conversation — wallet users own their conversation, guests own their session, admins can access all
   app.get("/api/support/messages/:conversationId", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const sessionId = req.headers["x-session-id"] as string | undefined;
       const conversationId = req.params.conversationId.toLowerCase();
-      
-      const { valid, isAdmin, error } = await verifyWalletAccess(walletAddress);
-      if (!valid) {
-        return res.status(401).json({ error });
+
+      const { isAdminWallet } = await import("@shared/schema");
+      const isAdmin = walletAddress ? isAdminWallet(walletAddress) : false;
+
+      if (!isAdmin) {
+        const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
+        if (!ownerIdentifier || ownerIdentifier !== conversationId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
       }
-      
-      const isOwnConversation = walletAddress!.toLowerCase() === conversationId;
-      
-      if (!isAdmin && !isOwnConversation) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      
+
       const messages = await storage.getMessages(conversationId);
       res.json(messages);
     } catch (error) {
@@ -804,32 +801,36 @@ export async function registerRoutes(
     }
   });
 
-  // Send a message - server validates sender type based on verified wallet
+  // Send a message — wallet users, guest sessions, and admins can all post
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
-      const { insertSupportMessageSchema } = await import("@shared/schema");
+      const { insertSupportMessageSchema, isAdminWallet } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      const { valid, isAdmin, error } = await verifyWalletAccess(walletAddress);
-      if (!valid) {
-        return res.status(401).json({ error });
-      }
-      
+      const sessionId = req.headers["x-session-id"] as string | undefined;
+
+      const isAdmin = walletAddress ? isAdminWallet(walletAddress) : false;
+
       const conversationId = (req.body.conversationId || "").toLowerCase();
-      
-      // Non-admin users can only send to their own conversation
-      if (!isAdmin && walletAddress!.toLowerCase() !== conversationId) {
-        return res.status(403).json({ error: "Can only send to your own conversation" });
+
+      if (!conversationId) {
+        return res.status(400).json({ error: "conversationId is required" });
       }
-      
-      // Override senderType based on server-verified admin status
+
+      if (!isAdmin) {
+        // Non-admin users must own the conversation (matched by wallet or session ID)
+        const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
+        if (!ownerIdentifier || ownerIdentifier !== conversationId) {
+          return res.status(403).json({ error: "Can only send to your own conversation" });
+        }
+      }
+
       const messageData = {
         ...req.body,
         senderType: isAdmin ? "admin" : "user",
-        senderWallet: isAdmin ? null : walletAddress!.toLowerCase(),
-        conversationId: conversationId,
+        senderWallet: isAdmin ? null : (walletAddress?.toLowerCase() || null),
+        conversationId,
       };
-      
+
       const validated = insertSupportMessageSchema.safeParse(messageData);
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });

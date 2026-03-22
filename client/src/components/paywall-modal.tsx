@@ -5,7 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { usePaywall } from "@/lib/paywall-context";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import {
   Lock,
   Zap,
@@ -18,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
 
 const PREMIUM_FEATURES = [
   {
@@ -49,8 +50,6 @@ export function PaywallModal() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const handleSubscribe = async () => {
-    // Prompt wallet connection first — address won't be available synchronously
-    // after connect(), so stop here and let the user click again once connected.
     if (!isConnected || !address) {
       try {
         await connect();
@@ -65,26 +64,8 @@ export function PaywallModal() {
     }
 
     setIsCheckingOut(true);
-    try {
-      const res = await apiRequest("POST", "/api/stripe/checkout", {
-        walletAddress: address,
-        tier: "pro",
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error(data.error || "No checkout URL returned");
-      }
-    } catch (err: any) {
-      toast({
-        title: "Checkout Failed",
-        description: err.message || "Could not start checkout. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsCheckingOut(false);
-    }
+    const url = `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`;
+    window.location.href = url;
   };
 
   return (

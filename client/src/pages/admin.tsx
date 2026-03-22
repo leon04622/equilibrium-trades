@@ -319,6 +319,7 @@ export default function Admin() {
                     <TableHead>Email</TableHead>
                     <TableHead>Plan</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Joined</TableHead>
                     <TableHead>Subscribed On</TableHead>
                     <TableHead>Expires</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -341,6 +342,11 @@ export default function Admin() {
                       </TableCell>
                       <TableCell>
                         {getTierBadge(user.subscriptionTier, user.subscriptionActive)}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {user.createdAt
+                          ? new Date(user.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : "—"}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {user.subscribedAt
