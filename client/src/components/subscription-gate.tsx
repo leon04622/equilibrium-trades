@@ -20,6 +20,7 @@ const featureRequirements: Record<PremiumFeature, { tier: 'pro' | 'elite'; icon:
   live_trading: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Live Trading' },
   trade_journal: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Trade Journal' },
   advanced_education: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Advanced Education' },
+  video_library: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Course Video Library' },
   heatmap: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: 'Liquidity Heatmap' },
   coaching: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: '1-on-1 Coaching' },
 };

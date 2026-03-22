@@ -14,7 +14,8 @@ export type PremiumFeature =
   | 'coaching'
   | 'sma_overlays'
   | 'live_trading'
-  | 'trade_journal';
+  | 'trade_journal'
+  | 'video_library';
 
 export function useSubscription() {
   const { address, isConnected } = useWallet();
@@ -38,6 +39,7 @@ export function useSubscription() {
       case 'sma_overlays':
       case 'live_trading':
       case 'trade_journal':
+      case 'video_library':
         return !!(isPro || isElite);
       // Elite features
       case 'heatmap':

@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useUpload } from "@/hooks/use-upload";
 import { useWallet } from "@/lib/wallet-context";
+import { SubscriptionGate } from "@/components/subscription-gate";
 import type { TutorialVideo } from "@shared/schema";
 
 interface VideoPlayerProps {
@@ -468,7 +469,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-export default function Videos() {
+function VideosContent() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<TutorialVideo | null>(null);
   const { toast } = useToast();
@@ -656,5 +657,17 @@ export default function Videos() {
         onClose={() => setPlayingVideo(null)} 
       />
     </div>
+  );
+}
+
+export default function Videos() {
+  return (
+    <SubscriptionGate
+      feature="video_library"
+      title="Course Video Library"
+      description="Upgrade to Pro to unlock the full course library — strategy breakdowns, pattern walkthroughs, and live trade reviews."
+    >
+      <VideosContent />
+    </SubscriptionGate>
   );
 }

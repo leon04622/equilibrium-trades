@@ -63,6 +63,8 @@ const mainNavItems = [
     title: "Videos",
     url: "/videos",
     icon: Play,
+    badge: "Pro",
+    badgeVariant: "outline" as const,
   },
 ];
 
