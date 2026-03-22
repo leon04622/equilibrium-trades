@@ -176,27 +176,33 @@ export function LiveChat() {
   };
 
   const chatContent = !isOpen ? (
-    <Button
+    <button
       onClick={() => openChat()}
-      className="fixed bottom-24 right-4 md:bottom-6 md:right-6 h-14 w-14 rounded-full shadow-xl border-2 border-primary/30"
-      size="icon"
-      style={{ zIndex: 9999 }}
+      className="fixed bottom-24 right-4 md:bottom-6 md:right-6 flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 h-12 rounded-full shadow-2xl transition-all duration-200 hover:scale-105 active:scale-95"
+      style={{ zIndex: 100000 }}
       data-testid="button-open-chat"
     >
-      <MessageCircle className="h-6 w-6" />
+      <MessageCircle className="h-5 w-5 shrink-0" />
+      <span className="font-semibold text-sm whitespace-nowrap">Chat Support</span>
       {isAdmin && totalUnread > 0 && (
-        <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs bg-destructive">
+        <span className="flex items-center justify-center h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold">
           {totalUnread}
-        </Badge>
+        </span>
       )}
-    </Button>
+      {!isAdmin && (
+        <span className="flex h-2 w-2 shrink-0">
+          <span className="animate-ping absolute h-2 w-2 rounded-full bg-green-400 opacity-75" />
+          <span className="relative h-2 w-2 rounded-full bg-green-500" />
+        </span>
+      )}
+    </button>
   ) : (
     <div
       className={cn(
         "fixed bottom-24 right-4 md:bottom-6 md:right-6 flex flex-col bg-background border rounded-xl shadow-2xl transition-all duration-200",
         isMinimized ? "w-72 h-14" : "w-[340px] sm:w-96 h-[480px] max-h-[80vh]"
       )}
-      style={{ zIndex: 9999 }}
+      style={{ zIndex: 100000 }}
       data-testid="live-chat-widget"
     >
       <div className="flex items-center justify-between px-4 py-3 border-b bg-primary text-primary-foreground rounded-t-xl">

@@ -41,7 +41,7 @@ export function HyperliquidStatus({
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-display flex items-center gap-2">
             <Wallet className="h-4 w-4" />
-            Hyperliquid
+            Trading Account
           </CardTitle>
           <Badge 
             variant={connected ? "default" : "secondary"}
@@ -126,7 +126,7 @@ export function HyperliquidStatus({
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              Connect your Hyperliquid account to start trading with AI-powered pattern detection.
+              Connect your trading account to start trading with AI-powered pattern detection.
             </p>
             <Button 
               className="w-full gap-2" 
@@ -134,7 +134,7 @@ export function HyperliquidStatus({
               data-testid="button-connect-hyperliquid"
             >
               <Link2 className="h-4 w-4" />
-              Connect to Hyperliquid
+              Connect Account
             </Button>
             <p className="text-[10px] text-center text-muted-foreground">
               Your API keys are encrypted and never stored on our servers

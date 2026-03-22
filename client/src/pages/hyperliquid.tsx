@@ -142,7 +142,7 @@ export default function Hyperliquid() {
     disconnectTrading();
     toast({
       title: "Disconnected",
-      description: "Your Hyperliquid account has been disconnected",
+      description: "Your trading account has been disconnected",
     });
   };
 
@@ -158,7 +158,7 @@ export default function Hyperliquid() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <TrendingUp className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-display font-bold">Hyperliquid</h1>
+          <h1 className="text-3xl font-display font-bold">Trading Account</h1>
           <Badge 
             variant={connected ? "default" : "secondary"}
             className={connected ? "bg-success text-success-foreground ml-2" : "ml-2"}
@@ -185,7 +185,7 @@ export default function Hyperliquid() {
           {!connected ? (
             <Card>
               <CardHeader>
-                <CardTitle className="font-display">Connect to Hyperliquid</CardTitle>
+                <CardTitle className="font-display">Connect Trading Account</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <Alert>
@@ -214,7 +214,7 @@ export default function Hyperliquid() {
                       <Wallet className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                       <h3 className="font-semibold mb-2">Connect Your Wallet</h3>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Connect MetaMask or any Web3 wallet to trade on Hyperliquid
+                        Connect MetaMask or any Web3 wallet to access live trading
                       </p>
                       <Button 
                         onClick={handleWalletConnect}
@@ -234,7 +234,7 @@ export default function Hyperliquid() {
                         <Input
                           id="apiKey"
                           type="password"
-                          placeholder="Enter your Hyperliquid API Key"
+                          placeholder="Enter your API Key"
                           value={apiKey}
                           onChange={(e) => setApiKey(e.target.value)}
                           data-testid="input-api-key"
@@ -245,7 +245,7 @@ export default function Hyperliquid() {
                         <Input
                           id="apiSecret"
                           type="password"
-                          placeholder="Enter your Hyperliquid API Secret"
+                          placeholder="Enter your API Secret"
                           value={apiSecret}
                           onChange={(e) => setApiSecret(e.target.value)}
                           data-testid="input-api-secret"
@@ -343,7 +343,7 @@ export default function Hyperliquid() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="font-display">Getting Started with Hyperliquid</CardTitle>
+              <CardTitle className="font-display">Getting Started</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-start gap-4">
@@ -351,7 +351,7 @@ export default function Hyperliquid() {
                   1
                 </div>
                 <div>
-                  <h4 className="font-medium">Create a Hyperliquid Account</h4>
+                  <h4 className="font-medium">Create Your Trading Account</h4>
                   <p className="text-sm text-muted-foreground">
                     Visit{" "}
                     <a 
@@ -423,7 +423,7 @@ export default function Hyperliquid() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base font-display">Why Hyperliquid?</CardTitle>
+              <CardTitle className="text-base font-display">Why This Exchange?</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-start gap-3">
@@ -460,7 +460,7 @@ export default function Hyperliquid() {
             <Info className="h-4 w-4" />
             <AlertTitle>Paper Trading</AlertTitle>
             <AlertDescription className="text-xs">
-              New to trading? Practice with paper trading first on the Hyperliquid testnet 
+              New to trading? Practice with paper trading first on the the paper trading testnet 
               before using real funds.
             </AlertDescription>
           </Alert>

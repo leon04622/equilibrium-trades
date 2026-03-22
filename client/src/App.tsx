@@ -92,10 +92,10 @@ function App() {
                 </div>
                 <MobileBottomNav />
               </SidebarProvider>
-              <LiveChat />
               <Toaster />
               </PaywallProvider>
               </WalletGate>
+              <LiveChat />
             </TooltipProvider>
             </ChatProvider>
           </TradingProvider>

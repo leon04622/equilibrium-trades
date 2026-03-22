@@ -107,7 +107,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
         
         toast({
           title: "Account Created!",
-          description: "Your Hyperliquid account is ready. Redirecting to trading...",
+          description: "Your account is ready. Redirecting to trading...",
         });
 
         if (onComplete) {
@@ -182,7 +182,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
         <CheckCircle2 className="h-4 w-4 text-success" />
         <AlertTitle className="text-success">Account Ready</AlertTitle>
         <AlertDescription>
-          Your Hyperliquid account is connected and ready for trading.
+          Your account is connected and ready for trading.
         </AlertDescription>
       </Alert>
     );
@@ -205,7 +205,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
         ) : (
           <>
             <Zap className="h-4 w-4" />
-            Create Hyperliquid Account
+            Connect & Start Trading
           </>
         )}
       </Button>
@@ -217,7 +217,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
       <CardHeader className="bg-gradient-to-r from-primary/10 to-primary/5">
         <CardTitle className="font-display flex items-center gap-2">
           <Zap className="h-5 w-5 text-primary" />
-          One-Click Hyperliquid Setup
+          One-Click Platform Setup
         </CardTitle>
         <CardDescription>
           Connect your wallet and start trading in seconds
@@ -321,7 +321,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
           ) : (
             <>
               <Zap className="h-4 w-4" />
-              Create Hyperliquid Account
+              Connect & Start Trading
             </>
           )}
         </Button>

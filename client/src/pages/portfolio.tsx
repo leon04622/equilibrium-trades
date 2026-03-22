@@ -181,7 +181,7 @@ export default function Portfolio() {
     }
 
     if (!activeSigner) {
-      const msg = "Wallet signer not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.";
+      const msg = "Wallet signer not available. Please disconnect and reconnect your wallet on the Exchange page, then try again.";
       console.error("[Transfer]", msg);
       setTransferStep("");
       setTransferResult({ success: false, error: msg });
@@ -394,7 +394,7 @@ export default function Portfolio() {
     }
 
     setDepositing(true);
-    setDepositStep("Sending USDC to Hyperliquid — confirm the transaction in your wallet...");
+    setDepositStep("Sending USDC to exchange — confirm the transaction in your wallet...");
 
     try {
       const result = await depositUsdcToHyperliquid(activeSigner, amount);
@@ -402,7 +402,7 @@ export default function Portfolio() {
       setDepositResult(result);
 
       if (result.success) {
-        toast({ title: "Deposit Submitted", description: `${amount} USDC sent to Hyperliquid. It will appear in your account within a few minutes.` });
+        toast({ title: "Deposit Submitted", description: `${amount} USDC sent to your trading account. It will appear in your account within a few minutes.` });
         setTimeout(() => handleRefresh(), 10000);
         setTimeout(() => handleRefresh(), 30000);
       } else {
@@ -433,7 +433,7 @@ export default function Portfolio() {
             <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">Wallet Not Connected</h3>
             <p className="text-muted-foreground mb-4">
-              Connect your wallet to view your Hyperliquid portfolio, positions, and balances.
+              Connect your wallet to view your portfolio, positions, and balances.
             </p>
             <Link href="/hyperliquid">
               <Button data-testid="button-connect-wallet">
@@ -452,7 +452,7 @@ export default function Portfolio() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-          <p className="text-muted-foreground text-sm">Your Hyperliquid holdings and positions</p>
+          <p className="text-muted-foreground text-sm">Your holdings and positions</p>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio" className="h-8 px-2 text-xs">
@@ -570,7 +570,7 @@ export default function Portfolio() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Open Positions</CardTitle>
-              <CardDescription>Your active perpetual futures positions on Hyperliquid</CardDescription>
+              <CardDescription>Your active perpetual futures positions</CardDescription>
             </CardHeader>
             <CardContent>
               {positions.length === 0 ? (
@@ -686,7 +686,7 @@ export default function Portfolio() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Spot Holdings</CardTitle>
-              <CardDescription>Your spot token balances on Hyperliquid</CardDescription>
+              <CardDescription>Your spot token balances</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoadingSpot ? (
@@ -779,7 +779,7 @@ export default function Portfolio() {
           <div className="flex items-center gap-3">
             <div className="h-2 w-2 rounded-full bg-green-500" />
             <span className="text-sm text-muted-foreground">
-              Connected to Hyperliquid Mainnet
+              Connected to Exchange Mainnet
             </span>
           </div>
         </CardContent>
@@ -800,7 +800,7 @@ export default function Portfolio() {
           {!signer && (
             <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>Wallet signing not available. Please go to the Hyperliquid page, disconnect and reconnect your wallet, then return here to transfer.</span>
+              <span>Wallet signing not available. Please go to the Exchange page, disconnect and reconnect your wallet, then return here to transfer.</span>
             </div>
           )}
 
@@ -888,7 +888,7 @@ export default function Portfolio() {
                 <p className="text-xs text-amber-500 mt-1">
                   {transferToPerp
                     ? "No USDC in Spot account. Try switching to Perp → Spot if you have funds in your Perp account."
-                    : "No withdrawable USDC in Perp account. Deposit funds to Hyperliquid first."}
+                    : "No withdrawable USDC in Perp account. Deposit funds to your account first."}
                 </p>
               )}
             </div>
@@ -952,17 +952,17 @@ export default function Portfolio() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowDownToLine className="h-5 w-5 text-primary" />
-              Deposit USDC to Hyperliquid
+              Deposit USDC to Your Account
             </DialogTitle>
             <DialogDescription>
-              Send native USDC from your Arbitrum wallet to your Hyperliquid account. Funds typically arrive within a few minutes.
+              Send native USDC from your Arbitrum wallet to your trading account. Funds typically arrive within a few minutes.
             </DialogDescription>
           </DialogHeader>
 
           {!signer && (
             <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.</span>
+              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Exchange page, then try again.</span>
             </div>
           )}
 
@@ -1061,7 +1061,7 @@ export default function Portfolio() {
                 )}
                 <span className="break-all">
                   {depositResult.success
-                    ? `Deposit of ${depositAmount} USDC submitted! Funds will appear in your Hyperliquid account shortly.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
+                    ? `Deposit of ${depositAmount} USDC submitted! Funds will appear in your trading account shortly.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
                     : depositResult.error || "Deposit failed"}
                 </span>
               </div>
@@ -1107,14 +1107,14 @@ export default function Portfolio() {
               Withdraw USDC to Wallet
             </DialogTitle>
             <DialogDescription>
-              Send USDC from your Hyperliquid perp account to any Arbitrum wallet. Funds arrive on Arbitrum within minutes.
+              Send USDC from your perp account to any Arbitrum wallet. Funds arrive on Arbitrum within minutes.
             </DialogDescription>
           </DialogHeader>
 
           {!signer && (
             <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Hyperliquid page, then try again.</span>
+              <span>Wallet signing not available. Please disconnect and reconnect your wallet on the Exchange page, then try again.</span>
             </div>
           )}
 

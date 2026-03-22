@@ -14,7 +14,7 @@ const proFeatures = [
   "AI-powered pattern detection",
   "Real-time pattern alerts",
   "Full TradingView trading charts",
-  "Hyperliquid exchange connection",
+  "Live trading — 200+ perp & spot markets",
   "Portfolio management & analytics",
   "Trade setup recommendations (entry, SL, TP)",
   "RSI, Stoch RSI & SMA indicators",
@@ -221,7 +221,7 @@ export default function Pricing() {
           <div className="space-y-2">
             <p className="font-medium text-foreground">Exchange Integration</p>
             <ul className="space-y-1">
-              <li>• Hyperliquid connection</li>
+              <li>• Live trading connection</li>
               <li>• Live portfolio view</li>
               <li>• Deposit &amp; withdraw</li>
               <li>• Order management</li>

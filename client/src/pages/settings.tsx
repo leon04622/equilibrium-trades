@@ -398,7 +398,7 @@ export default function Settings() {
                 </Tooltip>
               </div>
               <p className="text-sm text-muted-foreground">
-                Manage your Hyperliquid API credentials
+                Manage your API credentials
               </p>
             </div>
             <Button variant="outline" size="sm" data-testid="button-manage-api">

@@ -38,8 +38,8 @@ const PREMIUM_FEATURES = [
   },
   {
     icon: BarChart2,
-    title: "Live Trading on Hyperliquid",
-    description: "200+ perps & spot markets with direct wallet execution",
+    title: "Live Trading — 200+ Markets",
+    description: "Perps & spot markets with direct wallet execution",
   },
 ];
 

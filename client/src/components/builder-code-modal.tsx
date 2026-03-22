@@ -96,7 +96,7 @@ export function BuilderCodeModal() {
         hideClose
       >
         <DialogTitle className="sr-only">Platform Setup Required</DialogTitle>
-        <DialogDescription className="sr-only">Approve Equilibrium as your builder on Hyperliquid to continue.</DialogDescription>
+        <DialogDescription className="sr-only">Approve Equilibrium as your builder to continue.</DialogDescription>
 
         {/* Header */}
         <div className="bg-gradient-to-br from-primary/20 via-primary/10 to-background px-6 pt-8 pb-6 text-center border-b border-border/50">
@@ -107,7 +107,7 @@ export function BuilderCodeModal() {
             One-Time Platform Setup
           </h2>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-xs mx-auto">
-            Sign a message to authorise Equilibrium as your builder on Hyperliquid. This is free and takes seconds.
+            Sign a one-time message to authorise Equilibrium for trading. This is free and takes seconds.
           </p>
         </div>
 
