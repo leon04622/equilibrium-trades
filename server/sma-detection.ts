@@ -124,111 +124,143 @@ function findSwingPoints(candles: HyperliquidCandle[], lookback: number = 5): { 
 }
 
 // Detect Bull/Bear Flag patterns
+// Window: 60 candles total
+//   Candles  0-25: look for the POLE (sharp impulse move)
+//   Candles 25-50: FLAG consolidation (must slope counter to the pole)
+//   Candles 50-59: BREAKOUT check (current price vs flag boundary)
 function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
   const thresholds = getThresholds(timeframe);
-  if (candles.length < 50) return null;
-  
-  const recentCandles = candles.slice(-50);
-  const closePrices = recentCandles.map(c => parseFloat(c.c));
-  const highPrices = recentCandles.map(c => parseFloat(c.h));
-  const lowPrices = recentCandles.map(c => parseFloat(c.l));
-  
-  // Find the pole (impulse move)
-  let poleStart = 0, poleEnd = 0, poleHeight = 0;
-  
+  if (candles.length < 60) return null;
+
+  const window = candles.slice(-60);
+  const poleCandles  = window.slice(0, 25);
+  const flagCandles  = window.slice(25, 50);  // the consolidation channel
+  const recentCandles = window.slice(50);     // last 10 — breakout zone
+
+  const currentPrice = parseFloat(window[window.length - 1].c);
+
   if (isBullish) {
-    const minIdx = lowPrices.slice(0, 30).indexOf(Math.min(...lowPrices.slice(0, 30)));
-    const maxAfterMin = Math.max(...highPrices.slice(minIdx, 35));
-    const maxIdx = minIdx + highPrices.slice(minIdx, 35).indexOf(maxAfterMin);
-    
-    poleStart = lowPrices[minIdx];
-    poleEnd = maxAfterMin;
-    poleHeight = poleEnd - poleStart;
-    
-    const heightPercent = (poleHeight / poleStart) * 100;
-    if (heightPercent < thresholds.minMovePercent) return null;
-    
-    // Check for flag consolidation in last 15 candles
-    const flagCandles = recentCandles.slice(-15);
-    const flagHigh = Math.max(...flagCandles.map(c => parseFloat(c.h)));
-    const flagLow = Math.min(...flagCandles.map(c => parseFloat(c.l)));
-    const currentPrice = closePrices[closePrices.length - 1];
-    
-    const flagRange = flagHigh - flagLow;
-    if (flagRange / poleHeight > 0.7) return null; // Flag too large
-    
+    // ── POLE: sharp upward move ──────────────────────────────────────────────
+    const poleHighPrices = poleCandles.map(c => parseFloat(c.h));
+    const poleLowPrices  = poleCandles.map(c => parseFloat(c.l));
+    const poleBottom     = Math.min(...poleLowPrices);
+    const poleTop        = Math.max(...poleHighPrices);
+    const poleHeight     = poleTop - poleBottom;
+    const poleHeightPct  = (poleHeight / poleBottom) * 100;
+
+    // Pole must meet minimum move threshold
+    if (poleHeightPct < thresholds.minMovePercent) return null;
+    // Pole must end ABOVE where it started (genuinely bullish impulse)
+    if (poleTop <= poleBottom) return null;
+
+    // ── FLAG: tight downward-sloping consolidation after the pole ────────────
+    const flagHighs = flagCandles.map(c => parseFloat(c.h));
+    const flagLows  = flagCandles.map(c => parseFloat(c.l));
+    const flagUpperBound = Math.max(...flagHighs);
+    const flagLowerBound = Math.min(...flagLows);
+    const flagRange = flagUpperBound - flagLowerBound;
+
+    // Flag must be tighter than 65% of the pole height
+    if (flagRange / poleHeight > 0.65) return null;
+
+    // Flag must not retrace more than 60% of the pole
+    const retraceFromTop = poleTop - flagLowerBound;
+    if (retraceFromTop / poleHeight > 0.6) return null;
+
+    // Flag must stay ABOVE the pole's base (not give back the whole move)
+    if (flagLowerBound < poleBottom) return null;
+
+    // Flag should slope downward (counter to the pole) — check using first vs last flag candles
+    const firstFlagClose = parseFloat(flagCandles[0].c);
+    const lastFlagClose  = parseFloat(flagCandles[flagCandles.length - 1].c);
+    // Allow neutral flags (flat) too, but reject upward-sloping flags
+    const flagSlopePct = ((lastFlagClose - firstFlagClose) / firstFlagClose) * 100;
+    if (flagSlopePct > 0.3) return null; // Flag sloping up too much — not a bull flag
+
+    // ── BREAKOUT: current price vs flag upper boundary ────────────────────────
     let status: DetectedPattern["status"] = "forming";
-    const breakoutPercent = ((currentPrice - flagHigh) / flagHigh) * 100;
-    if (breakoutPercent > thresholds.minBreakoutPercent) {
+    const recentHigh = Math.max(...recentCandles.map(c => parseFloat(c.h)));
+    const breakoutPct = ((recentHigh - flagUpperBound) / flagUpperBound) * 100;
+    if (breakoutPct > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
-    } else if (currentPrice > flagHigh) {
+    } else if (currentPrice > flagUpperBound) {
       status = "breakout_pending";
     }
-    
-    const slBuffer = flagRange * 0.1;
-    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagHigh;
-    let takeProfit = flagHigh + poleHeight;
-    // For bullish patterns, TP MUST be above entry
-    if (takeProfit <= entryPrice) {
-      takeProfit = entryPrice + poleHeight;
-    }
-    
+
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagUpperBound;
+    let takeProfit = flagUpperBound + poleHeight;
+    if (takeProfit <= entryPrice) takeProfit = entryPrice + poleHeight;
+
     return {
       name: "bull_flag",
       displayName: "Bull Flag",
       status,
       entryPrice,
-      stopLoss: flagLow - slBuffer,
+      stopLoss: flagLowerBound - flagRange * 0.1,
       takeProfit,
-      breakoutLevel: flagHigh,
+      breakoutLevel: flagUpperBound,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 80 : 55,
+      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 52,
     };
+
   } else {
-    const maxIdx = highPrices.slice(0, 30).indexOf(Math.max(...highPrices.slice(0, 30)));
-    const minAfterMax = Math.min(...lowPrices.slice(maxIdx, 35));
-    
-    poleStart = highPrices[maxIdx];
-    poleEnd = minAfterMax;
-    poleHeight = poleStart - poleEnd;
-    
-    const heightPercent = (poleHeight / poleStart) * 100;
-    if (heightPercent < thresholds.minMovePercent) return null;
-    
-    const flagCandles = recentCandles.slice(-15);
-    const flagHigh = Math.max(...flagCandles.map(c => parseFloat(c.h)));
-    const flagLow = Math.min(...flagCandles.map(c => parseFloat(c.l)));
-    const currentPrice = closePrices[closePrices.length - 1];
-    
-    const flagRange = flagHigh - flagLow;
-    if (flagRange / poleHeight > 0.7) return null;
-    
+    // ── POLE: sharp downward move ─────────────────────────────────────────────
+    const poleHighPrices = poleCandles.map(c => parseFloat(c.h));
+    const poleLowPrices  = poleCandles.map(c => parseFloat(c.l));
+    const poleTop        = Math.max(...poleHighPrices);
+    const poleBottom     = Math.min(...poleLowPrices);
+    const poleHeight     = poleTop - poleBottom;
+    const poleHeightPct  = (poleHeight / poleTop) * 100;
+
+    if (poleHeightPct < thresholds.minMovePercent) return null;
+    if (poleBottom >= poleTop) return null;
+
+    // ── FLAG: tight upward-sloping consolidation after the pole ──────────────
+    const flagHighs = flagCandles.map(c => parseFloat(c.h));
+    const flagLows  = flagCandles.map(c => parseFloat(c.l));
+    const flagUpperBound = Math.max(...flagHighs);
+    const flagLowerBound = Math.min(...flagLows);
+    const flagRange = flagUpperBound - flagLowerBound;
+
+    if (flagRange / poleHeight > 0.65) return null;
+
+    // Flag must not retrace more than 60% of the pole
+    const retraceFromBottom = flagUpperBound - poleBottom;
+    if (retraceFromBottom / poleHeight > 0.6) return null;
+
+    // Flag must stay BELOW the pole's peak
+    if (flagUpperBound > poleTop) return null;
+
+    // Flag should slope upward (counter to the pole) — reject downward-sloping flags
+    const firstFlagClose = parseFloat(flagCandles[0].c);
+    const lastFlagClose  = parseFloat(flagCandles[flagCandles.length - 1].c);
+    const flagSlopePct = ((lastFlagClose - firstFlagClose) / firstFlagClose) * 100;
+    if (flagSlopePct < -0.3) return null; // Flag sloping down too much — not a bear flag
+
+    // ── BREAKOUT: current price vs flag lower boundary ────────────────────────
     let status: DetectedPattern["status"] = "forming";
-    const breakoutPercent = ((flagLow - currentPrice) / flagLow) * 100;
-    if (breakoutPercent > thresholds.minBreakoutPercent) {
+    const recentLow = Math.min(...recentCandles.map(c => parseFloat(c.l)));
+    const breakoutPct = ((flagLowerBound - recentLow) / flagLowerBound) * 100;
+    if (breakoutPct > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
-    } else if (currentPrice < flagLow) {
+    } else if (currentPrice < flagLowerBound) {
       status = "breakout_pending";
     }
-    
-    const slBuffer = flagRange * 0.1;
-    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagLow;
-    let takeProfit = flagLow - poleHeight;
-    // For bearish patterns, TP MUST be below entry
-    if (takeProfit >= entryPrice) {
-      takeProfit = entryPrice - poleHeight;
-    }
-    
+
+    const entryPrice = status === "breakout_confirmed" ? currentPrice : flagLowerBound;
+    let takeProfit = flagLowerBound - poleHeight;
+    if (takeProfit >= entryPrice) takeProfit = entryPrice - poleHeight;
+
     return {
       name: "bear_flag",
       displayName: "Bear Flag",
       status,
       entryPrice,
-      stopLoss: flagHigh + slBuffer,
+      stopLoss: flagUpperBound + flagRange * 0.1,
       takeProfit,
-      breakoutLevel: flagLow,
+      breakoutLevel: flagLowerBound,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 80 : 55,
+      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 52,
     };
   }
 }
@@ -305,9 +337,13 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   
   if (isBullish && (patternName === "ascending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = resistance;
-    const breakoutPercent = ((currentPrice - resistance) / resistance) * 100;
+    // Use recent 5-candle high to catch a confirmed breakout that closed above
+    const recentHigh = Math.max(...recentCandles.slice(-5).map(c => parseFloat(c.h)));
+    const breakoutPercent = ((recentHigh - resistance) / resistance) * 100;
     if (breakoutPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
+    } else if (currentPrice > resistance) {
+      status = "breakout_pending";
     }
     entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = support - (range * 0.1);
@@ -315,9 +351,13 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     if (takeProfit <= entryPrice) takeProfit = entryPrice + range;
   } else if (!isBullish && (patternName === "descending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = support;
-    const breakoutPercent = ((support - currentPrice) / support) * 100;
-    if (breakoutPercent > thresholds.minBreakoutPercent) {
+    // Use recent 5-candle low to catch a confirmed breakdown that closed below
+    const recentLow = Math.min(...recentCandles.slice(-5).map(c => parseFloat(c.l)));
+    const breakdownPercent = ((support - recentLow) / support) * 100;
+    if (breakdownPercent > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
+    } else if (currentPrice < support) {
+      status = "breakout_pending";
     }
     entryPrice = status === "breakout_confirmed" ? currentPrice : breakoutLevel;
     stopLoss = resistance + (range * 0.1);
@@ -326,7 +366,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   } else {
     return null;
   }
-  
+
   return {
     name: patternName,
     displayName,
@@ -336,7 +376,7 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     takeProfit,
     breakoutLevel,
     currentPrice,
-    confidence: status === "breakout_confirmed" ? 75 : 50,
+    confidence: status === "breakout_confirmed" ? 75 : status === "breakout_pending" ? 60 : 48,
   };
 }
 
@@ -487,41 +527,71 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
 }
 
 // Detect Wedge patterns (Rising/Falling)
+// A wedge is defined by two converging trendlines — both pointing the SAME direction
+// (both up for rising wedge, both down for falling wedge) but with different slopes,
+// so the lines are squeezing together. The breakout is AGAINST the wedge direction.
 function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
   if (candles.length < 40) return null;
-  
+
   const thresholds = getThresholds(timeframe);
   const recentCandles = candles.slice(-40);
+  const avgPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
   const { highs, lows } = findSwingPoints(recentCandles, 3);
-  
+
   if (highs.length < 3 || lows.length < 3) return null;
-  
+
   const recentHighs = highs.slice(-3);
-  const recentLows = lows.slice(-3);
-  
-  const highSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
-  const lowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
-  
+  const recentLows  = lows.slice(-3);
+
+  const highIdxSpan = (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx) || 1;
+  const lowIdxSpan  = (recentLows[recentLows.length - 1].idx  - recentLows[0].idx)  || 1;
+
+  // Raw slopes (price per candle)
+  const highSlopeRaw = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / highIdxSpan;
+  const lowSlopeRaw  = (recentLows[recentLows.length - 1].price  - recentLows[0].price)  / lowIdxSpan;
+
+  // Normalize slopes to % of current price per candle (so BTC vs altcoins use same thresholds)
+  const highSlope = (highSlopeRaw / avgPrice) * 100;
+  const lowSlope  = (lowSlopeRaw  / avgPrice) * 100;
+
   const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
-  const resistance = recentHighs[recentHighs.length - 1].price;
-  const support = recentLows[recentLows.length - 1].price;
-  const range = resistance - support;
-  
-  // Rising Wedge (bearish) - both lines rising, converging
-  if (highSlope > 0 && lowSlope > 0 && highSlope < lowSlope && !isBullish) {
+  const resistance   = recentHighs[recentHighs.length - 1].price;
+  const support      = recentLows[recentLows.length - 1].price;
+  const range        = resistance - support;
+
+  // Guard: trendlines must not have already crossed; range must be meaningful
+  if (resistance <= support) return null;
+  const rangePct = (range / avgPrice) * 100;
+  if (rangePct < 0.3) return null; // Wedge too flat to be meaningful
+
+  // Guard: slopes must be meaningfully non-zero (at least 0.01% per candle)
+  const minSlopeMag = 0.01;
+
+  // ── Rising Wedge (bearish) ────────────────────────────────────────────────
+  // Both trendlines slope UP, but lower rises faster → lines converge from below
+  // highSlope > 0, lowSlope > 0, lowSlope > highSlope (lower rising faster)
+  if (
+    highSlope > minSlopeMag &&
+    lowSlope  > minSlopeMag &&
+    lowSlope  > highSlope &&          // lower trendline rises faster → convergence
+    !isBullish
+  ) {
+    // Measure convergence: difference in slopes must be at least 0.01%/candle
+    if (lowSlope - highSlope < minSlopeMag) return null;
+
     let status: DetectedPattern["status"] = "forming";
-    const breakoutPercent = ((support - currentPrice) / support) * 100;
-    if (breakoutPercent > thresholds.minBreakoutPercent) {
+    const recentLow = Math.min(...recentCandles.slice(-5).map(c => parseFloat(c.l)));
+    const breakdownPct = ((support - recentLow) / support) * 100;
+    if (breakdownPct > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
+    } else if (currentPrice < support) {
+      status = "breakout_pending";
     }
-    
+
     const entryPrice = status === "breakout_confirmed" ? currentPrice : support;
     let takeProfit = support - range;
-    // For bearish patterns, TP MUST be below entry
-    if (takeProfit >= entryPrice) {
-      takeProfit = entryPrice - range;
-    }
-    
+    if (takeProfit >= entryPrice) takeProfit = entryPrice - range;
+
     return {
       name: "rising_wedge",
       displayName: "Rising Wedge (Bearish)",
@@ -531,26 +601,35 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
       takeProfit,
       breakoutLevel: support,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 70 : 45,
+      confidence: status === "breakout_confirmed" ? 70 : status === "breakout_pending" ? 55 : 42,
     };
   }
-  
-  // Falling Wedge (bullish) - both lines falling, upper falls faster → converging
-  // highSlope < lowSlope means upper trendline falls faster (more negative), so lines converge
-  if (highSlope < 0 && lowSlope < 0 && highSlope < lowSlope && isBullish) {
+
+  // ── Falling Wedge (bullish) ───────────────────────────────────────────────
+  // Both trendlines slope DOWN, but upper falls faster → lines converge from above
+  // highSlope < 0, lowSlope < 0, highSlope < lowSlope (upper falling faster = more negative)
+  if (
+    highSlope < -minSlopeMag &&
+    lowSlope  < -minSlopeMag &&
+    highSlope <  lowSlope &&           // upper falls faster → convergence
+    isBullish
+  ) {
+    // Measure convergence
+    if (lowSlope - highSlope < minSlopeMag) return null;
+
     let status: DetectedPattern["status"] = "forming";
-    const breakoutPercent = ((currentPrice - resistance) / resistance) * 100;
-    if (breakoutPercent > thresholds.minBreakoutPercent) {
+    const recentHigh = Math.max(...recentCandles.slice(-5).map(c => parseFloat(c.h)));
+    const breakoutPct = ((recentHigh - resistance) / resistance) * 100;
+    if (breakoutPct > thresholds.minBreakoutPercent) {
       status = "breakout_confirmed";
+    } else if (currentPrice > resistance) {
+      status = "breakout_pending";
     }
-    
+
     const entryPrice = status === "breakout_confirmed" ? currentPrice : resistance;
     let takeProfit = resistance + range;
-    // For bullish patterns, TP MUST be above entry
-    if (takeProfit <= entryPrice) {
-      takeProfit = entryPrice + range;
-    }
-    
+    if (takeProfit <= entryPrice) takeProfit = entryPrice + range;
+
     return {
       name: "falling_wedge",
       displayName: "Falling Wedge (Bullish)",
@@ -560,10 +639,10 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
       takeProfit,
       breakoutLevel: resistance,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 70 : 45,
+      confidence: status === "breakout_confirmed" ? 70 : status === "breakout_pending" ? 55 : 42,
     };
   }
-  
+
   return null;
 }
 
