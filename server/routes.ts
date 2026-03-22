@@ -15,7 +15,7 @@ import {
 import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
 import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
-import { getStripePublishableKey } from "./stripeClient";
+import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -939,6 +939,28 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching Stripe products:", error);
       res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  // Get the Pro tier price ID directly (bypasses name/metadata matching)
+  app.get("/api/stripe/pro-price-id", async (req: Request, res: Response) => {
+    const PRO_PRODUCT_ID = 'prod_TpGvzRznydzDhy';
+    try {
+      // Try synced DB first
+      const rows = await stripeService.listProductsWithPrices();
+      if (rows && (rows as any[]).length > 0) {
+        const proRow = (rows as any[]).find((r: any) => r.product_id === PRO_PRODUCT_ID && r.price_id);
+        if (proRow) return res.json({ priceId: proRow.price_id });
+      }
+      // Fall back to Stripe API directly
+      const stripe = await getUncachableStripeClient();
+      const prices = await stripe.prices.list({ product: PRO_PRODUCT_ID, active: true, limit: 10 });
+      const monthly = prices.data.find((p) => p.recurring?.interval === 'month') || prices.data[0];
+      if (monthly) return res.json({ priceId: monthly.id });
+      res.status(404).json({ error: 'Pro price not found' });
+    } catch (error) {
+      console.error("Error fetching Pro price ID:", error);
+      res.status(500).json({ error: "Failed to fetch Pro price ID" });
     }
   });
 

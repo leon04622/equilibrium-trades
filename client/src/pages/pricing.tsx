@@ -30,26 +30,11 @@ const mentoringFeatures = [
   "Direct access & messaging support",
 ];
 
-interface StripePrice {
-  id: string;
-  unit_amount: number;
-  currency: string;
-  recurring: { interval: string } | null;
-}
-
-interface StripeProduct {
-  id: string;
-  name: string;
-  description: string;
-  metadata: { tier?: string };
-  prices: StripePrice[];
-}
 
 export default function Pricing() {
   const { toast } = useToast();
   const { address, isConnected, connect } = useWallet();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const [stripeProducts, setStripeProducts] = useState<StripeProduct[]>([]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -72,29 +57,6 @@ export default function Pricing() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    async function fetchProducts() {
-      try {
-        const response = await fetch("/api/stripe/products");
-        if (response.ok) {
-          const data = await response.json();
-          setStripeProducts(data.data || []);
-        }
-      } catch (error) {
-        console.error("Failed to fetch Stripe products:", error);
-      }
-    }
-    fetchProducts();
-  }, []);
-
-  const getProPriceId = (): string | null => {
-    const product = stripeProducts.find(
-      (p) => p.name === "AI Pro" || p.metadata?.tier === "pro"
-    );
-    if (!product || product.prices.length === 0) return null;
-    return product.prices[0].id;
-  };
-
   const handleProCheckout = async () => {
     if (!isConnected) {
       try {
@@ -109,18 +71,13 @@ export default function Pricing() {
       }
     }
 
-    const priceId = getProPriceId();
-    if (!priceId) {
-      toast({
-        title: "Not Ready Yet",
-        description: "Payment is being set up. Please try again in a moment.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsCheckingOut(true);
     try {
+      const priceRes = await fetch("/api/stripe/pro-price-id");
+      if (!priceRes.ok) throw new Error("Could not load price");
+      const { priceId } = await priceRes.json();
+      if (!priceId) throw new Error("No price ID returned");
+
       const response = await apiRequest("POST", "/api/stripe/checkout", {
         priceId,
         walletAddress: address,
