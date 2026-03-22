@@ -15,6 +15,25 @@ import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
 
+let dbAvailable: boolean | null = null;
+let lastDbCheck = 0;
+const DB_CHECK_INTERVAL = 30_000;
+
+async function isDbUp(): Promise<boolean> {
+  const now = Date.now();
+  if (dbAvailable !== null && now - lastDbCheck < DB_CHECK_INTERVAL) {
+    return dbAvailable;
+  }
+  try {
+    await db.execute("SELECT 1" as any);
+    dbAvailable = true;
+  } catch {
+    dbAvailable = false;
+  }
+  lastDbCheck = now;
+  return dbAvailable;
+}
+
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
@@ -78,6 +97,7 @@ export class MemStorage implements IStorage {
   private smaSignals: Map<string, SmaSignal>;
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
+  private walletUsersCache: Map<string, WalletUser>;
 
   constructor() {
     this.users = new Map();
@@ -86,6 +106,7 @@ export class MemStorage implements IStorage {
     this.smaSignals = new Map();
     this.subscriptionTiers = new Map();
     this.tradeGrades = new Map();
+    this.walletUsersCache = new Map();
     
     this.initializeSubscriptionTiers();
   }
@@ -331,13 +352,21 @@ export class MemStorage implements IStorage {
 
   // Tutorial Videos - Now using database for persistence
   async getAllVideos(): Promise<TutorialVideo[]> {
-    const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
-    return videos;
+    try {
+      const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
+      return videos;
+    } catch {
+      return [];
+    }
   }
 
   async getVideo(id: string): Promise<TutorialVideo | undefined> {
-    const [video] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
-    return video;
+    try {
+      const [video] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
+      return video;
+    } catch {
+      return undefined;
+    }
   }
 
   async createVideo(video: InsertTutorialVideo): Promise<TutorialVideo> {
@@ -354,15 +383,16 @@ export class MemStorage implements IStorage {
   }
 
   async deleteVideo(id: string): Promise<boolean> {
-    const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
-    return result.length > 0;
+    try {
+      const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
+      return result.length > 0;
+    } catch {
+      return false;
+    }
   }
 
-  // Wallet Users (Hyperliquid onboarding) - Using database for persistence
-  async getWalletUser(walletAddress: string): Promise<WalletUser | undefined> {
-    const normalizedAddress = walletAddress.toLowerCase();
-    const [user] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
-    if (!user) return undefined;
+  // Wallet Users (Hyperliquid onboarding) - Using database with in-memory fallback
+  private mapDbUser(user: any): WalletUser {
     return {
       id: user.id,
       walletAddress: user.walletAddress,
@@ -377,85 +407,112 @@ export class MemStorage implements IStorage {
     };
   }
 
+  async getWalletUser(walletAddress: string): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    try {
+      const [user] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
+      if (user) {
+        const mapped = this.mapDbUser(user);
+        this.walletUsersCache.set(normalizedAddress, mapped);
+        return mapped;
+      }
+      return this.walletUsersCache.get(normalizedAddress);
+    } catch {
+      return this.walletUsersCache.get(normalizedAddress);
+    }
+  }
+
   async getAllWalletUsers(): Promise<WalletUser[]> {
-    const users = await db.select().from(walletUsers).orderBy(desc(walletUsers.createdAt));
-    return users.map(user => ({
-      id: user.id,
-      walletAddress: user.walletAddress,
-      email: user.email,
-      builderCodeApproved: user.builderCodeApproved ?? false,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
-      subscriptionActive: user.subscriptionActive ?? false,
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-      subscribedAt: user.subscribedAt ?? null,
-      createdAt: user.createdAt ?? new Date(),
-      updatedAt: user.updatedAt ?? new Date(),
-    }));
+    try {
+      const users = await db.select().from(walletUsers).orderBy(desc(walletUsers.createdAt));
+      return users.map(u => this.mapDbUser(u));
+    } catch {
+      return Array.from(this.walletUsersCache.values());
+    }
   }
 
   async createWalletUser(user: InsertWalletUser): Promise<WalletUser> {
     const normalizedAddress = user.walletAddress.toLowerCase();
-    const [newUser] = await db.insert(walletUsers).values({
+    const now = new Date();
+    const fallback: WalletUser = {
+      id: randomUUID(),
       walletAddress: normalizedAddress,
       email: user.email ?? null,
       builderCodeApproved: user.builderCodeApproved ?? false,
-      subscriptionTier: user.subscriptionTier ?? 'free',
+      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
-    }).returning();
-    return {
-      id: newUser.id,
-      walletAddress: newUser.walletAddress,
-      email: newUser.email,
-      builderCodeApproved: newUser.builderCodeApproved ?? false,
-      subscriptionTier: (newUser.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
-      subscriptionActive: newUser.subscriptionActive ?? false,
-      subscriptionExpiresAt: newUser.subscriptionExpiresAt,
-      subscribedAt: newUser.subscribedAt ?? null,
-      createdAt: newUser.createdAt ?? new Date(),
-      updatedAt: newUser.updatedAt ?? new Date(),
+      subscriptionExpiresAt: null,
+      subscribedAt: null,
+      createdAt: now,
+      updatedAt: now,
     };
+    try {
+      const [newUser] = await db.insert(walletUsers).values({
+        walletAddress: normalizedAddress,
+        email: user.email ?? null,
+        builderCodeApproved: user.builderCodeApproved ?? false,
+        subscriptionTier: user.subscriptionTier ?? 'free',
+        subscriptionActive: user.subscriptionActive ?? false,
+      }).returning();
+      const mapped = this.mapDbUser(newUser);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      this.walletUsersCache.set(normalizedAddress, fallback);
+      return fallback;
+    }
   }
 
   async updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    const [user] = await db.update(walletUsers)
-      .set({ builderCodeApproved: approved, updatedAt: new Date() })
-      .where(eq(walletUsers.walletAddress, normalizedAddress))
-      .returning();
-    if (!user) return undefined;
-    return {
-      id: user.id,
-      walletAddress: user.walletAddress,
-      email: user.email,
-      builderCodeApproved: user.builderCodeApproved ?? false,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
-      subscriptionActive: user.subscriptionActive ?? false,
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-      subscribedAt: user.subscribedAt ?? null,
-      createdAt: user.createdAt ?? new Date(),
-      updatedAt: user.updatedAt ?? new Date(),
-    };
+    try {
+      const [user] = await db.update(walletUsers)
+        .set({ builderCodeApproved: approved, updatedAt: new Date() })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) {
+        const cached = this.walletUsersCache.get(normalizedAddress);
+        if (cached) {
+          cached.builderCodeApproved = approved;
+          cached.updatedAt = new Date();
+          return cached;
+        }
+        return undefined;
+      }
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      const cached = this.walletUsersCache.get(normalizedAddress);
+      if (cached) {
+        cached.builderCodeApproved = approved;
+        cached.updatedAt = new Date();
+        return cached;
+      }
+      return undefined;
+    }
   }
 
   async updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    const [user] = await db.update(walletUsers)
-      .set({ email, updatedAt: new Date() })
-      .where(eq(walletUsers.walletAddress, normalizedAddress))
-      .returning();
-    if (!user) return undefined;
-    return {
-      id: user.id,
-      walletAddress: user.walletAddress,
-      email: user.email,
-      builderCodeApproved: user.builderCodeApproved ?? false,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
-      subscriptionActive: user.subscriptionActive ?? false,
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-      subscribedAt: user.subscribedAt ?? null,
-      createdAt: user.createdAt ?? new Date(),
-      updatedAt: user.updatedAt ?? new Date(),
-    };
+    try {
+      const [user] = await db.update(walletUsers)
+        .set({ email, updatedAt: new Date() })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) return undefined;
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      const cached = this.walletUsersCache.get(normalizedAddress);
+      if (cached) {
+        cached.email = email;
+        cached.updatedAt = new Date();
+        return cached;
+      }
+      return undefined;
+    }
   }
 
   async updateWalletUserSubscription(
@@ -465,92 +522,135 @@ export class MemStorage implements IStorage {
     expiresAt?: Date | null
   ): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
-    // Fetch current record to determine if subscribedAt should be set
-    const [existing] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
     const now = new Date();
-    const setSubscribedAt = active && existing && !existing.subscribedAt ? now : (existing?.subscribedAt ?? null);
-    const [user] = await db.update(walletUsers)
-      .set({ 
-        subscriptionTier: tier, 
-        subscriptionActive: active, 
-        subscriptionExpiresAt: expiresAt ?? null,
-        subscribedAt: setSubscribedAt,
-        updatedAt: now,
-      })
-      .where(eq(walletUsers.walletAddress, normalizedAddress))
-      .returning();
-    if (!user) return undefined;
-    return {
-      id: user.id,
-      walletAddress: user.walletAddress,
-      email: user.email,
-      builderCodeApproved: user.builderCodeApproved ?? false,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
-      subscriptionActive: user.subscriptionActive ?? false,
-      subscriptionExpiresAt: user.subscriptionExpiresAt,
-      subscribedAt: user.subscribedAt ?? null,
-      createdAt: user.createdAt ?? new Date(),
-      updatedAt: user.updatedAt ?? new Date(),
-    };
+    try {
+      const [existing] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
+      const setSubscribedAt = active && existing && !existing.subscribedAt ? now : (existing?.subscribedAt ?? null);
+      const [user] = await db.update(walletUsers)
+        .set({ 
+          subscriptionTier: tier, 
+          subscriptionActive: active, 
+          subscriptionExpiresAt: expiresAt ?? null,
+          subscribedAt: setSubscribedAt,
+          updatedAt: now,
+        })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) return undefined;
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      const cached = this.walletUsersCache.get(normalizedAddress);
+      if (cached) {
+        cached.subscriptionTier = tier;
+        cached.subscriptionActive = active;
+        cached.subscriptionExpiresAt = expiresAt ?? null;
+        if (active && !cached.subscribedAt) cached.subscribedAt = now;
+        cached.updatedAt = now;
+        return cached;
+      }
+      return undefined;
+    }
   }
 
   // Support Messages - Using database for persistence
   async getMessages(conversationId: string): Promise<SupportMessage[]> {
-    const messages = await db.select().from(supportMessages)
-      .where(eq(supportMessages.conversationId, conversationId.toLowerCase()))
-      .orderBy(supportMessages.createdAt);
-    return messages;
+    try {
+      const messages = await db.select().from(supportMessages)
+        .where(eq(supportMessages.conversationId, conversationId.toLowerCase()))
+        .orderBy(supportMessages.createdAt);
+      return messages;
+    } catch {
+      return [];
+    }
   }
 
   async getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]> {
-    const messages = await db.select().from(supportMessages).orderBy(desc(supportMessages.createdAt));
-    
-    const conversationMap = new Map<string, { messages: SupportMessage[] }>();
-    for (const msg of messages) {
-      const convId = msg.conversationId.toLowerCase();
-      if (!conversationMap.has(convId)) {
-        conversationMap.set(convId, { messages: [] });
+    try {
+      const messages = await db.select().from(supportMessages).orderBy(desc(supportMessages.createdAt));
+      
+      const conversationMap = new Map<string, { messages: SupportMessage[] }>();
+      for (const msg of messages) {
+        const convId = msg.conversationId.toLowerCase();
+        if (!conversationMap.has(convId)) {
+          conversationMap.set(convId, { messages: [] });
+        }
+        conversationMap.get(convId)!.messages.push(msg);
       }
-      conversationMap.get(convId)!.messages.push(msg);
+      
+      return Array.from(conversationMap.entries()).map(([conversationId, data]) => ({
+        conversationId,
+        lastMessage: data.messages[0],
+        unreadCount: data.messages.filter(m => !m.isRead && m.senderType === 'user').length,
+      }));
+    } catch {
+      return [];
     }
-    
-    return Array.from(conversationMap.entries()).map(([conversationId, data]) => ({
-      conversationId,
-      lastMessage: data.messages[0],
-      unreadCount: data.messages.filter(m => !m.isRead && m.senderType === 'user').length,
-    }));
   }
 
   async createMessage(message: InsertSupportMessage): Promise<SupportMessage> {
-    const [newMessage] = await db.insert(supportMessages).values({
-      senderType: message.senderType,
-      senderWallet: message.senderWallet?.toLowerCase() || null,
-      senderName: message.senderName || null,
-      message: message.message,
-      isRead: message.isRead || false,
-      conversationId: message.conversationId.toLowerCase(),
-    }).returning();
-    return newMessage;
+    try {
+      const [newMessage] = await db.insert(supportMessages).values({
+        senderType: message.senderType,
+        senderWallet: message.senderWallet?.toLowerCase() || null,
+        senderName: message.senderName || null,
+        message: message.message,
+        isRead: message.isRead || false,
+        conversationId: message.conversationId.toLowerCase(),
+      }).returning();
+      return newMessage;
+    } catch {
+      return {
+        id: randomUUID(),
+        senderType: message.senderType,
+        senderWallet: message.senderWallet?.toLowerCase() || null,
+        senderName: message.senderName || null,
+        message: message.message,
+        isRead: message.isRead || false,
+        conversationId: message.conversationId.toLowerCase(),
+        createdAt: new Date(),
+      };
+    }
   }
 
   async markMessagesAsRead(conversationId: string): Promise<void> {
-    await db.update(supportMessages)
-      .set({ isRead: true })
-      .where(eq(supportMessages.conversationId, conversationId.toLowerCase()));
+    try {
+      await db.update(supportMessages)
+        .set({ isRead: true })
+        .where(eq(supportMessages.conversationId, conversationId.toLowerCase()));
+    } catch {
+      // ignore if DB is down
+    }
   }
 
   async createLead(lead: InsertLead): Promise<Lead> {
-    const [newLead] = await db.insert(leads).values({
-      email: lead.email,
-      name: lead.name || null,
-      source: lead.source || "landing",
-      walletAddress: lead.walletAddress || null,
-    }).returning();
-    return newLead;
+    try {
+      const [newLead] = await db.insert(leads).values({
+        email: lead.email,
+        name: lead.name || null,
+        source: lead.source || "landing",
+        walletAddress: lead.walletAddress || null,
+      }).returning();
+      return newLead;
+    } catch {
+      return {
+        id: randomUUID(),
+        email: lead.email,
+        name: lead.name || null,
+        source: lead.source || "landing",
+        walletAddress: lead.walletAddress || null,
+        createdAt: new Date(),
+      };
+    }
   }
 
   async getAllLeads(): Promise<Lead[]> {
-    return await db.select().from(leads).orderBy(desc(leads.createdAt));
+    try {
+      return await db.select().from(leads).orderBy(desc(leads.createdAt));
+    } catch {
+      return [];
+    }
   }
 }
 

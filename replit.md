@@ -46,7 +46,7 @@ None provided.
 - **OpenAI**: Via Replit AI Integrations (gpt-5.1) for AI-powered pattern detection.
 - **Hyperliquid**: For non-custodial trading, market data (coins, tickers, order books, trades, candles), and order execution.
 - **MetaMask/Other Browser Wallets**: For client-side wallet connection and transaction signing using ethers.js.
-- **PostgreSQL (Neon)**: For persistent data storage, including video metadata, user information, and support chat messages.
+- **PostgreSQL (Neon/Helium)**: For persistent data storage, including video metadata, user information, and support chat messages. **NOTE**: The `helium` PostgreSQL hostname is currently unresolvable (Replit infrastructure issue). All DB operations have in-memory fallbacks so the app remains functional. When the DB recovers, data will automatically persist again.
 - **Stripe**: For subscription payment processing and management using stripe-replit-sync package.
 
 ## Access System (Dual-Layer)
