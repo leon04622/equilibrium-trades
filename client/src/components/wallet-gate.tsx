@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, ExternalLink } from "lucide-react";
+import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, ExternalLink, AlertCircle } from "lucide-react";
 
 export function WalletGate({ children }: { children: React.ReactNode }) {
-  const { isConnected, isConnecting, connect, isMobile, openInWalletBrowser, detectedWallets } = useWallet();
+  const { isConnected, isConnecting, connect, isMobile, openInWalletBrowser, detectedWallets, connectError } = useWallet();
   const [email, setEmail] = useState("");
   const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
@@ -63,6 +63,13 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
         {/* Connect section */}
         <div className="w-full space-y-3">
           <p className="text-sm font-medium text-foreground">Connect your wallet to get started</p>
+
+          {connectError && (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <span>{connectError}</span>
+            </div>
+          )}
 
           {isMobile && !hasWallet ? (
             <>
