@@ -8,7 +8,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
-const MENTORING_STRIPE_LINK = "https://buy.stripe.com/28E7sK3Pr9UUgci95P0oM03";
+const MENTORING_STRIPE_LINK = "https://buy.stripe.com/eVqeVc3Prc326BI6XH0oM04";
 
 const proFeatures = [
   "AI-powered pattern detection",
