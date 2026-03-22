@@ -135,9 +135,10 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
     }
 
     const isLong = tpslDialog.side === "long";
-    // Validate against entry price — prevents false rejections when position is in the red
-    // and mark price has already moved past the intended SL level.
     const entryPrice = tpslDialog.entryPrice || 0;
+    const markPrice = tpslDialog.markPrice || entryPrice;
+    // TP validates against entry price (profit direction must be correct).
+    // SL validates against current mark price so breakeven / profit-lock stops are allowed.
     if (tp && entryPrice > 0) {
       const fmtEntry = entryPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
       if (isLong && tp <= entryPrice) {
@@ -149,14 +150,14 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
         return;
       }
     }
-    if (sl && entryPrice > 0) {
-      const fmtEntry = entryPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
-      if (isLong && sl >= entryPrice) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be below entry price ($${fmtEntry}) for a Long.`, variant: "destructive" });
+    if (sl && markPrice > 0) {
+      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      if (isLong && sl >= markPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be below the current price ($${fmtMark}) — it would trigger immediately.`, variant: "destructive" });
         return;
       }
-      if (!isLong && sl <= entryPrice) {
-        toast({ title: "Invalid Stop Loss", description: `SL must be above entry price ($${fmtEntry}) for a Short.`, variant: "destructive" });
+      if (!isLong && sl <= markPrice) {
+        toast({ title: "Invalid Stop Loss", description: `SL must be above the current price ($${fmtMark}) — it would trigger immediately.`, variant: "destructive" });
         return;
       }
     }
@@ -485,9 +486,17 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-bearish">
-                  Stop Loss {tpslDialog.side === "long" ? "↓ (below entry price)" : "↑ (above entry price)"}
+                  Stop Loss {tpslDialog.side === "long" ? "↓ (below current price)" : "↑ (above current price)"}
                 </label>
                 <div className="flex gap-1">
+                  <button
+                    onClick={() => setSlPrice(tpslDialog.entryPrice.toFixed(0))}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80"
+                    data-testid="button-sl-breakeven"
+                    title="Set SL at your entry price (breakeven)"
+                  >
+                    BE
+                  </button>
                   {[1, 2, 5].map(pct => {
                     const mult = tpslDialog.side === "long" ? (1 - pct / 100) : (1 + pct / 100);
                     const price = (tpslDialog.entryPrice * mult).toFixed(0);
@@ -498,7 +507,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
                         className="text-[10px] px-1.5 py-0.5 rounded bg-bearish/10 text-bearish hover:bg-bearish/20"
                         data-testid={`button-sl-pct-${pct}`}
                       >
-                        -{pct}%
+                        +{pct}%
                       </button>
                     );
                   })}
@@ -506,18 +515,29 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
               </div>
               <Input
                 type="number"
-                placeholder={tpslDialog.side === "long" ? `Below ${formatPrice(tpslDialog.entryPrice)}` : `Above ${formatPrice(tpslDialog.entryPrice)}`}
+                placeholder={tpslDialog.side === "long" ? `Below ${formatPrice(tpslDialog.markPrice || tpslDialog.entryPrice)}` : `Above ${formatPrice(tpslDialog.markPrice || tpslDialog.entryPrice)}`}
                 value={slPrice}
                 onChange={(e) => setSlPrice(e.target.value)}
                 className="font-mono bg-muted/50"
                 data-testid="input-sl-price"
               />
-              {slPrice && tpslDialog.entryPrice > 0 && (() => {
-                const pct = (parseFloat(slPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100;
-                const isValid = tpslDialog.side === "long" ? pct < 0 : pct > 0;
+              {slPrice && tpslDialog.markPrice > 0 && (() => {
+                const sl = parseFloat(slPrice);
+                const mark = tpslDialog.markPrice;
+                const entry = tpslDialog.entryPrice;
+                const isLong = tpslDialog.side === "long";
+                const isValid = isLong ? sl < mark : sl > mark;
+                const pctFromEntry = entry > 0 ? ((sl - entry) / entry * 100) : 0;
+                const atBreakeven = entry > 0 && Math.abs(sl - entry) < 0.01 * entry;
+                const lockingProfit = isLong ? (sl > entry && sl < mark) : (sl < entry && sl > mark);
+                const label = atBreakeven
+                  ? "breakeven stop ✓"
+                  : lockingProfit
+                    ? `locking ${Math.abs(pctFromEntry).toFixed(2)}% profit ✓`
+                    : `${pctFromEntry > 0 ? "+" : ""}${pctFromEntry.toFixed(2)}% from entry`;
                 return (
-                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-bearish" : "text-destructive"}`}>
-                    {pct.toFixed(2)}% from entry{!isValid && " ⚠ must be " + (tpslDialog.side === "long" ? "below" : "above") + " entry"}
+                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-muted-foreground" : "text-destructive"}`}>
+                    {isValid ? label : `⚠ must be ${isLong ? "below" : "above"} current price ($${formatPrice(mark)})`}
                   </div>
                 );
               })()}

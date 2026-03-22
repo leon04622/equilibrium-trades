@@ -589,27 +589,30 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isPlacingTPSLRef.current = true;
 
     try {
-      // Validate TP/SL against the entry price of the position (or mark price if no
-      // position found yet). Using entry price prevents false rejections when the
-      // position is already in the red and mark has moved below entry.
+      // TP validates against entry price (direction must be correct relative to entry).
+      // SL validates against current mark price — this allows setting SL at entry
+      // (breakeven stop) or between mark and entry (lock in partial profit).
       const pos = positions.find(p => p.coin === coin);
       const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
+      const markPrice = pos?.markPrice || currentPrices[coin] || refPrice;
       if (refPrice > 0) {
-        const fmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        const entryFmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
         if (tpPrice && tpPrice > 0) {
           if (isLong && tpPrice <= refPrice) {
-            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Long.` };
+            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${entryFmt}) for a Long.` };
           }
           if (!isLong && tpPrice >= refPrice) {
-            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Short.` };
+            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${entryFmt}) for a Short.` };
           }
         }
         if (slPrice && slPrice > 0) {
-          if (isLong && slPrice >= refPrice) {
-            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below entry price ($${fmt}) for a Long.` };
+          const slRef = markPrice > 0 ? markPrice : refPrice;
+          const slFmt = slRef.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          if (isLong && slPrice >= slRef) {
+            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below the current price ($${slFmt}) — it would trigger immediately.` };
           }
-          if (!isLong && slPrice <= refPrice) {
-            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above entry price ($${fmt}) for a Short.` };
+          if (!isLong && slPrice <= slRef) {
+            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above the current price ($${slFmt}) — it would trigger immediately.` };
           }
         }
       }
