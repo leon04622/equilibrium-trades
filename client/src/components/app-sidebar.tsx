@@ -92,11 +92,6 @@ const accountNavItems = [
     icon: Wallet,
   },
   {
-    title: "Connect Exchange",
-    url: "/hyperliquid",
-    icon: TrendingUp,
-  },
-  {
     title: "Subscription",
     url: "/pricing",
     icon: CreditCard,

@@ -24,7 +24,6 @@ import Patterns from "@/pages/patterns";
 import Learn from "@/pages/learn";
 import Signals from "@/pages/signals";
 import Heatmap from "@/pages/heatmap";
-import Hyperliquid from "@/pages/hyperliquid";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
 import Portfolio from "@/pages/portfolio";
@@ -42,7 +41,6 @@ function OtherRoutes() {
       <Route path="/learn" component={Learn} />
       <Route path="/signals" component={Signals} />
       <Route path="/heatmap" component={Heatmap} />
-      <Route path="/hyperliquid" component={Hyperliquid} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/settings" component={Settings} />
       <Route path="/portfolio" component={Portfolio} />
