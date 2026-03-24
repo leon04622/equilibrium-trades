@@ -177,7 +177,8 @@ const SPOT_ASSET_LABELS: Record<string, string> = {
 };
 
 // Minimum daily volume in USD for a spot market to be included
-const SPOT_MIN_VOL = 50_000;
+// Kept low so all legitimately active assets appear in the selector
+const SPOT_MIN_VOL = 1_000;
 
 // Fetch spot market tickers and return them with @index coin identifiers
 export async function getSpotTickers(): Promise<HyperliquidTicker[]> {

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { TradingViewChart } from "@/components/trading-view-chart";
 import { PatternChart } from "@/components/pattern-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
@@ -124,10 +123,8 @@ export default function Trading({ visible = true }: TradingProps) {
     console.log("[selectedAsset]", { symbol: ticker?.baseName || coin, coin });
   }, [coin]);
 
-  // Spot markets use @N identifiers — TradingView has no equivalent, so we
-  // use the PatternChart (Hyperliquid native candles) as the primary chart for them.
+  // Spot markets use @N identifiers
   const isSpot = coin.startsWith("@");
-  const tvSymbol = isSpot ? "" : `BINANCE:${coin}USDT`;
 
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
@@ -408,20 +405,16 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 relative" style={{ minHeight: 'calc(100dvh - 16rem)' }}>
-                  {showAIChart || isSpot ? (
-                    <PatternChart 
-                      symbol={coin} 
-                      interval={
-                        { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
-                      }
-                      currentPrice={price}
-                      showSignals={canUseAIPatterns && !isSpot}
-                      hideIndicators={!showIndicators}
-                      className="absolute inset-0" 
-                    />
-                  ) : (
-                    <TradingViewChart symbol={tvSymbol} interval={timeframe} hideVolume className="absolute inset-0" />
-                  )}
+                  <PatternChart 
+                    symbol={coin} 
+                    interval={
+                      { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
+                    }
+                    currentPrice={price}
+                    showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                    hideIndicators={!showIndicators}
+                    className="absolute inset-0" 
+                  />
                 </div>
               )}
               {!isFullscreen && mobileTab === "orderbook" && (
@@ -436,22 +429,18 @@ export default function Trading({ visible = true }: TradingProps) {
               )}
             </div>
 
-            {/* Desktop: Chart */}
+            {/* Desktop: Chart — always PatternChart so toggling AI mode never remounts the chart */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              {showAIChart || isSpot ? (
-                <PatternChart 
-                  symbol={coin} 
-                  interval={
-                    { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
-                  }
-                  currentPrice={price}
-                  showSignals={canUseAIPatterns && !isSpot}
-                  hideIndicators={!showIndicators}
-                  className="h-full" 
-                />
-              ) : (
-                <TradingViewChart symbol={tvSymbol} interval={timeframe} className="h-full" />
-              )}
+              <PatternChart 
+                symbol={coin} 
+                interval={
+                  { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
+                }
+                currentPrice={price}
+                showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                hideIndicators={!showIndicators}
+                className="h-full" 
+              />
             </div>
             
             {/* Optional Order Book Panel - Desktop only */}

@@ -62,9 +62,12 @@ export interface CrossoverSignal {
 function getThresholds(timeframe: string) {
   const thresholds: Record<string, { minMovePercent: number; minBreakoutPercent: number; lookback: number }> = {
     "1m":  { minMovePercent: 0.15, minBreakoutPercent: 0.05, lookback: 30 },
+    "3m":  { minMovePercent: 0.20, minBreakoutPercent: 0.06, lookback: 32 },
     "5m":  { minMovePercent: 0.25, minBreakoutPercent: 0.08, lookback: 35 },
     "15m": { minMovePercent: 0.4,  minBreakoutPercent: 0.10, lookback: 40 },
+    "30m": { minMovePercent: 0.5,  minBreakoutPercent: 0.12, lookback: 45 },
     "1h":  { minMovePercent: 0.6,  minBreakoutPercent: 0.15, lookback: 50 },
+    "2h":  { minMovePercent: 0.8,  minBreakoutPercent: 0.18, lookback: 50 },
     "4h":  { minMovePercent: 1.0,  minBreakoutPercent: 0.20, lookback: 50 },
     "1d":  { minMovePercent: 2.0,  minBreakoutPercent: 0.30, lookback: 50 },
   };
@@ -956,26 +959,35 @@ export async function analyzeForEducationalPatterns(
     }
     
     // MULTI-TIMEFRAME VALIDATION FOR CONTINUATION PATTERNS
-    // For bull/bear flags: Require 21 SMA > 200 SMA on BOTH 1m AND 5m timeframes
-    // This prevents false signals when only one timeframe shows bullish alignment
+    // Use the current timeframe PLUS one lower reference timeframe.
+    // This prevents false signals when the shorter TF disagrees with the current chart.
+    // Reference frames chosen by timeframe so the validation is always meaningful:
+    //   1m → validate only current TF (no lower frame available)
+    //   3m, 5m → also check 1m
+    //   15m, 30m → also check 5m
+    //   1h, 2h, 4h → also check 15m
+    //   1d → also check 4h
+    const refTfMap: Record<string, string> = {
+      "1m": "1m", "3m": "1m", "5m": "1m",
+      "15m": "5m", "30m": "5m",
+      "1h": "15m", "2h": "15m", "4h": "15m",
+      "1d": "4h",
+    };
+    const refTf = refTfMap[timeframe] || "5m";
+    const refSMA = refTf === timeframe
+      ? Promise.resolve(currentSMA)
+      : getSMAForTimeframe(coin, refTf);
+
     let multiTimeframeBullish = false;
     let multiTimeframeBearish = false;
-    
-    // Get SMA data for both 1m and 5m timeframes for validation
-    const [sma1m, sma5m] = await Promise.all([
-      timeframe === "1m" ? Promise.resolve(currentSMA) : getSMAForTimeframe(coin, "1m"),
-      timeframe === "5m" ? Promise.resolve(currentSMA) : getSMAForTimeframe(coin, "5m"),
-    ]);
-    
-    // For continuation patterns: prefer BOTH timeframes aligned, but allow EITHER if one is unavailable
-    const is1mBullish = sma1m ? sma1m.sma21 > sma1m.sma200 : isBullish;
-    const is5mBullish = sma5m ? sma5m.sma21 > sma5m.sma200 : isBullish;
-    const is1mBearish = sma1m ? sma1m.sma21 < sma1m.sma200 : !isBullish;
-    const is5mBearish = sma5m ? sma5m.sma21 < sma5m.sma200 : !isBullish;
 
-    // Strong: both aligned; Weak: at least one aligned + current TF aligned
-    multiTimeframeBullish = is1mBullish || is5mBullish; // At least one bullish TF
-    multiTimeframeBearish = is1mBearish || is5mBearish; // At least one bearish TF
+    const resolvedRef = await refSMA;
+    const isRefBullish = resolvedRef ? resolvedRef.sma21 > resolvedRef.sma200 : isBullish;
+    const isRefBearish = resolvedRef ? resolvedRef.sma21 < resolvedRef.sma200 : !isBullish;
+
+    // Both current TF and reference TF must agree for continuation patterns
+    multiTimeframeBullish = isBullish && isRefBullish;
+    multiTimeframeBearish = !isBullish && isRefBearish;
     
     // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);

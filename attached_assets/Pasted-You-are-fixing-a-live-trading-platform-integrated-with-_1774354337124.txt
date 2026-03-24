@@ -1,0 +1,110 @@
+You are fixing a live trading platform integrated with Hyperliquid. 
+This is a PRODUCTION-CRITICAL update. Do NOT guess. Do NOT partially fix. Fix all issues completely without breaking existing working features.
+
+========================
+ISSUES TO FIX
+========================
+
+1. AI PATTERN DETECTION IS WRONG
+- Current problem: Patterns shown (e.g. bottoms on BTC 15m) are incorrect and do not match actual chart structure.
+
+Fix requirements:
+- Pattern detection must be based on REAL OHLCV data from Hyperliquid
+- No placeholder logic, no random or simulated patterns
+- Implement proper logic for:
+  - Support/Resistance
+  - Double top / double bottom
+  - Trend detection (higher highs / lower lows)
+- Patterns must match EXACTLY what is visible on the chart
+- Scan and return patterns for ALL timeframes:
+  - 1m, 5m, 15m, 30m, 1h, 4h, 1d
+- Each timeframe must be calculated independently using its own candle data
+
+Rules:
+- Do NOT show a pattern unless it is fully confirmed
+- Remove any fake or default signals
+- Output must be deterministic based on data (no randomness)
+
+========================
+
+2. 30-MINUTE TIMEFRAME DATA INCORRECT
+- Problem: 30m chart does not match actual market data
+
+Fix:
+- Ensure ALL timeframes pull directly from Hyperliquid API
+- No local aggregation unless correctly built
+- If aggregating:
+  - 30m candles must be built from 1m/5m data correctly (OHLCV accurate)
+
+Rules:
+- Chart data MUST match Hyperliquid exactly
+- No mismatched candles or delays
+
+========================
+
+3. MISSING TRADING PAIRS (TICKERS)
+- Problem: Not all tradable assets are shown
+
+Fix:
+- Fetch FULL list of tradable markets from Hyperliquid
+- Include:
+  - Perps
+  - Spot
+  - HIP-3 assets (if available)
+- Dynamically populate ticker list
+
+Rules:
+- No hardcoded tickers
+- Must auto-update from API
+- Ensure search works for all tickers
+
+========================
+
+4. CHART UI BREAKING (TIMEFRAME SLIDER DISAPPEARS)
+- Problem: When switching between AI mode and normal mode, chart controls disappear
+
+Fix:
+- Ensure chart component does NOT re-mount when toggling modes
+- Preserve:
+  - Zoom level
+  - Timeframe
+  - UI controls (slider)
+
+Rules:
+- Do NOT destroy and recreate chart instance
+- Only toggle overlays (AI vs normal)
+- Chart must remain stable at all times
+
+========================
+
+GLOBAL RULES (CRITICAL)
+========================
+
+- DO NOT break:
+  - Trade execution
+  - Open positions display
+  - Wallet connection
+- DO NOT rewrite entire app
+- ONLY fix the listed issues
+
+- All fixes must be:
+  - Stable
+  - Production-ready
+  - Matching Hyperliquid behaviour exactly
+
+- If unsure:
+  → Use Hyperliquid as the source of truth
+
+========================
+
+EXPECTED RESULT
+========================
+
+- AI patterns are accurate and match chart structure
+- All timeframes show correct data (especially 30m)
+- All tradable tickers are visible and selectable
+- Chart UI never disappears or resets
+- Platform behaves like Hyperliquid + added features
+
+Return only completed working implementation.
+No explanations.
