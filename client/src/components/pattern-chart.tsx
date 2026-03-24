@@ -33,6 +33,8 @@ interface EducationalPatternSignal {
   educationalNote: string;
   whatToWatch: string;
   detectedAt: string;
+  tradeable: boolean;
+  maFilterReason: string;
 }
 
 interface PatternChartProps {
@@ -239,28 +241,26 @@ function PatternChartComponent({
   }, [weights]);
 
   // ── SMA status for signal card ──
+  // Uses exactly 21 and 200 close prices — same formula as Hyperliquid charts.
   useEffect(() => {
     if (!candles || candles.length < 21) { setSmaStatus(null); return; }
     const sorted = [...candles].sort((a, b) => a.t - b.t);
     const closes = sorted.map(c => parsePrice(c.c));
     const times = sorted.map(c => (c.t / 1000) as Time);
     const sma21 = calcSMA(closes, times, 21);
-    const period200 = Math.min(sorted.length - 1, 200);
-    const sma200 = period200 >= 10 ? calcSMA(closes, times, period200) : [];
+    // SMA200: only compute when we have 200+ candles; never approximate with fewer
+    const sma200 = sorted.length >= 200 ? calcSMA(closes, times, 200) : [];
     const s21 = sma21.length > 0 ? sma21[sma21.length - 1].value : 0;
     const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : 0;
     if (s21 > 0) setSmaStatus({ sma21: s21, sma200: s200, isBullish: s21 > s200 });
   }, [candles, parsePrice]);
 
+  // Show ALL detected patterns — do NOT gate by MA direction here.
+  // The signal card itself shows whether the pattern is tradeable based on MA position.
   useEffect(() => {
     const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
-    if (currentSignal && smaStatus) {
-      const sigBull = currentSignal.bias === "bullish";
-      setActiveSignal((smaStatus.isBullish && sigBull) || (!smaStatus.isBullish && !sigBull) ? currentSignal : null);
-    } else {
-      setActiveSignal(null);
-    }
-  }, [signals, smaStatus, coin, interval]);
+    setActiveSignal(currentSignal ?? null);
+  }, [signals, coin, interval]);
 
   // ── Chart initialization — runs ONCE on mount, re-runs only if theme/hideIndicators changes ──
   useEffect(() => {
@@ -461,8 +461,8 @@ function PatternChartComponent({
 
         if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
         if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-        const p200 = Math.min(sorted.length - 1, 200);
-        if (p200 >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200));
+        // SMA200: use exactly 200 periods — never approximate (matches Hyperliquid exactly)
+        if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMA(closes, times, 200));
 
         if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
           const rsiData = calcRSI(closes, times, 14);
@@ -510,8 +510,7 @@ function PatternChartComponent({
           })));
           if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
           if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-          const p200b = Math.min(sorted.length - 1, 200);
-          if (p200b >= 10) sma200SeriesRef.current.setData(calcSMA(closes, times, p200b));
+          if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMA(closes, times, 200));
           setLastVol(vols[vols.length - 1] ?? null);
         } catch (e) {
           console.warn("[chart] bulk setData error:", e);
@@ -540,9 +539,8 @@ function PatternChartComponent({
             const s21 = calcSMA(closes, times, 21);
             if (s21.length > 0) sma21SeriesRef.current.update(s21[s21.length - 1]);
           }
-          const p200u = Math.min(sorted.length - 1, 200);
-          if (p200u >= 10) {
-            const s200 = calcSMA(closes, times, p200u);
+          if (sorted.length >= 200) {
+            const s200 = calcSMA(closes, times, 200);
             if (s200.length > 0) sma200SeriesRef.current.update(s200[s200.length - 1]);
           }
           if (vols.length >= 20) {
@@ -658,27 +656,50 @@ function PatternChartComponent({
 
         {/* Signal overlay card */}
         {showSignals && activeSignal ? (
-          <Card className="absolute top-8 left-1 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-[#2a3249] shadow-xl max-w-xs z-10">
-            <div className="flex items-center gap-2 mb-2">
-              {activeSignal.bias === "bullish" ? <TrendingUp className="h-4 w-4 text-green-400" /> :
-               activeSignal.bias === "bearish" ? <TrendingDown className="h-4 w-4 text-red-400" /> :
-               <AlertCircle className="h-4 w-4 text-yellow-400" />}
-              <span className="font-semibold text-sm text-[#e8ecf1]">{activeSignal.patternName}</span>
-              <Badge className={`text-[9px] px-1 ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-yellow-700" : "bg-green-700"}`}>
+          <Card className="absolute top-8 left-1 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-[#2a3249] shadow-xl max-w-[260px] z-10">
+            {/* Header */}
+            <div className="flex items-center gap-1.5 mb-2">
+              {activeSignal.bias === "bullish"
+                ? <TrendingUp className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                : activeSignal.bias === "bearish"
+                ? <TrendingDown className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                : <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />}
+              <span className={`text-[11px] font-bold ${activeSignal.bias === "bullish" ? "text-green-300" : activeSignal.bias === "bearish" ? "text-red-300" : "text-yellow-300"}`}>
+                {activeSignal.bias === "bullish" ? "Bullish Pattern" : activeSignal.bias === "bearish" ? "Bearish Pattern" : "Neutral Pattern"}
+              </span>
+              <Badge className={`ml-auto text-[8px] px-1 shrink-0 ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-blue-800" : "bg-emerald-800"}`}>
                 {activeSignal.patternStatus === "breakout_watch" ? "WATCH" : activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
               </Badge>
             </div>
-            <div className="bg-blue-900/40 border border-blue-700/40 rounded px-2 py-1 mb-2">
-              <p className="text-[10px] text-blue-300">Educational · Learn to identify your own entries</p>
+            <p className="text-[10px] font-medium text-[#e8ecf1] mb-2">{activeSignal.patternName}</p>
+
+            {/* Tradeable badge */}
+            <div className={`rounded px-2 py-1 mb-2 ${activeSignal.tradeable ? "bg-green-900/50 border border-green-700/50" : "bg-orange-900/30 border border-orange-700/30"}`}>
+              <p className={`text-[10px] font-semibold ${activeSignal.tradeable ? "text-green-300" : "text-orange-300"}`}>
+                {activeSignal.tradeable ? "✓ Tradeable — MA filter passed" : "⚠ Study Only — MA filter not met"}
+              </p>
             </div>
-            <p className="text-[10px] text-[#8c9ab5] mb-2 leading-relaxed">{activeSignal.educationalNote}</p>
-            <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
-              <span className="flex items-center gap-1"><span className="w-2 h-0.5 bg-white inline-block" /><span className="text-[#8c9ab5]">21 SMA</span><span className="font-mono text-[#e8ecf1]">${activeSignal.sma21.toFixed(1)}</span></span>
-              <span className="flex items-center gap-1"><span className="w-2 h-0.5 inline-block" style={{ background: "#f5e642" }} /><span className="text-[#8c9ab5]">200 SMA</span><span className="font-mono text-[#e8ecf1]">${activeSignal.sma200.toFixed(1)}</span></span>
+
+            {/* MA filter reason */}
+            <p className="text-[9px] text-[#8c9ab5] mb-2 leading-relaxed">{activeSignal.maFilterReason}</p>
+
+            {/* SMA values */}
+            <div className="flex gap-3 text-[9px] mb-2">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-white inline-block" />
+                <span className="text-[#8c9ab5]">21</span>
+                <span className="font-mono text-[#e8ecf1]">{activeSignal.sma21.toFixed(2)}</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 inline-block" style={{ background: "#f5e642" }} />
+                <span className="text-[#8c9ab5]">200</span>
+                <span className="font-mono text-[#e8ecf1]">{activeSignal.sma200.toFixed(2)}</span>
+              </span>
             </div>
-            <div className="border-t border-[#2a3249] pt-2">
-              <p className="text-[10px] font-medium text-amber-400 mb-0.5">What to Watch:</p>
-              <p className="text-[10px] text-[#8c9ab5] leading-relaxed">{activeSignal.whatToWatch}</p>
+
+            {/* Educational note */}
+            <div className="border-t border-[#2a3249] pt-1.5">
+              <p className="text-[9px] text-[#6b7a99] leading-relaxed">{activeSignal.educationalNote}</p>
             </div>
           </Card>
         ) : smaStatus ? (

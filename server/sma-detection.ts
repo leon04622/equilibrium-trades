@@ -836,6 +836,9 @@ export interface EducationalPatternSignal {
   educationalNote: string;
   whatToWatch: string;
   detectedAt: Date;
+  // MA execution filter — pattern is always shown; tradeable = MA confirms direction
+  tradeable: boolean;
+  maFilterReason: string;
 }
 
 // Generate educational content based on pattern
@@ -1005,6 +1008,10 @@ export async function analyzeForEducationalPatterns(
         currentSMA.price
       );
       
+      const crossoverPrice = currentSMA.price;
+      const crossoverTradeable = crossover === "bullish_crossover"
+        ? crossoverPrice > currentSMA.sma21 && crossoverPrice > currentSMA.sma200
+        : crossoverPrice < currentSMA.sma21 && crossoverPrice < currentSMA.sma200;
       return {
         id: `${coin}-${timeframe}-${Date.now()}`,
         coin,
@@ -1014,56 +1021,28 @@ export async function analyzeForEducationalPatterns(
         patternStatus,
         sma21: currentSMA.sma21,
         sma200: currentSMA.sma200,
-        currentPrice: currentSMA.price,
+        currentPrice: crossoverPrice,
         smaRelationship: `The 21 SMA just crossed ${crossover === "bullish_crossover" ? "ABOVE" : "BELOW"} the 200 SMA. This is a significant momentum shift.`,
         educationalNote: `A ${crossover === "bullish_crossover" ? "bullish" : "bearish"} SMA crossover occurs when the faster 21 SMA crosses ${crossover === "bullish_crossover" ? "above" : "below"} the slower 200 SMA. This often indicates a change in momentum and can signal the start of a new trend.`,
         whatToWatch: `Look for continuation patterns (flags, triangles) to form after this crossover. These can provide cleaner setups for entries. Always confirm on higher timeframes.`,
         detectedAt: new Date(),
+        tradeable: crossoverTradeable,
+        maFilterReason: crossoverTradeable
+          ? `Crossover confirmed and price is on the ${crossover === "bullish_crossover" ? "bullish" : "bearish"} side of both MAs.`
+          : `Crossover detected but price has not yet confirmed the direction. Wait for price to trade ${crossover === "bullish_crossover" ? "above" : "below"} both SMAs.`,
       };
     }
     
-    // Scan for all pattern types
+    // Scan for ALL pattern types — no MA gating at detection stage.
+    // The MA filter only determines whether the pattern is "tradeable" (execution-ready).
     const patterns: DetectedPattern[] = [];
     
-    // CONTINUATION PATTERNS (Bull/Bear Flags, Pennants, Triangles)
-    // These require MULTI-TIMEFRAME ALIGNMENT:
-    // - Bull patterns: 21 > 200 SMA on BOTH 1m AND 5m
-    // - Bear patterns: 21 < 200 SMA on BOTH 1m AND 5m
     const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
-    if (flagPattern) {
-      const isBullishPattern = flagPattern.name === "bull_flag";
-      const isBearishPattern = flagPattern.name === "bear_flag";
-      
-      // Only include bull flags if BOTH 1m and 5m are bullish
-      // Only include bear flags if BOTH 1m and 5m are bearish
-      if ((isBullishPattern && multiTimeframeBullish) || 
-          (isBearishPattern && multiTimeframeBearish)) {
-        patterns.push(flagPattern);
-      }
-      // If multi-timeframe doesn't align, skip this pattern - it's a false signal
-    }
+    if (flagPattern) patterns.push(flagPattern);
     
     const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
-    if (trianglePattern) {
-      // Ascending triangles need bullish multi-timeframe alignment
-      // Descending triangles need bearish multi-timeframe alignment
-      // Symmetrical triangles can go either way - still require alignment
-      const isBullishPattern = trianglePattern.name === "ascending_triangle";
-      const isBearishPattern = trianglePattern.name === "descending_triangle";
-      
-      if (trianglePattern.name === "symmetrical_triangle") {
-        // Symmetrical can break either way, require at least some alignment
-        if (multiTimeframeBullish || multiTimeframeBearish) {
-          patterns.push(trianglePattern);
-        }
-      } else if ((isBullishPattern && multiTimeframeBullish) || 
-                 (isBearishPattern && multiTimeframeBearish)) {
-        patterns.push(trianglePattern);
-      }
-    }
+    if (trianglePattern) patterns.push(trianglePattern);
     
-    // REVERSAL PATTERNS (Double Top/Bottom, Wedges) - these don't require multi-TF alignment
-    // as they indicate potential reversals
     const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
     if (doublePattern) patterns.push(doublePattern);
     
@@ -1085,19 +1064,45 @@ export async function analyzeForEducationalPatterns(
       currentSMA.price
     );
     
-    let smaRelationship: string;
-    const mtfStatus = multiTimeframeBullish 
-      ? "CONFIRMED on 1m+5m" 
-      : multiTimeframeBearish 
-        ? "CONFIRMED on 1m+5m" 
-        : "NOT aligned on both 1m+5m";
-    
-    if (bias === "bullish") {
-      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is above 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BULLISH structure (${mtfStatus}). Look for long setups.`;
-    } else if (bias === "bearish") {
-      smaRelationship = `21 SMA ($${currentSMA.sma21.toFixed(2)}) is below 200 SMA ($${currentSMA.sma200.toFixed(2)}) - BEARISH structure (${mtfStatus}). Look for short setups.`;
+    // EXECUTION FILTER: determine if pattern is tradeable based on price vs MA positions.
+    // Bullish patterns require: price > 21 SMA AND price > 200 SMA
+    // Bearish patterns require: price < 21 SMA AND price < 200 SMA
+    const price = currentSMA.price;
+    const { sma21: s21, sma200: s200 } = currentSMA;
+    let tradeable = false;
+    let maFilterReason = "";
+
+    const isBullishPattern = bias === "bullish";
+    const isBearishPattern = bias === "bearish";
+
+    if (isBullishPattern) {
+      tradeable = price > s21 && price > s200;
+      if (tradeable) {
+        maFilterReason = `Price (${price.toFixed(2)}) is above both 21 SMA (${s21.toFixed(2)}) and 200 SMA (${s200.toFixed(2)}). MA structure confirms bullish entry.`;
+      } else {
+        const belowWhat = price < s200 ? "both SMAs (bearish structure)" : price < s21 ? "21 SMA (momentum weak)" : "200 SMA";
+        maFilterReason = `Price is below ${belowWhat}. Wait for price to reclaim both SMAs before considering long entries on this pattern.`;
+      }
+    } else if (isBearishPattern) {
+      tradeable = price < s21 && price < s200;
+      if (tradeable) {
+        maFilterReason = `Price (${price.toFixed(2)}) is below both 21 SMA (${s21.toFixed(2)}) and 200 SMA (${s200.toFixed(2)}). MA structure confirms bearish entry.`;
+      } else {
+        const aboveWhat = price > s200 ? "both SMAs (bullish structure)" : price > s21 ? "21 SMA (momentum recovering)" : "200 SMA";
+        maFilterReason = `Price is above ${aboveWhat}. Wait for price to break below both SMAs before considering short entries on this pattern.`;
+      }
     } else {
-      smaRelationship = `21 SMA and 200 SMA are very close - NEUTRAL/CHOPPY conditions. Wait for clearer separation.`;
+      tradeable = false;
+      maFilterReason = "Neutral bias — SMAs too close together. Study the pattern structure; wait for clearer SMA separation.";
+    }
+
+    let smaRelationship: string;
+    if (bias === "bullish") {
+      smaRelationship = `21 SMA ($${s21.toFixed(2)}) is above 200 SMA ($${s200.toFixed(2)}) — BULLISH trend structure. Price is ${price > s21 ? "above" : "below"} 21 SMA and ${price > s200 ? "above" : "below"} 200 SMA.`;
+    } else if (bias === "bearish") {
+      smaRelationship = `21 SMA ($${s21.toFixed(2)}) is below 200 SMA ($${s200.toFixed(2)}) — BEARISH trend structure. Price is ${price > s21 ? "above" : "below"} 21 SMA and ${price > s200 ? "above" : "below"} 200 SMA.`;
+    } else {
+      smaRelationship = `21 SMA and 200 SMA are very close — NEUTRAL/CHOPPY conditions. Patterns detected for educational purposes.`;
     }
     
     return {
@@ -1107,13 +1112,15 @@ export async function analyzeForEducationalPatterns(
       bias,
       patternName: bestPattern.displayName,
       patternStatus,
-      sma21: currentSMA.sma21,
-      sma200: currentSMA.sma200,
-      currentPrice: currentSMA.price,
+      sma21: s21,
+      sma200: s200,
+      currentPrice: price,
       smaRelationship,
       educationalNote,
       whatToWatch,
       detectedAt: new Date(),
+      tradeable,
+      maFilterReason,
     };
   } catch (error) {
     console.error(`Error analyzing ${coin} for educational patterns:`, error);

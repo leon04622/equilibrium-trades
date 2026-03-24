@@ -1,0 +1,133 @@
+You are fixing a live trading platform integrated with Hyperliquid. This is a production-critical fix. Do NOT guess. Do NOT use placeholder logic. All data must match Hyperliquid exactly.
+
+========================
+ISSUES TO FIX
+========================
+
+1. MOVING AVERAGES (21 SMA & 200 SMA INCORRECT)
+
+Problem:
+- 21 SMA and 200 SMA do NOT match Hyperliquid
+- Price appears above/below incorrectly vs Hyperliquid charts
+
+Fix requirements:
+- Use EXACT same candle source as chart (Hyperliquid OHLCV)
+- Calculate SMA using standard formula:
+  SMA = sum(close prices over period) / period
+- Apply to:
+  - 21 period SMA
+  - 200 period SMA
+- Ensure:
+  - Same timeframe = same MA values as Hyperliquid
+  - No offset, no shift, no smoothing differences
+  - Use CLOSE price only (not HL2, HLC3, etc.)
+
+Critical:
+- MA must update in real-time with incoming candles
+- MA must align perfectly with chart candles
+
+========================
+
+2. PATTERN DETECTION LOGIC (RESTRUCTURE)
+
+Current issue:
+- Patterns are inaccurate and filtered incorrectly
+
+New logic (MANDATORY):
+
+Step 1 — ALWAYS scan for patterns:
+- Detect patterns on ALL timeframes regardless of trend
+- No filtering at detection stage
+
+Step 2 — APPLY trade filters separately:
+- Bullish trades ONLY allowed when:
+  - Price > 21 SMA
+  - Price > 200 SMA
+- Bearish trades ONLY allowed when:
+  - Price < 21 SMA
+  - Price < 200 SMA
+
+Timeframe rule:
+- Trend confirmation from higher timeframe (15m / 1h)
+- Execution from lower timeframe (1m / 5m)
+
+Rules:
+- DO NOT hide patterns because of MA
+- Show all valid patterns
+- Only filter execution signals based on MA
+
+========================
+
+3. TRADINGVIEW CHART LOST ON TOGGLE
+
+Problem:
+- When switching between AI mode and TradingView mode:
+  - Chart disappears or resets
+  - Drawing tools are lost
+
+Fix requirements (IMPORTANT DESIGN DECISION):
+
+- Use ONE chart instance only
+- TradingView chart must be the PRIMARY chart
+- AI overlays should be layered ON TOP of TradingView (not separate chart)
+
+Behaviour:
+- Toggle ON:
+  → Show AI overlays (patterns, signals)
+- Toggle OFF:
+  → Hide overlays ONLY
+
+Do NOT:
+- Destroy chart
+- Recreate chart
+- Switch components
+
+Must preserve:
+- Drawings (trendlines, zones)
+- Zoom level
+- Timeframe
+- Indicators
+
+========================
+
+4. UI/UX IMPROVEMENT (BEGINNER FRIENDLY)
+
+- Default view:
+  → Clean TradingView chart
+- AI mode:
+  → Overlays appear clearly (labels, zones, arrows)
+
+Ensure:
+- Clear labels: "Bullish Pattern", "Bearish Pattern"
+- No clutter
+- Simple toggle: AI ON / OFF
+
+========================
+
+GLOBAL RULES
+========================
+
+- DO NOT break:
+  - Trade execution
+  - Wallet connection
+  - Positions display
+
+- DO NOT rewrite entire app
+- ONLY fix listed systems
+
+- EVERYTHING must match Hyperliquid data exactly
+
+========================
+
+EXPECTED RESULT
+========================
+
+- 21 SMA and 200 SMA match Hyperliquid perfectly
+- Patterns are always detected correctly
+- Trade signals filtered properly using MA logic
+- TradingView chart never disappears
+- AI overlays work cleanly on top of chart
+- Platform is stable and beginner-friendly
+
+Return fully working implementation only.
+No explanations.
