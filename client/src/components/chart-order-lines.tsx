@@ -95,7 +95,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       const tp = finalDragging === "tp" ? finalPrice : (tpPrice ?? undefined);
       const sl = finalDragging === "sl" ? finalPrice : (slPrice ?? undefined);
 
-      const result = await placeTPSL(coin, isLong, tp, sl, pos.entryPrice);
+      const result = await placeTPSL(coin, pos.size, isLong, tp, sl, pos.entryPrice);
       if (result.success) {
         toast({ title: `${finalDragging === "tp" ? "Take Profit" : "Stop Loss"} updated` });
       } else {
@@ -164,7 +164,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       const isLong = position.side === "long";
       const tp = editMode === "tp" ? newPrice : (tpPrice ?? undefined);
       const sl = editMode === "sl" ? newPrice : (slPrice ?? undefined);
-      const result = await placeTPSL(coin, isLong, tp, sl, position.entryPrice);
+      const result = await placeTPSL(coin, position.size, isLong, tp, sl, position.entryPrice);
       if (result.success) {
         toast({ title: `${editMode === "tp" ? "Take Profit" : "Stop Loss"} updated` });
         setEditMode(null);
