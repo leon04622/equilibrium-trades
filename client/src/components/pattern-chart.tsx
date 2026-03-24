@@ -205,7 +205,7 @@ function PatternChartComponent({
     ALL_INTERVALS.forEach((tf) => {
       if (tf === interval) return;
       queryClient.prefetchQuery({
-        queryKey: [`/api/hyperliquid/candles/${coin}?interval=${tf}`],
+        queryKey: [`/api/hyperliquid/candles/${coin}?interval=${tf}&limit=500`],
         staleTime: 30000,
       });
     });
@@ -224,7 +224,7 @@ function PatternChartComponent({
   }, [coin, interval]);
 
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
-    queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}`],
+    queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`],
     refetchInterval: 10000,
     staleTime: 8000,
   });
@@ -614,6 +614,63 @@ function PatternChartComponent({
   // TP/SL/Entry/Liq lines are rendered by <ChartOrderLines> as an interactive overlay.
   // The native createPriceLine() approach has been replaced to avoid double lines and to
   // enable inline editing and drag-to-update functionality.
+
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    const series = candleSeriesRef.current;
+
+    positionLineRefs.current.forEach(line => {
+      try { series.removePriceLine(line); } catch (e) {}
+    });
+    positionLineRefs.current = [];
+
+    const position = positions.find(p => p.coin === coin);
+    if (!position) return;
+
+    const coinOrders = openOrders.filter(o => o.coin === coin);
+
+    const entryLine = series.createPriceLine({
+      price: position.entryPrice,
+      color: "#60a5fa",
+      lineWidth: 1,
+      lineStyle: 0,
+      axisLabelVisible: true,
+      title: "Entry",
+    });
+    positionLineRefs.current.push(entryLine);
+
+    if (position.liquidationPrice && position.liquidationPrice > 0) {
+      const liqLine = series.createPriceLine({
+        price: position.liquidationPrice,
+        color: "#f97316",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "Liq",
+      });
+      positionLineRefs.current.push(liqLine);
+    }
+
+    for (const order of coinOrders) {
+      const isTP = order.orderType === "take_profit" ||
+        (position.side === "long"
+          ? parseFloat(order.triggerPx || order.limitPx) > position.entryPrice
+          : parseFloat(order.triggerPx || order.limitPx) < position.entryPrice);
+      const orderPrice = parseFloat(order.triggerPx || order.limitPx);
+      if (!orderPrice || isNaN(orderPrice)) continue;
+
+      const orderLine = series.createPriceLine({
+        price: orderPrice,
+        color: isTP ? "#22c55e" : "#ef4444",
+        lineWidth: 1,
+        lineStyle: 1,
+        axisLabelVisible: true,
+        title: isTP ? "TP" : "SL",
+      });
+      positionLineRefs.current.push(orderLine);
+    }
+  }, [positions, openOrders, coin]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 

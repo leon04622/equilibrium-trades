@@ -283,13 +283,13 @@ export async function getCandles(
   coin: string,
   interval: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  limit: number = 500
 ): Promise<HyperliquidCandle[]> {
   try {
     const end = endTime || Date.now();
     
     // Calculate appropriate time range based on interval
-    // Need enough candles to display patterns (at least 100-200 candles)
     const intervalMs: Record<string, number> = {
       "1m": 60 * 1000,
       "3m": 3 * 60 * 1000,
@@ -302,8 +302,7 @@ export async function getCandles(
       "1d": 24 * 60 * 60 * 1000,
     };
     
-    // Get 500 candles so SMAs have enough history
-    const candleCount = 500;
+    const candleCount = limit;
     const msPerCandle = intervalMs[interval] || 60 * 1000;
     const defaultRange = msPerCandle * candleCount;
     const start = startTime || end - defaultRange;

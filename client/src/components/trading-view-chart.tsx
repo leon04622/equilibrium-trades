@@ -28,7 +28,10 @@ function TradingViewChartComponent({
 
     containerRef.current.innerHTML = '<div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>';
 
-    const studies: (string | { id: string; inputs: Record<string, any> })[] = [];
+    const studies: (string | { id: string; inputs: Record<string, any> })[] = [
+      { id: "MASimple@tv-basicstudies", inputs: { length: 21 } },
+      { id: "MASimple@tv-basicstudies", inputs: { length: 200 } },
+    ];
 
     enabledIndicators.forEach((ind) => {
       if (ind.type === "overlay") {
@@ -67,17 +70,6 @@ function TradingViewChartComponent({
         }
       }
     });
-
-    if (studies.length === 0) {
-      studies.push({
-        id: "MASimple@tv-basicstudies",
-        inputs: { length: 21 }
-      });
-      studies.push({
-        id: "MASimple@tv-basicstudies",
-        inputs: { length: 200 }
-      });
-    }
 
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";

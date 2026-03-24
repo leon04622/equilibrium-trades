@@ -255,12 +255,13 @@ export async function registerRoutes(
   // Get candle data for a coin
   app.get("/api/hyperliquid/candles/:coin", async (req: Request, res: Response) => {
     try {
-      const { interval, startTime, endTime } = req.query;
+      const { interval, startTime, endTime, limit } = req.query;
       const candles = await getCandles(
         req.params.coin,
         (interval as string) || "1m",
         startTime ? parseInt(startTime as string) : undefined,
-        endTime ? parseInt(endTime as string) : undefined
+        endTime ? parseInt(endTime as string) : undefined,
+        limit ? parseInt(limit as string) : 500
       );
       res.json(candles);
     } catch (error) {
