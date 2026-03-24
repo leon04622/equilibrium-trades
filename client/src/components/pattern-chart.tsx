@@ -18,6 +18,7 @@ import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import { ChartOrderLines } from "@/components/chart-order-lines";
 
 interface EducationalPatternSignal {
   id: string;
@@ -154,6 +155,15 @@ function PatternChartComponent({
   // Incremented each time the chart is (re)created — causes the data effect to re-run even
   // when candles/coin/interval haven't changed, so the fresh chart always gets populated.
   const [chartVersion, setChartVersion] = useState(0);
+  const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
+
+  const coordinateToPrice = useCallback((clientY: number): number | null => {
+    if (!mainChartRef.current || !mainContainerRef.current) return null;
+    const rect = mainContainerRef.current.getBoundingClientRect();
+    const yRel = clientY - rect.top;
+    const price = mainChartRef.current.priceScale("right").coordinateToPrice(yRel);
+    return price ?? null;
+  }, []);
 
   // Pane resize state
   const [weights, setWeights] = useState([6, 2, 2]);
@@ -251,8 +261,12 @@ function PatternChartComponent({
     // SMA200: only compute when we have 200+ candles; never approximate with fewer
     const sma200 = sorted.length >= 200 ? calcSMA(closes, times, 200) : [];
     const s21 = sma21.length > 0 ? sma21[sma21.length - 1].value : 0;
-    const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : 0;
-    if (s21 > 0) setSmaStatus({ sma21: s21, sma200: s200, isBullish: s21 > s200 });
+    const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : null;
+    if (s21 > 0 && s200 !== null) {
+      setSmaStatus({ sma21: s21, sma200: s200, isBullish: s21 > s200 });
+    } else {
+      setSmaStatus(null);
+    }
   }, [candles, parsePrice]);
 
   // Show ALL detected patterns — do NOT gate by MA direction here.
@@ -323,6 +337,15 @@ function PatternChartComponent({
     };
     const r1 = obs(mainContainerRef.current!, mainChart);
     const cleanups: (() => void)[] = [];
+
+    // Subscribe to visible price range so ChartOrderLines can align to the chart's scale
+    const priceRangeHandler = (range: { minValue: number; maxValue: number } | null) => {
+      if (range) setVisiblePriceRange({ min: range.minValue, max: range.maxValue });
+    };
+    mainChart.priceScale("right").subscribeVisiblePriceRangeChange(priceRangeHandler);
+    cleanups.push(() => {
+      try { mainChart.priceScale("right").unsubscribeVisiblePriceRangeChange(priceRangeHandler); } catch (_) {}
+    });
 
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
       const indOpts = {
@@ -571,40 +594,9 @@ function PatternChartComponent({
     }
   }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
 
-  // ── TP/SL/Entry/Liq price lines ──
-  useEffect(() => {
-    const series = candleSeriesRef.current;
-    if (!series) return;
-    priceLineRefs.current.forEach(l => { try { series.removePriceLine(l); } catch (_) {} });
-    priceLineRefs.current = [];
-
-    const add = (price: number, color: string, title: string) => {
-      if (!price || isNaN(price) || price <= 0 || !candleSeriesRef.current) return;
-      try {
-        priceLineRefs.current.push(series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title }));
-      } catch (_) {}
-    };
-
-    const pos = positions.find(p => p.coin === coin);
-    if (pos) {
-      const isLong = pos.side === "long";
-      const orders = openOrders.filter(o => o.coin === coin);
-      const getType = (o: any) => {
-        const ot = (o.orderType || "").toLowerCase();
-        if (ot.includes("take profit")) return "tp";
-        if (ot.includes("stop")) return "sl";
-        const px = parseFloat(o.triggerPx || o.limitPx);
-        if (isNaN(px)) return "other";
-        return isLong ? (px > (pos.entryPrice || currentPrice) ? "tp" : "sl") : (px < (pos.entryPrice || currentPrice) ? "tp" : "sl");
-      };
-      const tp = orders.find(o => getType(o) === "tp");
-      const sl = orders.find(o => getType(o) === "sl");
-      if (tp) add(parseFloat(tp.triggerPx || tp.limitPx), "#22c55e", "TP");
-      if (pos.entryPrice) add(pos.entryPrice, "#60a5fa", "Entry");
-      if (sl) add(parseFloat(sl.triggerPx || sl.limitPx), "#ef4444", "SL");
-      if (pos.liquidationPrice > 0) add(pos.liquidationPrice, "#f97316", "Liq.");
-    }
-  }, [positions, openOrders, coin, currentPrice]);
+  // TP/SL/Entry/Liq lines are rendered by <ChartOrderLines> as an interactive overlay.
+  // The native createPriceLine() approach has been replaced to avoid double lines and to
+  // enable inline editing and drag-to-update functionality.
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -615,6 +607,12 @@ function PatternChartComponent({
       {/* ── Main chart pane ── */}
       <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative overflow-hidden">
         <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
+        <ChartOrderLines
+          coin={coin}
+          currentPrice={currentPrice ?? 0}
+          visiblePriceRange={visiblePriceRange}
+          coordinateToPrice={coordinateToPrice}
+        />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
         {candlesLoading && (
@@ -648,9 +646,9 @@ function PatternChartComponent({
             <span className="inline-block w-4 h-0.5 bg-white" />
             <span className="text-[9px] text-[#b2b5be]">21</span>
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" style={{ opacity: (candles?.length ?? 0) >= 200 ? 1 : 0.35 }}>
             <span className="inline-block w-4 h-0.5" style={{ background: "#f5e642" }} />
-            <span className="text-[9px] text-[#b2b5be]">200</span>
+            <span className="text-[9px] text-[#b2b5be]">200{(candles?.length ?? 0) < 200 ? " (N/A)" : ""}</span>
           </span>
         </div>
 

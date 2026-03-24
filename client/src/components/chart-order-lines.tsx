@@ -7,6 +7,8 @@ import { X, Pencil, Check } from "lucide-react";
 interface ChartOrderLinesProps {
   coin: string;
   currentPrice: number;
+  visiblePriceRange?: { min: number; max: number } | null;
+  coordinateToPrice?: (clientY: number) => number | null;
 }
 
 function fmt(p: number): string {
@@ -30,7 +32,7 @@ function fmtPnl(pnl: number): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
-export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
+export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordinateToPrice }: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
   const [containerHeight, setContainerHeight] = useState(400);
@@ -39,6 +41,8 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const [editInput, setEditInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState<null | "tp" | "sl">(null);
+  const [dragPrice, setDragPrice] = useState<number | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -55,6 +59,57 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       inputRef.current.select();
     }
   }, [editMode]);
+
+  // Drag-to-update: track mouse while dragging a TP or SL line.
+  // Uses a ref for the live price so we don't re-subscribe on every mousemove.
+  const dragPriceRef = useRef<number | null>(null);
+  const draggingRef = useRef<null | "tp" | "sl">(null);
+  draggingRef.current = dragging;
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const onMove = (e: MouseEvent) => {
+      if (!coordinateToPrice) return;
+      const price = coordinateToPrice(e.clientY);
+      if (price !== null && price > 0) {
+        dragPriceRef.current = price;
+        setDragPrice(price);
+      }
+    };
+
+    const onUp = async (e: MouseEvent) => {
+      const finalDragging = draggingRef.current;
+      const finalPrice = dragPriceRef.current ?? (coordinateToPrice ? coordinateToPrice(e.clientY) : null);
+      dragPriceRef.current = null;
+      setDragging(null);
+      setDragPrice(null);
+
+      if (!finalDragging || finalPrice === null || finalPrice <= 0) return;
+
+      // Re-read from trading context via closure; positions/tpPrice/slPrice are stable refs here
+      const pos = positions.find(p => p.coin === coin);
+      if (!pos) return;
+
+      const isLong = pos.side === "long";
+      const tp = finalDragging === "tp" ? finalPrice : (tpPrice ?? undefined);
+      const sl = finalDragging === "sl" ? finalPrice : (slPrice ?? undefined);
+
+      const result = await placeTPSL(coin, isLong, tp, sl, pos.entryPrice);
+      if (result.success) {
+        toast({ title: `${finalDragging === "tp" ? "Take Profit" : "Stop Loss"} updated` });
+      } else {
+        toast({ title: "Update failed", description: result.error, variant: "destructive" });
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, coordinateToPrice, coin, placeTPSL, toast, positions, tpPrice, slPrice]);
 
   const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
 
@@ -143,7 +198,11 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
   const rMin = rawMin - pad;
   const rMax = rawMax + pad;
 
-  const toYPct = (price: number): number => ((rMax - price) / (rMax - rMin)) * 100;
+  // Use the chart's actual visible price range when available for pixel-perfect alignment
+  const effMin = visiblePriceRange?.min ?? rMin;
+  const effMax = visiblePriceRange?.max ?? rMax;
+
+  const toYPct = (price: number): number => ((effMax - price) / (effMax - effMin)) * 100;
 
   interface LineConfig {
     key: string;
@@ -233,6 +292,25 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
       style={{ pointerEvents: "none", height: containerHeight || undefined }}
       data-testid="chart-order-lines"
     >
+      {/* Drag preview line while dragging */}
+      {dragging && dragPrice !== null && (() => {
+        const yPct = toYPct(dragPrice);
+        if (yPct < 0 || yPct > 100) return null;
+        const previewColor = dragging === "tp" ? "#22c55e" : "#ef4444";
+        return (
+          <div
+            className="absolute left-0 right-0 pointer-events-none"
+            style={{ top: `${yPct}%`, transform: "translateY(-50%)", zIndex: 40 }}
+          >
+            <div className="absolute left-0 right-0 h-0" style={{ borderTop: `1px dashed ${previewColor}`, opacity: 0.9 }} />
+            <div className="absolute right-16 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold"
+              style={{ background: previewColor, color: "#fff", transform: "translateY(-50%)" }}>
+              {fmt(dragPrice)}
+            </div>
+          </div>
+        );
+      })()}
+
       {lines.map(line => {
         const yPct = toYPct(line.price);
         if (yPct < -8 || yPct > 108) return null;
@@ -249,6 +327,20 @@ export function ChartOrderLines({ coin, currentPrice }: ChartOrderLinesProps) {
               className="absolute left-0 right-0 h-0"
               style={{ borderTop: `1px dashed ${line.lineColor}`, opacity: 0.7 }}
             />
+
+            {/* Drag handle strip for TP and SL — invisible but interactive */}
+            {(line.editType === "tp" || line.editType === "sl") && coordinateToPrice && (
+              <div
+                className="absolute left-0 right-0"
+                style={{ height: 14, top: -7, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25 }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  dragPriceRef.current = null;
+                  setDragging(line.editType!);
+                }}
+                data-testid={`drag-handle-${line.key}`}
+              />
+            )}
 
             {line.labelSide === "center" ? (
               <div
