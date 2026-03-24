@@ -1,0 +1,124 @@
+This is a CRITICAL production fix. The platform is currently broken (blank screen + incorrect indicators). Fix all issues below without breaking existing trading functionality.
+
+========================
+ROOT CAUSE (DO NOT IGNORE)
+========================
+
+Hyperliquid uses:
+→ SMMA (Smoothed Moving Average)
+
+We are currently using:
+→ SMA (Simple Moving Average)
+
+This is WRONG and is why values do not match.
+
+========================
+1. FIX MOVING AVERAGES (MATCH HYPERLIQUID EXACTLY)
+========================
+
+Replace ALL moving averages with SMMA.
+
+SMMA Formula:
+
+First value:
+SMMA = SMA (initial period)
+
+Next values:
+SMMA = (Previous SMMA * (period - 1) + Current Close) / period
+
+Implement for:
+- 21 SMMA
+- 200 SMMA
+
+Rules:
+- Use CLOSE price only
+- No offsets
+- No repainting
+- Must update live with incoming candles
+- Must match Hyperliquid values EXACTLY on same timeframe
+
+========================
+2. DATA SOURCE CONSISTENCY (CRITICAL)
+========================
+
+Ensure ALL of the following use the SAME candle data source:
+
+- Chart candles
+- Moving averages
+- Pattern detection
+
+Source must be:
+→ Hyperliquid OHLCV API
+
+DO NOT:
+- Mix TradingView data + Hyperliquid data
+- Use cached or delayed data
+- Use mock data
+
+If data mismatch occurs → system is invalid
+
+========================
+3. FIX BLANK SCREEN (APP CRASH)
+========================
+
+Current issue:
+- Site loads blank → likely JS crash or failed API call
+
+Fix:
+
+- Wrap ALL async data calls in try/catch
+- Add fallback UI state:
+
+if (error || noData) {
+  show "Loading market data..." instead of blank screen
+}
+
+- Add console error logging for:
+  - API failures
+  - undefined variables
+  - render crashes
+
+- Ensure:
+  - Chart component only renders AFTER data is loaded
+  - No null/undefined passed into chart
+
+========================
+4. SAFE INITIALIZATION (PREVENT CRASH)
+========================
+
+Before rendering chart:
+
+IF:
+- candles.length === 0
+- OR API not ready
+
+THEN:
+- Do NOT render chart
+- Show loading state
+
+========================
+5. DO NOT BREAK THESE
+========================
+
+- Wallet connection
+- Trade execution
+- Open positions display
+
+========================
+6. VALIDATION REQUIREMENTS
+========================
+
+After fix:
+
+- 21 SMMA matches Hyperliquid exactly
+- 200 SMMA matches Hyperliquid exactly
+- Price position vs MA is identical to Hyperliquid
+- No blank screen
+- App always shows fallback instead of crashing
+
+========================
+OUTPUT
+========================
+
+Return only working code changes.
+No explanations.
