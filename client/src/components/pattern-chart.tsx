@@ -73,6 +73,23 @@ function calcSMA(vals: number[], times: Time[], period: number): { time: Time; v
   return out;
 }
 
+// SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
+// First value = SMA of first `period` bars; then SMMA = (prev * (period-1) + close) / period
+function calcSMMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
+  if (vals.length < period) return [];
+  const out: { time: Time; value: number }[] = [];
+  let prev = 0;
+  for (let i = 0; i < period; i++) prev += vals[i];
+  prev /= period;
+  out.push({ time: times[period - 1], value: prev });
+  for (let i = period; i < vals.length; i++) {
+    const smma = (prev * (period - 1) + vals[i]) / period;
+    out.push({ time: times[i], value: smma });
+    prev = smma;
+  }
+  return out;
+}
+
 function calcRSI(closes: number[], times: Time[], period = 14): { time: Time; value: number }[] {
   if (closes.length < period + 1) return [];
   let ag = 0, al = 0;
@@ -257,9 +274,9 @@ function PatternChartComponent({
     const sorted = [...candles].sort((a, b) => a.t - b.t);
     const closes = sorted.map(c => parsePrice(c.c));
     const times = sorted.map(c => (c.t / 1000) as Time);
-    const sma21 = calcSMA(closes, times, 21);
-    // SMA200: only compute when we have 200+ candles; never approximate with fewer
-    const sma200 = sorted.length >= 200 ? calcSMA(closes, times, 200) : [];
+    const sma21 = calcSMMA(closes, times, 21);
+    // SMMA200: only compute when we have 200+ candles; never approximate with fewer
+    const sma200 = sorted.length >= 200 ? calcSMMA(closes, times, 200) : [];
     const s21 = sma21.length > 0 ? sma21[sma21.length - 1].value : 0;
     const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : null;
     if (s21 > 0 && s200 !== null) {
@@ -307,11 +324,11 @@ function PatternChartComponent({
     candleSeriesRef.current = candleSeries;
 
     sma21SeriesRef.current = mainChart.addSeries(LineSeries, {
-      color: "#ffffff", lineWidth: 2, title: "21", priceLineVisible: false, lastValueVisible: true,
+      color: "#ffffff", lineWidth: 2, title: "SMMA 21", priceLineVisible: false, lastValueVisible: true,
     });
 
     sma200SeriesRef.current = mainChart.addSeries(LineSeries, {
-      color: "#f5e642", lineWidth: 2, title: "200", priceLineVisible: false, lastValueVisible: true,
+      color: "#f5e642", lineWidth: 2, title: "SMMA 200", priceLineVisible: false, lastValueVisible: true,
     });
 
     const volSeries = mainChart.addSeries(HistogramSeries, {
@@ -483,9 +500,9 @@ function PatternChartComponent({
         setLastVol(vols[vols.length - 1] ?? null);
 
         if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-        if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-        // SMA200: use exactly 200 periods — never approximate (matches Hyperliquid exactly)
-        if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMA(closes, times, 200));
+        if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMMA(closes, times, 21));
+        // SMMA200: use exactly 200 periods — never approximate (matches Hyperliquid exactly)
+        if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMMA(closes, times, 200));
 
         if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
           const rsiData = calcRSI(closes, times, 14);
@@ -532,8 +549,8 @@ function PatternChartComponent({
             color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
           })));
           if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-          if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMA(closes, times, 21));
-          if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMA(closes, times, 200));
+          if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMMA(closes, times, 21));
+          if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMMA(closes, times, 200));
           setLastVol(vols[vols.length - 1] ?? null);
         } catch (e) {
           console.warn("[chart] bulk setData error:", e);
@@ -557,13 +574,13 @@ function PatternChartComponent({
           });
           setLastVol(parsePrice(lastCandle.v));
 
-          // Update SMA last points (incremental — avoids full series redraw)
+          // Update SMMA last points (incremental — avoids full series redraw)
           if (sorted.length >= 21) {
-            const s21 = calcSMA(closes, times, 21);
+            const s21 = calcSMMA(closes, times, 21);
             if (s21.length > 0) sma21SeriesRef.current.update(s21[s21.length - 1]);
           }
           if (sorted.length >= 200) {
-            const s200 = calcSMA(closes, times, 200);
+            const s200 = calcSMMA(closes, times, 200);
             if (s200.length > 0) sma200SeriesRef.current.update(s200[s200.length - 1]);
           }
           if (vols.length >= 20) {
@@ -640,15 +657,15 @@ function PatternChartComponent({
           {lastVol !== null && <span className="text-[10px] text-[#f59e0b] font-mono">{fmtVol(lastVol)}</span>}
         </div>
 
-        {/* SMA legend */}
+        {/* SMMA legend */}
         <div className="absolute top-1 right-8 z-10 pointer-events-none flex items-center gap-3">
           <span className="flex items-center gap-1">
             <span className="inline-block w-4 h-0.5 bg-white" />
-            <span className="text-[9px] text-[#b2b5be]">21</span>
+            <span className="text-[9px] text-[#b2b5be]">SMMA 21</span>
           </span>
           <span className="flex items-center gap-1" style={{ opacity: (candles?.length ?? 0) >= 200 ? 1 : 0.35 }}>
             <span className="inline-block w-4 h-0.5" style={{ background: "#f5e642" }} />
-            <span className="text-[9px] text-[#b2b5be]">200{(candles?.length ?? 0) < 200 ? " (N/A)" : ""}</span>
+            <span className="text-[9px] text-[#b2b5be]">SMMA 200{(candles?.length ?? 0) < 200 ? " (N/A)" : ""}</span>
           </span>
         </div>
 
@@ -681,16 +698,16 @@ function PatternChartComponent({
             {/* MA filter reason */}
             <p className="text-[9px] text-[#8c9ab5] mb-2 leading-relaxed">{activeSignal.maFilterReason}</p>
 
-            {/* SMA values */}
+            {/* SMMA values */}
             <div className="flex gap-3 text-[9px] mb-2">
               <span className="flex items-center gap-1">
                 <span className="w-3 h-0.5 bg-white inline-block" />
-                <span className="text-[#8c9ab5]">21</span>
+                <span className="text-[#8c9ab5]">SMMA 21</span>
                 <span className="font-mono text-[#e8ecf1]">{activeSignal.sma21.toFixed(2)}</span>
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-3 h-0.5 inline-block" style={{ background: "#f5e642" }} />
-                <span className="text-[#8c9ab5]">200</span>
+                <span className="text-[#8c9ab5]">SMMA 200</span>
                 <span className="font-mono text-[#e8ecf1]">{activeSignal.sma200.toFixed(2)}</span>
               </span>
             </div>

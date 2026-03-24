@@ -28,7 +28,7 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
     <Card data-testid="sma-indicator">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-display">SMA Analysis</CardTitle>
+          <CardTitle className="text-base font-display">SMMA Analysis</CardTitle>
           <Badge 
             variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "secondary"}
             className={cn(
@@ -46,7 +46,7 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-md bg-muted/50 p-3">
-            <p className="text-xs text-muted-foreground mb-1">21 SMA (1m)</p>
+            <p className="text-xs text-muted-foreground mb-1">21 SMMA (1m)</p>
             <p className="font-mono font-semibold text-sm">
               ${sma21_1m.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
@@ -66,7 +66,7 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
           </div>
 
           <div className="rounded-md bg-muted/50 p-3">
-            <p className="text-xs text-muted-foreground mb-1">200 SMA (1m)</p>
+            <p className="text-xs text-muted-foreground mb-1">200 SMMA (1m)</p>
             <p className="font-mono font-semibold text-sm">
               ${sma200_1m.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
@@ -87,7 +87,7 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
         </div>
 
         <div className="rounded-md bg-muted/50 p-3">
-          <p className="text-xs text-muted-foreground mb-1">200 SMA (5m)</p>
+          <p className="text-xs text-muted-foreground mb-1">200 SMMA (5m)</p>
           <div className="flex items-center justify-between">
             <p className="font-mono font-semibold text-sm">
               ${sma200_5m.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -112,9 +112,9 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
         )}>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium">21/200 Crossover</p>
+              <p className="text-xs font-medium">21/200 SMMA Crossover</p>
               <p className="text-[10px] text-muted-foreground">
-                {sma21VsSma200 ? "21 SMA above 200 SMA" : "21 SMA below 200 SMA"}
+                {sma21VsSma200 ? "21 SMMA above 200 SMMA" : "21 SMMA below 200 SMMA"}
               </p>
             </div>
             {crossoverActive ? (
@@ -137,7 +137,7 @@ export function SMAIndicator({ marketCondition }: SMAIndicatorProps) {
               "Bearish setup active - look for bear flags and short opportunities."
             )}
             {!crossoverActive && (
-              "Waiting for 21/200 SMA crossover on 1-minute timeframe."
+              "Waiting for 21/200 SMMA crossover on 1-minute timeframe."
             )}
           </p>
         </div>

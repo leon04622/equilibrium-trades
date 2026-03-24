@@ -74,18 +74,23 @@ function getThresholds(timeframe: string) {
   return thresholds[timeframe] || thresholds["1h"];
 }
 
-function calculateSMA(prices: number[], period: number): number | null {
+// SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
+// First value = SMA of first `period` bars; then SMMA = (prev * (period-1) + close) / period
+function calculateSMMA(prices: number[], period: number): number | null {
   if (prices.length < period) return null;
-  const slice = prices.slice(-period);
-  return slice.reduce((sum, p) => sum + p, 0) / period;
+  let smma = prices.slice(0, period).reduce((sum, p) => sum + p, 0) / period;
+  for (let i = period; i < prices.length; i++) {
+    smma = (smma * (period - 1) + prices[i]) / period;
+  }
+  return smma;
 }
 
 export function calculateSMAFromCandles(candles: HyperliquidCandle[]): SMAValues | null {
   if (candles.length < 200) return null;
   
   const closePrices = candles.map(c => parseFloat(c.c));
-  const sma21 = calculateSMA(closePrices, 21);
-  const sma200 = calculateSMA(closePrices, 200);
+  const sma21 = calculateSMMA(closePrices, 21);
+  const sma200 = calculateSMMA(closePrices, 200);
   const lastCandle = candles[candles.length - 1];
   
   if (!sma21 || !sma200) return null;
