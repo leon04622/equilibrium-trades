@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { PatternChart } from "@/components/pattern-chart";
+import { TradingViewChart } from "@/components/trading-view-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
@@ -18,7 +19,18 @@ import { usePaywall } from "@/lib/paywall-context";
 import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { cn } from "@/lib/utils";
+import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
 
+const LS_COIN = "eq_trading_coin";
+const LS_TF = "eq_trading_timeframe";
+const LS_CHART_ENGINE = "eq_chart_engine";
+
+type ChartEngine = "hyperliquid" | "tradingview";
+
+const TF_TO_INTERVAL: Record<string, string> = {
+  "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m",
+  "60": "1h", "120": "2h", "240": "4h", "D": "1d",
+};
 
 const timeframes = [
   { value: "1", label: "1m" },
@@ -41,9 +53,28 @@ type MobileTab = "chart" | "orderbook" | "trades";
 export default function Trading({ visible = true }: TradingProps) {
   const [coin, setCoin] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("coin") || "BTC";
+    const q = params.get("coin");
+    if (q) return q;
+    try {
+      const saved = localStorage.getItem(LS_COIN);
+      if (saved) return saved;
+    } catch { /* ignore */ }
+    return "BTC";
   });
-  const [timeframe, setTimeframe] = useState("5");
+  const [timeframe, setTimeframe] = useState(() => {
+    try {
+      const saved = localStorage.getItem(LS_TF);
+      if (saved && TF_TO_INTERVAL[saved]) return saved;
+    } catch { /* ignore */ }
+    return "5";
+  });
+  const [chartEngine, setChartEngine] = useState<ChartEngine>(() => {
+    try {
+      const v = localStorage.getItem(LS_CHART_ENGINE);
+      if (v === "tradingview" || v === "hyperliquid") return v;
+    } catch { /* ignore */ }
+    return "hyperliquid";
+  });
   const [showOrderBook, setShowOrderBook] = useState(false);
   const [orderBookMode, setOrderBookMode] = useState<"book" | "trades">("book");
   const [showAIChart, setShowAIChart] = useState(true);
@@ -71,7 +102,27 @@ export default function Trading({ visible = true }: TradingProps) {
       setCoin(coinParam);
     }
   }, [location]);
-  
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_COIN, coin);
+    } catch { /* ignore */ }
+  }, [coin]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_TF, timeframe);
+    } catch { /* ignore */ }
+  }, [timeframe]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_CHART_ENGINE, chartEngine);
+    } catch { /* ignore */ }
+  }, [chartEngine]);
+
+  const chartInterval = TF_TO_INTERVAL[timeframe] || "5m";
+
   // Basic charting is free for all connected wallets
   const canShowIndicatorChart = isConnected;
   // AI pattern signals and SMA overlays are Pro-only (both gated together)
@@ -129,6 +180,11 @@ export default function Trading({ visible = true }: TradingProps) {
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
   const displaySymbol = currentTicker?.baseName || (isSpot ? coin : coin);
+
+  const tradingViewSymbol = useMemo(
+    () => coinToTradingViewSymbol(coin, currentTicker?.baseName),
+    [coin, currentTicker?.baseName]
+  );
 
   const handleOrderSubmit = (order: any) => {
     toast({
@@ -335,6 +391,32 @@ export default function Trading({ visible = true }: TradingProps) {
             >
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
+
+            <div
+              className="flex items-center gap-0.5 shrink-0 border-r border-border/50 pr-1 mr-0.5"
+              title="Hyperliquid = native chart + TP/SL lines. TradingView = embed (no TP/SL overlay)."
+            >
+              <Button
+                type="button"
+                variant={chartEngine === "hyperliquid" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-1.5 text-[10px] font-mono"
+                onClick={() => setChartEngine("hyperliquid")}
+                data-testid="chart-engine-hl"
+              >
+                HL
+              </Button>
+              <Button
+                type="button"
+                variant={chartEngine === "tradingview" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-1.5 text-[10px] font-mono"
+                onClick={() => setChartEngine("tradingview")}
+                data-testid="chart-engine-tv"
+              >
+                TV
+              </Button>
+            </div>
             
             <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
               {timeframes.map((tf) => (
@@ -352,34 +434,38 @@ export default function Trading({ visible = true }: TradingProps) {
             </div>
             
             <div className="hidden md:flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <Switch 
-                  checked={showAIChart} 
-                  onCheckedChange={handleAIChartToggle}
-                  id="ai-chart-toggle"
-                  data-testid="toggle-ai-chart"
-                />
-                <label
-                  htmlFor="ai-chart-toggle"
-                  className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1"
-                  onClick={() => !canUseAIPatterns && openPaywall("AI Pattern Recognition")}
-                >
-                  <Brain className="h-3 w-3" />
-                  AI Chart
-                  {!canUseAIPatterns && <Lock className="h-3 w-3 text-muted-foreground/60" />}
-                </label>
-              </div>
-              {showAIChart && (
-                <div className="flex items-center gap-1.5">
-                  <Switch 
-                    checked={showIndicators} 
-                    onCheckedChange={setShowIndicators}
-                    id="indicators-toggle"
-                  />
-                  <label htmlFor="indicators-toggle" className="text-xs text-muted-foreground cursor-pointer">
-                    RSI / Stoch
-                  </label>
-                </div>
+              {chartEngine === "hyperliquid" && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <Switch 
+                      checked={showAIChart} 
+                      onCheckedChange={handleAIChartToggle}
+                      id="ai-chart-toggle"
+                      data-testid="toggle-ai-chart"
+                    />
+                    <label
+                      htmlFor="ai-chart-toggle"
+                      className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1"
+                      onClick={() => !canUseAIPatterns && openPaywall("AI Pattern Recognition")}
+                    >
+                      <Brain className="h-3 w-3" />
+                      AI Chart
+                      {!canUseAIPatterns && <Lock className="h-3 w-3 text-muted-foreground/60" />}
+                    </label>
+                  </div>
+                  {showAIChart && (
+                    <div className="flex items-center gap-1.5">
+                      <Switch 
+                        checked={showIndicators} 
+                        onCheckedChange={setShowIndicators}
+                        id="indicators-toggle"
+                      />
+                      <label htmlFor="indicators-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                        RSI / Stoch
+                      </label>
+                    </div>
+                  )}
+                </>
               )}
               <div className="flex items-center gap-1.5">
                 <Switch 
@@ -405,16 +491,24 @@ export default function Trading({ visible = true }: TradingProps) {
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
                 <div className="flex-1 relative" style={{ minHeight: 'calc(100dvh - 16rem)' }}>
-                  <PatternChart 
-                    symbol={coin} 
-                    interval={
-                      { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
-                    }
-                    currentPrice={price}
-                    showSignals={showAIChart && canUseAIPatterns && !isSpot}
-                    hideIndicators={!showIndicators}
-                    className="absolute inset-0" 
-                  />
+                  {chartEngine === "hyperliquid" ? (
+                    <PatternChart 
+                      key={`lc-${coin}-${chartInterval}`}
+                      symbol={coin} 
+                      interval={chartInterval}
+                      currentPrice={price}
+                      showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                      hideIndicators={!showIndicators}
+                      className="absolute inset-0" 
+                    />
+                  ) : (
+                    <TradingViewChart
+                      key={`tv-${tradingViewSymbol}-${timeframe}`}
+                      symbol={tradingViewSymbol}
+                      interval={timeframe}
+                      className="absolute inset-0"
+                    />
+                  )}
                 </div>
               )}
               {!isFullscreen && mobileTab === "orderbook" && (
@@ -431,16 +525,24 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {/* Desktop: Chart — always PatternChart so toggling AI mode never remounts the chart */}
             <div className="hidden md:block flex-1 min-w-0 relative">
-              <PatternChart 
-                symbol={coin} 
-                interval={
-                  { "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "D": "1d" }[timeframe] || "5m"
-                }
-                currentPrice={price}
-                showSignals={showAIChart && canUseAIPatterns && !isSpot}
-                hideIndicators={!showIndicators}
-                className="h-full" 
-              />
+              {chartEngine === "hyperliquid" ? (
+                <PatternChart 
+                  key={`lc-${coin}-${chartInterval}`}
+                  symbol={coin} 
+                  interval={chartInterval}
+                  currentPrice={price}
+                  showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                  hideIndicators={!showIndicators}
+                  className="h-full" 
+                />
+              ) : (
+                <TradingViewChart
+                  key={`tv-${tradingViewSymbol}-${timeframe}`}
+                  symbol={tradingViewSymbol}
+                  interval={timeframe}
+                  className="h-full"
+                />
+              )}
             </div>
             
             {/* Optional Order Book Panel - Desktop only */}

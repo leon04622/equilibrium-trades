@@ -17,8 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
+import { proCheckoutUrl } from "@/lib/stripe-payment-links";
 
 const PREMIUM_FEATURES = [
   {
@@ -64,8 +63,7 @@ export function PaywallModal() {
     }
 
     setIsCheckingOut(true);
-    const url = `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`;
-    window.location.href = url;
+    window.location.href = proCheckoutUrl(address);
   };
 
   return (

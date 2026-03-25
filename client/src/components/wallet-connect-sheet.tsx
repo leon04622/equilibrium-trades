@@ -1,7 +1,7 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useWallet, WalletType } from "@/lib/wallet-context";
-import { Wallet, ExternalLink, Smartphone, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Wallet, ExternalLink, Smartphone, Loader2, CheckCircle2, AlertCircle, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 interface WalletConnectSheetProps {
@@ -117,6 +117,21 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
               <Button
                 variant="outline"
                 className="w-full justify-between h-14"
+                onClick={() => openInWalletBrowser("rabby")}
+                data-testid="button-open-rabby-mobile"
+              >
+                <div className="flex items-center gap-3">
+                  <WalletIcon type="rabby" color={WALLET_META.rabby.color} />
+                  <div className="text-left">
+                    <span className="font-medium block">Rabby</span>
+                    <span className="text-xs text-muted-foreground">Open in Rabby app — unlock, then connect</span>
+                  </div>
+                </div>
+                <Smartphone className="h-4 w-4 text-muted-foreground" />
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-between h-14"
                 onClick={() => openInWalletBrowser("metamask")}
                 data-testid="button-open-metamask"
               >
@@ -124,7 +139,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
                   <WalletIcon type="metamask" color={WALLET_META.metamask.color} />
                   <div className="text-left">
                     <span className="font-medium block">MetaMask</span>
-                    <span className="text-xs text-muted-foreground">Recommended for mobile</span>
+                    <span className="text-xs text-muted-foreground">Open in MetaMask browser</span>
                   </div>
                 </div>
                 <Smartphone className="h-4 w-4 text-muted-foreground" />
@@ -184,7 +199,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
                     {connectingWallet === wallet.type ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     )}
                   </Button>
                 );

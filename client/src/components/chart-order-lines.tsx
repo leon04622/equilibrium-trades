@@ -32,6 +32,24 @@ function fmtPnl(pnl: number): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
+/** Snap to sensible price increments (Hyperliquid-style tick by magnitude). */
+function snapOrderPrice(price: number, refPrice: number): number {
+  if (!Number.isFinite(price) || price <= 0) return price;
+  const r = refPrice > 0 ? refPrice : price;
+  const tick =
+    r >= 50_000 ? 1 :
+    r >= 10_000 ? 0.5 :
+    r >= 1_000 ? 0.1 :
+    r >= 100 ? 0.01 :
+    r >= 10 ? 0.001 :
+    r >= 1 ? 0.0001 :
+    r >= 0.1 ? 0.00001 :
+    0.0000001;
+  const rounded = Math.round(price / tick) * tick;
+  const dec = Math.min(8, Math.max(0, Math.ceil(-Math.log10(tick))));
+  return parseFloat(rounded.toFixed(dec));
+}
+
 export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordinateToPrice }: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
@@ -60,57 +78,6 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     }
   }, [editMode]);
 
-  // Drag-to-update: track mouse while dragging a TP or SL line.
-  // Uses a ref for the live price so we don't re-subscribe on every mousemove.
-  const dragPriceRef = useRef<number | null>(null);
-  const draggingRef = useRef<null | "tp" | "sl">(null);
-  draggingRef.current = dragging;
-
-  useEffect(() => {
-    if (!dragging) return;
-
-    const onMove = (e: MouseEvent) => {
-      if (!coordinateToPrice) return;
-      const price = coordinateToPrice(e.clientY);
-      if (price !== null && price > 0) {
-        dragPriceRef.current = price;
-        setDragPrice(price);
-      }
-    };
-
-    const onUp = async (e: MouseEvent) => {
-      const finalDragging = draggingRef.current;
-      const finalPrice = dragPriceRef.current ?? (coordinateToPrice ? coordinateToPrice(e.clientY) : null);
-      dragPriceRef.current = null;
-      setDragging(null);
-      setDragPrice(null);
-
-      if (!finalDragging || finalPrice === null || finalPrice <= 0) return;
-
-      // Re-read from trading context via closure; positions/tpPrice/slPrice are stable refs here
-      const pos = positions.find(p => p.coin === coin);
-      if (!pos) return;
-
-      const isLong = pos.side === "long";
-      const tp = finalDragging === "tp" ? finalPrice : (tpPrice ?? undefined);
-      const sl = finalDragging === "sl" ? finalPrice : (slPrice ?? undefined);
-
-      const result = await placeTPSL(coin, pos.size, isLong, tp, sl, pos.entryPrice);
-      if (result.success) {
-        toast({ title: `${finalDragging === "tp" ? "Take Profit" : "Stop Loss"} updated` });
-      } else {
-        toast({ title: "Update failed", description: result.error, variant: "destructive" });
-      }
-    };
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [dragging, coordinateToPrice, coin, placeTPSL, toast, positions, tpPrice, slPrice]);
-
   const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
 
   const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
@@ -131,6 +98,76 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
 
   const tpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
   const slPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
+
+  // Drag-to-update: track mouse while dragging a TP or SL line.
+  // Uses a ref for the live price so we don't re-subscribe on every mousemove.
+  const dragPriceRef = useRef<number | null>(null);
+  const draggingRef = useRef<null | "tp" | "sl">(null);
+  draggingRef.current = dragging;
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const readY = (e: MouseEvent | TouchEvent): number | null => {
+      if ("touches" in e && e.touches.length > 0) return e.touches[0].clientY;
+      if ("changedTouches" in e && e.changedTouches.length > 0) return e.changedTouches[0].clientY;
+      return (e as MouseEvent).clientY;
+    };
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      if (!coordinateToPrice) return;
+      if ("preventDefault" in e && e.cancelable) e.preventDefault();
+      const y = readY(e);
+      if (y === null) return;
+      const raw = coordinateToPrice(y);
+      if (raw !== null && raw > 0) {
+        const snapped = snapOrderPrice(raw, currentPrice);
+        dragPriceRef.current = snapped;
+        setDragPrice(snapped);
+      }
+    };
+
+    const onUp = async (e: MouseEvent | TouchEvent) => {
+      const finalDragging = draggingRef.current;
+      const y = readY(e);
+      const raw =
+        dragPriceRef.current ??
+        (coordinateToPrice && y !== null ? coordinateToPrice(y) : null);
+      const finalPrice = raw !== null && raw > 0 ? snapOrderPrice(raw, currentPrice) : null;
+      dragPriceRef.current = null;
+      setDragging(null);
+      setDragPrice(null);
+
+      if (!finalDragging || finalPrice === null || finalPrice <= 0) return;
+
+      const pos = positions.find(p => p.coin === coin);
+      if (!pos) return;
+
+      const isLong = pos.side === "long";
+      const tp = finalDragging === "tp" ? finalPrice : (tpPrice ?? undefined);
+      const sl = finalDragging === "sl" ? finalPrice : (slPrice ?? undefined);
+
+      const result = await placeTPSL(coin, pos.size, isLong, tp, sl, pos.entryPrice);
+      if (result.success) {
+        toast({ title: `${finalDragging === "tp" ? "Take Profit" : "Stop Loss"} updated` });
+      } else {
+        toast({ title: "Update failed", description: result.error, variant: "destructive" });
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+    window.addEventListener("touchcancel", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+      window.removeEventListener("touchcancel", onUp);
+    };
+  }, [dragging, coordinateToPrice, coin, placeTPSL, toast, positions, tpPrice, slPrice, currentPrice]);
 
   const handleCancel = useCallback(async (type: "tp" | "sl") => {
     const order = type === "tp" ? tpOrder : slOrder;
@@ -154,7 +191,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
 
   const confirmEdit = useCallback(async () => {
     if (!editMode || !position) return;
-    const newPrice = parseFloat(editInput);
+    const newPrice = snapOrderPrice(parseFloat(editInput), currentPrice);
     if (isNaN(newPrice) || newPrice <= 0) {
       toast({ title: "Invalid price", variant: "destructive" });
       return;
@@ -175,7 +212,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     } finally {
       setIsSubmitting(false);
     }
-  }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast]);
+  }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast, currentPrice]);
 
   if (!position) return null;
 
@@ -331,9 +368,14 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
             {/* Drag handle strip for TP and SL — invisible but interactive */}
             {(line.editType === "tp" || line.editType === "sl") && coordinateToPrice && (
               <div
-                className="absolute left-0 right-0"
-                style={{ height: 14, top: -7, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25 }}
+                className="absolute left-0 right-0 touch-none"
+                style={{ height: 18, top: -9, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25, touchAction: "none" }}
                 onMouseDown={(e) => {
+                  e.preventDefault();
+                  dragPriceRef.current = null;
+                  setDragging(line.editType!);
+                }}
+                onTouchStart={(e) => {
                   e.preventDefault();
                   dragPriceRef.current = null;
                   setDragging(line.editType!);

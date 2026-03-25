@@ -20,6 +20,7 @@ let lastDbCheck = 0;
 const DB_CHECK_INTERVAL = 30_000;
 
 async function isDbUp(): Promise<boolean> {
+  if (!db) return false;
   const now = Date.now();
   if (dbAvailable !== null && now - lastDbCheck < DB_CHECK_INTERVAL) {
     return dbAvailable;
@@ -352,6 +353,7 @@ export class MemStorage implements IStorage {
 
   // Tutorial Videos - Now using database for persistence
   async getAllVideos(): Promise<TutorialVideo[]> {
+    if (!db) return [];
     try {
       const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
       return videos;
@@ -361,6 +363,7 @@ export class MemStorage implements IStorage {
   }
 
   async getVideo(id: string): Promise<TutorialVideo | undefined> {
+    if (!db) return undefined;
     try {
       const [video] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
       return video;
@@ -370,19 +373,36 @@ export class MemStorage implements IStorage {
   }
 
   async createVideo(video: InsertTutorialVideo): Promise<TutorialVideo> {
-    const [newVideo] = await db.insert(tutorialVideos).values({
+    const fallback: TutorialVideo = {
+      id: randomUUID(),
       title: video.title,
       description: video.description,
       duration: video.duration || "",
       category: video.category,
-      youtubeId: video.youtubeId || null,
-      videoPath: video.videoPath || null,
-      thumbnailPath: video.thumbnailPath || null,
-    }).returning();
-    return newVideo;
+      youtubeId: video.youtubeId ?? null,
+      videoPath: video.videoPath ?? null,
+      thumbnailPath: video.thumbnailPath ?? null,
+      createdAt: new Date(),
+    };
+    if (!db) return fallback;
+    try {
+      const [newVideo] = await db.insert(tutorialVideos).values({
+        title: video.title,
+        description: video.description,
+        duration: video.duration || "",
+        category: video.category,
+        youtubeId: video.youtubeId || null,
+        videoPath: video.videoPath || null,
+        thumbnailPath: video.thumbnailPath || null,
+      }).returning();
+      return newVideo;
+    } catch {
+      return fallback;
+    }
   }
 
   async deleteVideo(id: string): Promise<boolean> {
+    if (!db) return false;
     try {
       const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
       return result.length > 0;
@@ -410,6 +430,7 @@ export class MemStorage implements IStorage {
   async getWalletUser(walletAddress: string): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
     try {
+      if (!db) return this.walletUsersCache.get(normalizedAddress);
       const [user] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
       if (user) {
         const mapped = this.mapDbUser(user);
@@ -424,6 +445,7 @@ export class MemStorage implements IStorage {
 
   async getAllWalletUsers(): Promise<WalletUser[]> {
     try {
+      if (!db) return Array.from(this.walletUsersCache.values());
       const users = await db.select().from(walletUsers).orderBy(desc(walletUsers.createdAt));
       return users.map(u => this.mapDbUser(u));
     } catch {
@@ -447,6 +469,10 @@ export class MemStorage implements IStorage {
       updatedAt: now,
     };
     try {
+      if (!db) {
+        this.walletUsersCache.set(normalizedAddress, fallback);
+        return fallback;
+      }
       const [newUser] = await db.insert(walletUsers).values({
         walletAddress: normalizedAddress,
         email: user.email ?? null,
@@ -466,6 +492,15 @@ export class MemStorage implements IStorage {
   async updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
     try {
+      if (!db) {
+        const cached = this.walletUsersCache.get(normalizedAddress);
+        if (cached) {
+          cached.builderCodeApproved = approved;
+          cached.updatedAt = new Date();
+          return cached;
+        }
+        return undefined;
+      }
       const [user] = await db.update(walletUsers)
         .set({ builderCodeApproved: approved, updatedAt: new Date() })
         .where(eq(walletUsers.walletAddress, normalizedAddress))
@@ -496,6 +531,15 @@ export class MemStorage implements IStorage {
   async updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
     try {
+      if (!db) {
+        const cached = this.walletUsersCache.get(normalizedAddress);
+        if (cached) {
+          cached.email = email;
+          cached.updatedAt = new Date();
+          return cached;
+        }
+        return undefined;
+      }
       const [user] = await db.update(walletUsers)
         .set({ email, updatedAt: new Date() })
         .where(eq(walletUsers.walletAddress, normalizedAddress))
@@ -524,6 +568,18 @@ export class MemStorage implements IStorage {
     const normalizedAddress = walletAddress.toLowerCase();
     const now = new Date();
     try {
+      if (!db) {
+        const cached = this.walletUsersCache.get(normalizedAddress);
+        if (cached) {
+          cached.subscriptionTier = tier;
+          cached.subscriptionActive = active;
+          cached.subscriptionExpiresAt = expiresAt ?? null;
+          if (active && !cached.subscribedAt) cached.subscribedAt = now;
+          cached.updatedAt = now;
+          return cached;
+        }
+        return undefined;
+      }
       const [existing] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalizedAddress));
       const setSubscribedAt = active && existing && !existing.subscribedAt ? now : (existing?.subscribedAt ?? null);
       const [user] = await db.update(walletUsers)
@@ -556,6 +612,7 @@ export class MemStorage implements IStorage {
 
   // Support Messages - Using database for persistence
   async getMessages(conversationId: string): Promise<SupportMessage[]> {
+    if (!db) return [];
     try {
       const messages = await db.select().from(supportMessages)
         .where(eq(supportMessages.conversationId, conversationId.toLowerCase()))
@@ -567,6 +624,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]> {
+    if (!db) return [];
     try {
       const messages = await db.select().from(supportMessages).orderBy(desc(supportMessages.createdAt));
       
@@ -591,6 +649,18 @@ export class MemStorage implements IStorage {
 
   async createMessage(message: InsertSupportMessage): Promise<SupportMessage> {
     try {
+      if (!db) {
+        return {
+          id: randomUUID(),
+          senderType: message.senderType,
+          senderWallet: message.senderWallet?.toLowerCase() || null,
+          senderName: message.senderName || null,
+          message: message.message,
+          isRead: message.isRead || false,
+          conversationId: message.conversationId.toLowerCase(),
+          createdAt: new Date(),
+        };
+      }
       const [newMessage] = await db.insert(supportMessages).values({
         senderType: message.senderType,
         senderWallet: message.senderWallet?.toLowerCase() || null,
@@ -615,6 +685,7 @@ export class MemStorage implements IStorage {
   }
 
   async markMessagesAsRead(conversationId: string): Promise<void> {
+    if (!db) return;
     try {
       await db.update(supportMessages)
         .set({ isRead: true })
@@ -626,6 +697,16 @@ export class MemStorage implements IStorage {
 
   async createLead(lead: InsertLead): Promise<Lead> {
     try {
+      if (!db) {
+        return {
+          id: randomUUID(),
+          email: lead.email,
+          name: lead.name || null,
+          source: lead.source || "landing",
+          walletAddress: lead.walletAddress || null,
+          createdAt: new Date(),
+        };
+      }
       const [newLead] = await db.insert(leads).values({
         email: lead.email,
         name: lead.name || null,
@@ -646,6 +727,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAllLeads(): Promise<Lead[]> {
+    if (!db) return [];
     try {
       return await db.select().from(leads).orderBy(desc(leads.createdAt));
     } catch {

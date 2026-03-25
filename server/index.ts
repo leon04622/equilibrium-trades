@@ -1,3 +1,4 @@
+import "./env";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -6,6 +7,8 @@ import { heatmapWSManager } from "./heatmap-ws";
 import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
+import { getDatabaseStatus } from './db';
+import { getPublicAppBaseUrl } from "./public-url";
 
 const app = express();
 const httpServer = createServer(app);
@@ -44,19 +47,29 @@ async function initStripe() {
 
     const stripeSync = await getStripeSync();
 
-    log('Setting up managed webhook...', 'stripe');
-    const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
-    try {
-      const result = await stripeSync.findOrCreateManagedWebhook(
-        `${webhookBaseUrl}/api/stripe/webhook`
+    const webhookBaseUrl = getPublicAppBaseUrl();
+    if (!webhookBaseUrl.startsWith("https://")) {
+      log(
+        "Skipping managed Stripe webhook auto-setup (need https). Set PUBLIC_APP_URL=https://your.domain and configure /api/stripe/webhook in Stripe Dashboard for production.",
+        "stripe"
       );
-      if (result?.webhook) {
-        log(`Webhook configured: ${result.webhook.url}`, 'stripe');
-      } else {
-        log('Webhook setup returned no webhook object, continuing without managed webhook', 'stripe');
+    } else {
+      log("Setting up managed webhook...", "stripe");
+      try {
+        const result = await stripeSync.findOrCreateManagedWebhook(
+          `${webhookBaseUrl}/api/stripe/webhook`
+        );
+        if (result?.webhook) {
+          log(`Webhook configured: ${result.webhook.url}`, "stripe");
+        } else {
+          log(
+            "Webhook setup returned no webhook object, continuing without managed webhook",
+            "stripe"
+          );
+        }
+      } catch (webhookError: any) {
+        log(`Webhook setup error (non-fatal): ${webhookError.message}`, "stripe");
       }
-    } catch (webhookError: any) {
-      log(`Webhook setup error (non-fatal): ${webhookError.message}`, 'stripe');
     }
 
     log('Syncing Stripe data...', 'stripe');
@@ -149,7 +162,15 @@ async function initStripe() {
 
   // ── Health check (required by Replit autoscale) ──
   app.get("/health", (_req, res) => {
-    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+    const dbStatus = getDatabaseStatus();
+    res.status(200).json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      database: {
+        configured: dbStatus.configured,
+        ...(dbStatus.message ? { message: dbStatus.message } : {}),
+      },
+    });
   });
 
   await registerRoutes(httpServer, app);
@@ -172,14 +193,19 @@ async function initStripe() {
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  // reusePort is unsupported on Windows (ENOTSUP) and not needed for local dev
+  const listenOptions: { port: number; host: string; reusePort?: boolean } = {
+    port,
+    host: "0.0.0.0",
+  };
+  if (process.platform !== "win32") {
+    listenOptions.reusePort = true;
+  }
+  httpServer.listen(listenOptions, () => {
+    log(`serving on port ${port}`);
+    const d = getDatabaseStatus();
+    if (!d.configured && d.message) {
+      log(d.message, "db");
+    }
+  });
 })();

@@ -1,0 +1,13 @@
+# Install Caddy on your VPS, replace domain, point DNS A/AAAA to this server.
+# sudo caddy run --config /path/to/Caddyfile
+#
+# TLS is automatic. Traffic proxies to Node on 127.0.0.1:5000 (npm start or Docker).
+
+www.equilibrium-trading.xyz {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:5000
+}
+
+equilibrium-trading.xyz {
+	redir https://www.equilibrium-trading.xyz{uri}
+}

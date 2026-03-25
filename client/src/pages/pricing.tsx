@@ -6,9 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
-
-const PRO_STRIPE_LINK = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
-const MENTORING_STRIPE_LINK = "https://buy.stripe.com/eVqeVc3Prc326BI6XH0oM04";
+import { proCheckoutUrl, mentoringCheckoutUrl } from "@/lib/stripe-payment-links";
 
 const proFeatures = [
   "AI-powered pattern detection",
@@ -70,12 +68,11 @@ export default function Pricing() {
       return;
     }
 
-    const url = `${PRO_STRIPE_LINK}?client_reference_id=${encodeURIComponent(address)}`;
-    window.location.href = url;
+    window.location.href = proCheckoutUrl(address);
   };
 
   const handleMentoringCheckout = () => {
-    window.location.href = MENTORING_STRIPE_LINK;
+    window.location.href = mentoringCheckoutUrl(isConnected ? address : null);
   };
 
   return (

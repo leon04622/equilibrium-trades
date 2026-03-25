@@ -1,51 +1,20 @@
 import Stripe from 'stripe';
 
-let connectionSettings: any;
-
-async function fetchConnectionForEnvironment(hostname: string, xReplitToken: string, environment: string) {
-  const url = new URL(`https://${hostname}/api/v2/connection`);
-  url.searchParams.set('include_secrets', 'true');
-  url.searchParams.set('connector_names', 'stripe');
-  url.searchParams.set('environment', environment);
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      'Accept': 'application/json',
-      'X_REPLIT_TOKEN': xReplitToken
-    }
-  });
-
-  const data = await response.json();
-  const settings = data.items?.[0];
-  if (!settings || !settings.settings.publishable || !settings.settings.secret) return null;
-  return { publishableKey: settings.settings.publishable, secretKey: settings.settings.secret };
+function getEnvStripeCredentials(): { publishableKey: string; secretKey: string } | null {
+  const sk = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!sk) return null;
+  const pk = process.env.STRIPE_PUBLISHABLE_KEY?.trim() || '';
+  return { publishableKey: pk, secretKey: sk };
 }
 
 async function getCredentials() {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? 'repl ' + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-      ? 'depl ' + process.env.WEB_REPL_RENEWAL
-      : null;
-
-  if (!xReplitToken) {
-    throw new Error('X_REPLIT_TOKEN not found for repl/depl');
+  const envCreds = getEnvStripeCredentials();
+  if (!envCreds) {
+    throw new Error(
+      'Stripe credentials unavailable: set STRIPE_SECRET_KEY (and STRIPE_PUBLISHABLE_KEY for checkout UI)'
+    );
   }
-
-  const isProduction = process.env.REPLIT_DEPLOYMENT === '1';
-
-  // Try the target environment first, then fall back to development
-  const environments = isProduction ? ['production', 'development'] : ['development'];
-  for (const env of environments) {
-    const creds = await fetchConnectionForEnvironment(hostname!, xReplitToken, env);
-    if (creds) {
-      connectionSettings = creds;
-      return creds;
-    }
-  }
-
-  throw new Error('Stripe connection not found in any environment');
+  return envCreds;
 }
 
 export async function getUncachableStripeClient() {
@@ -56,9 +25,16 @@ export async function getUncachableStripeClient() {
   });
 }
 
-export async function getStripePublishableKey() {
-  const { publishableKey } = await getCredentials();
-  return publishableKey;
+/** Publishable key for the checkout UI; null if Stripe is not configured. */
+export async function getStripePublishableKey(): Promise<string | null> {
+  const pk = process.env.STRIPE_PUBLISHABLE_KEY?.trim();
+  if (pk) return pk;
+  try {
+    const { publishableKey } = await getCredentials();
+    return publishableKey?.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getStripeSecretKey() {
@@ -68,6 +44,7 @@ export async function getStripeSecretKey() {
 
 let stripeSync: any = null;
 
+/** Uses npm package `stripe-replit-sync` for Postgres-backed catalog + webhooks (works on any host with DATABASE_URL + STRIPE_SECRET_KEY). */
 export async function getStripeSync() {
   if (!stripeSync) {
     const { StripeSync } = await import('stripe-replit-sync');

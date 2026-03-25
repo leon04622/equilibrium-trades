@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { BrowserProvider, JsonRpcSigner } from "ethers";
+import { trySetReferrer } from "@/lib/hyperliquid-client";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
 
@@ -104,6 +105,102 @@ function detectWallets(): DetectedWallet[] {
   return wallets;
 }
 
+/** EIP-6963: map wallet rdns to our WalletType + display name */
+function mapEip6963Rdns(rdns: string, displayName: string): Pick<DetectedWallet, "type" | "name"> {
+  switch (rdns) {
+    case "io.rabby":
+      return { type: "rabby", name: "Rabby Wallet" };
+    case "io.metamask":
+      return { type: "metamask", name: "MetaMask" };
+    case "com.coinbase.wallet":
+      return { type: "coinbase", name: displayName || "Coinbase Wallet" };
+    default:
+      if (/okx|okex/i.test(rdns)) return { type: "okx", name: displayName || "OKX Wallet" };
+      if (/trust/i.test(rdns)) return { type: "trust", name: displayName || "Trust Wallet" };
+      return { type: "injected", name: displayName || "Wallet" };
+  }
+}
+
+const WALLET_LIST_ORDER: WalletType[] = [
+  "rabby",
+  "metamask",
+  "coinbase",
+  "okx",
+  "trust",
+  "phantom",
+  "injected",
+];
+
+function mergeDetectedWallets(eip6963ByRdns: Map<string, DetectedWallet>): DetectedWallet[] {
+  const legacy = detectWallets();
+  const byType = new Map<WalletType, DetectedWallet>();
+
+  for (const w of legacy) {
+    if (!byType.has(w.type)) byType.set(w.type, w);
+  }
+  for (const w of eip6963ByRdns.values()) {
+    const prev = byType.get(w.type);
+    byType.set(w.type, {
+      type: w.type,
+      name: w.name || prev?.name || "Wallet",
+      icon: w.icon ?? prev?.icon,
+      provider: w.provider ?? prev?.provider,
+    });
+  }
+
+  const out: DetectedWallet[] = [];
+  const used = new Set<WalletType>();
+  for (const t of WALLET_LIST_ORDER) {
+    const w = byType.get(t);
+    if (w) {
+      out.push(w);
+      used.add(t);
+    }
+  }
+  for (const w of byType.values()) {
+    if (!used.has(w.type)) out.push(w);
+  }
+  return out;
+}
+
+function resolveInjectedProvider(
+  walletType: WalletType | undefined,
+  eip6963ByRdns: Map<string, DetectedWallet>
+): any | null {
+  const from6963 = () => [...eip6963ByRdns.values()];
+
+  if (walletType && walletType !== "injected") {
+    const hit = from6963().find((w) => w.type === walletType);
+    if (hit?.provider) return hit.provider;
+    if (walletType === "okx" && window.okxwallet) return window.okxwallet;
+    if (walletType === "phantom" && window.phantom?.ethereum) return window.phantom.ethereum;
+    if (window.ethereum?.providers?.length) {
+      for (const p of window.ethereum.providers) {
+        if (getWalletInfo(p)?.type === walletType) return p;
+      }
+    }
+    if (getWalletInfo(window.ethereum)?.type === walletType) return window.ethereum;
+    return null;
+  }
+
+  const rabby6963 = from6963().find((w) => w.type === "rabby");
+  if (rabby6963?.provider) return rabby6963.provider;
+  const mm6963 = from6963().find((w) => w.type === "metamask");
+  if (mm6963?.provider) return mm6963.provider;
+
+  const list = detectWallets();
+  const rabbyLegacy = list.find((w) => w.type === "rabby");
+  if (rabbyLegacy?.provider) return rabbyLegacy.provider;
+  const mmLegacy = list.find((w) => w.type === "metamask");
+  if (mmLegacy?.provider) return mmLegacy.provider;
+
+  if (window.ethereum?.providers?.length) {
+    const rp = window.ethereum.providers.find((p: any) => p?.isRabby);
+    if (rp) return rp;
+  }
+  return window.ethereum ?? null;
+}
+
 const WALLET_DISCONNECTED_KEY = 'wallet_user_disconnected';
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -117,29 +214,39 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [detectedWallets, setDetectedWallets] = useState<DetectedWallet[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const eip6963MapRef = useRef(new Map<string, DetectedWallet>());
+  const activeInjectedRef = useRef<any>(null);
 
   const isConnected = !!address && !!signer;
 
-  // Detect wallets on mount, then again after 800ms to catch late injectors
+  const rebuildDetectedWallets = useCallback(() => {
+    setDetectedWallets(mergeDetectedWallets(eip6963MapRef.current));
+  }, []);
+
+  // EIP-6963 + legacy detection; Rabby is sorted before MetaMask when both exist
   useEffect(() => {
     setIsMobile(detectMobile());
-    setDetectedWallets(detectWallets());
+    rebuildDetectedWallets();
 
-    const retryTimer = setTimeout(() => {
-      setDetectedWallets(detectWallets());
-    }, 800);
-
-    // Also listen for EIP-6963 provider announcements (modern standard)
-    const handleProviderAnnouncement = () => {
-      setDetectedWallets(detectWallets());
+    const on6963 = (event: Event) => {
+      const e = event as CustomEvent<{ info?: { rdns: string; name: string }; provider?: any }>;
+      const { info, provider } = e.detail ?? {};
+      if (!info?.rdns || !provider) return;
+      const mapped = mapEip6963Rdns(info.rdns, info.name);
+      eip6963MapRef.current.set(info.rdns, { ...mapped, provider });
+      rebuildDetectedWallets();
     };
-    window.addEventListener("eip6963:announceProvider", handleProviderAnnouncement);
+
+    window.addEventListener("eip6963:announceProvider", on6963);
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+    const retryTimer = setTimeout(rebuildDetectedWallets, 800);
 
     return () => {
       clearTimeout(retryTimer);
-      window.removeEventListener("eip6963:announceProvider", handleProviderAnnouncement);
+      window.removeEventListener("eip6963:announceProvider", on6963);
     };
-  }, []);
+  }, [rebuildDetectedWallets]);
 
   const refreshApprovalStatus = useCallback(async () => {
     if (!address) {
@@ -181,16 +288,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [address, refreshApprovalStatus]);
 
+  // After platform builder approval only — avoids wallet EIP-712 prompts before the EIP-191 setup modal
+  useEffect(() => {
+    if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;
+    trySetReferrer(signer).catch(() => {});
+  }, [signer, address, builderCodeApproved, isCheckingApproval]);
+
   const handleAccountsChanged = useCallback(async (accounts: string[]) => {
+    const raw = activeInjectedRef.current ?? window.ethereum;
     if (accounts.length === 0) {
       setAddress(null);
       setSigner(null);
       setProvider(null);
+      activeInjectedRef.current = null;
     } else {
       setAddress(accounts[0]);
-      if (window.ethereum) {
+      if (raw) {
         try {
-          const browserProvider = new BrowserProvider(window.ethereum);
+          const browserProvider = new BrowserProvider(raw);
           const browserSigner = await browserProvider.getSigner();
           setProvider(browserProvider);
           setSigner(browserSigner);
@@ -204,10 +319,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const handleChainChanged = useCallback(async (chainIdHex: string) => {
     const newChainId = parseInt(chainIdHex, 16);
     setChainId(newChainId);
-    
-    if (window.ethereum) {
+    const raw = activeInjectedRef.current ?? window.ethereum;
+    if (raw) {
       try {
-        const browserProvider = new BrowserProvider(window.ethereum);
+        const browserProvider = new BrowserProvider(raw);
         const browserSigner = await browserProvider.getSigner();
         setProvider(browserProvider);
         setSigner(browserSigner);
@@ -218,63 +333,72 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (window.ethereum) {
-      window.ethereum.on("accountsChanged", handleAccountsChanged);
-      window.ethereum.on("chainChanged", handleChainChanged);
-    }
+    const raw = activeInjectedRef.current ?? window.ethereum;
+    if (!raw?.on) return;
+
+    raw.on("accountsChanged", handleAccountsChanged);
+    raw.on("chainChanged", handleChainChanged);
 
     return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-        window.ethereum.removeListener("chainChanged", handleChainChanged);
-      }
+      raw.removeListener?.("accountsChanged", handleAccountsChanged);
+      raw.removeListener?.("chainChanged", handleChainChanged);
     };
-  }, [handleAccountsChanged, handleChainChanged]);
+  }, [handleAccountsChanged, handleChainChanged, address]);
 
   useEffect(() => {
     const checkConnection = async () => {
       const wasDisconnected = localStorage.getItem(WALLET_DISCONNECTED_KEY) === 'true';
       if (wasDisconnected) return;
-      
-      if (window.ethereum) {
-        try {
-          const accounts = await window.ethereum.request({ method: "eth_accounts" });
-          if (accounts.length > 0) {
-            const browserProvider = new BrowserProvider(window.ethereum);
-            const browserSigner = await browserProvider.getSigner();
-            const network = await browserProvider.getNetwork();
-            
-            setProvider(browserProvider);
-            setSigner(browserSigner);
-            setAddress(accounts[0]);
-            setChainId(Number(network.chainId));
-          } else if (isMobile && window.ethereum.isMetaMask) {
-            const pendingDeepLink = sessionStorage.getItem('metamask_deep_link_pending');
-            if (pendingDeepLink) {
-              sessionStorage.removeItem('metamask_deep_link_pending');
-              try {
-                setIsConnecting(true);
-                const requestedAccounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-                if (requestedAccounts.length > 0) {
-                  const browserProvider = new BrowserProvider(window.ethereum);
-                  const browserSigner = await browserProvider.getSigner();
-                  const network = await browserProvider.getNetwork();
-                  
-                  setProvider(browserProvider);
-                  setSigner(browserSigner);
-                  setAddress(requestedAccounts[0]);
-                  setChainId(Number(network.chainId));
-                }
-              } catch (err) {
-                console.error("Error auto-connecting in MetaMask browser:", err);
-              } finally {
-                setIsConnecting(false);
+
+      const raw =
+        resolveInjectedProvider(undefined, eip6963MapRef.current) ?? window.ethereum;
+      if (!raw?.request) return;
+
+      try {
+        const accounts = await raw.request({ method: "eth_accounts" });
+        if (accounts.length > 0) {
+          activeInjectedRef.current = raw;
+          const browserProvider = new BrowserProvider(raw);
+          const browserSigner = await browserProvider.getSigner();
+          const network = await browserProvider.getNetwork();
+
+          setProvider(browserProvider);
+          setSigner(browserSigner);
+          setAddress(accounts[0]);
+          setChainId(Number(network.chainId));
+        } else if (isMobile && window.ethereum) {
+          const mmPending = sessionStorage.getItem("metamask_deep_link_pending");
+          const rbPending = sessionStorage.getItem("rabby_deep_link_pending");
+          const eth = window.ethereum;
+          const tryDeepLink =
+            (mmPending && Boolean(eth.isMetaMask) && !eth.isRabby) ||
+            (rbPending && Boolean(eth.isRabby));
+          if (tryDeepLink) {
+            sessionStorage.removeItem("metamask_deep_link_pending");
+            sessionStorage.removeItem("rabby_deep_link_pending");
+            try {
+              setIsConnecting(true);
+              const requestedAccounts = await raw.request({ method: "eth_requestAccounts" });
+              if (requestedAccounts.length > 0) {
+                activeInjectedRef.current = raw;
+                const browserProvider = new BrowserProvider(raw);
+                const browserSigner = await browserProvider.getSigner();
+                const network = await browserProvider.getNetwork();
+
+                setProvider(browserProvider);
+                setSigner(browserSigner);
+                setAddress(requestedAccounts[0]);
+                setChainId(Number(network.chainId));
               }
+            } catch (err) {
+              console.error("Error auto-connecting after wallet deep link:", err);
+            } finally {
+              setIsConnecting(false);
             }
           }
-        } catch (error) {
-          console.error("Error checking wallet connection:", error);
         }
+      } catch (error) {
+        console.error("Error checking wallet connection:", error);
       }
     };
 
@@ -286,14 +410,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const wasDisconnected = localStorage.getItem(WALLET_DISCONNECTED_KEY) === 'true';
       if (wasDisconnected) return;
       
-      if (document.visibilityState === 'visible' && isMobile && window.ethereum && !address) {
+      if (document.visibilityState === "visible" && isMobile && !address) {
+        const raw =
+          resolveInjectedProvider(undefined, eip6963MapRef.current) ?? window.ethereum;
+        if (!raw?.request) return;
         try {
-          const accounts = await window.ethereum.request({ method: "eth_accounts" });
+          const accounts = await raw.request({ method: "eth_accounts" });
           if (accounts.length > 0) {
-            const browserProvider = new BrowserProvider(window.ethereum);
+            activeInjectedRef.current = raw;
+            const browserProvider = new BrowserProvider(raw);
             const browserSigner = await browserProvider.getSigner();
             const network = await browserProvider.getNetwork();
-            
+
             setProvider(browserProvider);
             setSigner(browserSigner);
             setAddress(accounts[0]);
@@ -310,65 +438,57 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [isMobile, address]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
+    const path = `${window.location.pathname}${window.location.search}`;
+    const hostPath = `${window.location.host}${path}`;
+
     if (walletType === "metamask") {
-      sessionStorage.setItem('metamask_deep_link_pending', 'true');
-      window.location.href = `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`;
-    } else {
-      alert("Please open this site inside your wallet's built-in browser to connect on mobile.");
+      sessionStorage.setItem("metamask_deep_link_pending", "true");
+      sessionStorage.removeItem("rabby_deep_link_pending");
+      window.location.href = `https://metamask.app.link/dapp/${hostPath}`;
+      return;
     }
+    if (walletType === "rabby") {
+      sessionStorage.setItem("rabby_deep_link_pending", "true");
+      sessionStorage.removeItem("metamask_deep_link_pending");
+      const fullUrl = `${window.location.origin}${path}`;
+      window.location.href = `rabby://dapp?url=${encodeURIComponent(fullUrl)}`;
+      return;
+    }
+    alert("Open this site in your wallet app's browser (DApp / Discover), then use Connect Wallet.");
   }, []);
 
   const connect = useCallback(async (walletType?: WalletType) => {
     localStorage.removeItem(WALLET_DISCONNECTED_KEY);
     setConnectError(null);
 
-    if (!window.ethereum) {
+    const selectedProvider = resolveInjectedProvider(walletType, eip6963MapRef.current);
+
+    if (!selectedProvider?.request) {
       if (isMobile) {
-        openInWalletBrowser("metamask");
+        setConnectError(
+          "No wallet in this browser. Tap Rabby or MetaMask below to open this site in the app, unlock, then connect."
+        );
       } else {
-        setConnectError("No wallet detected. Please install MetaMask, Rabby, or another EVM wallet extension.");
+        setConnectError(
+          "No wallet detected. Install Rabby or MetaMask (or another EVM wallet), refresh, then try again."
+        );
       }
       return;
     }
 
     setIsConnecting(true);
-    
+
     try {
-      // Find the right provider for the chosen wallet type
-      let selectedProvider: any = window.ethereum;
-      
-      if (walletType && walletType !== "injected") {
-        // Check standalone objects first
-        if (walletType === "okx" && window.okxwallet) {
-          selectedProvider = window.okxwallet;
-        } else if (walletType === "phantom" && window.phantom?.ethereum) {
-          selectedProvider = window.phantom.ethereum;
-        } else if (window.ethereum.providers?.length) {
-          // Search multi-provider array
-          for (const p of window.ethereum.providers) {
-            const info = getWalletInfo(p);
-            if (info?.type === walletType) {
-              selectedProvider = p;
-              break;
-            }
-          }
-        } else {
-          // Single provider — verify it matches
-          const info = getWalletInfo(window.ethereum);
-          if (info?.type === walletType) {
-            selectedProvider = window.ethereum;
-          }
-        }
-      }
-      
-      const accounts = await selectedProvider.request({ 
-        method: "eth_requestAccounts" 
+      const accounts = await selectedProvider.request({
+        method: "eth_requestAccounts",
       });
 
       if (!accounts || accounts.length === 0) {
         throw new Error("No accounts returned. Please unlock your wallet and try again.");
       }
-      
+
+      activeInjectedRef.current = selectedProvider;
+
       const browserProvider = new BrowserProvider(selectedProvider);
       const browserSigner = await browserProvider.getSigner();
       const network = await browserProvider.getNetwork();
@@ -392,10 +512,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
-  }, [isMobile, openInWalletBrowser]);
+  }, [isMobile]);
 
   const disconnect = useCallback(() => {
     localStorage.setItem(WALLET_DISCONNECTED_KEY, 'true');
+    activeInjectedRef.current = null;
     setAddress(null);
     setSigner(null);
     setProvider(null);
@@ -405,16 +526,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const switchToArbitrum = useCallback(async () => {
-    if (!window.ethereum) return;
+    const raw = activeInjectedRef.current ?? window.ethereum;
+    if (!raw?.request) return;
 
     try {
-      await window.ethereum.request({
+      await raw.request({
         method: "wallet_switchEthereumChain",
         params: [{ chainId: `0x${ARBITRUM_CHAIN_ID.toString(16)}` }],
       });
     } catch (error: any) {
       if (error.code === 4902) {
-        await window.ethereum.request({
+        await raw.request({
           method: "wallet_addEthereumChain",
           params: [{
             chainId: `0x${ARBITRUM_CHAIN_ID.toString(16)}`,

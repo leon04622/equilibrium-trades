@@ -47,6 +47,7 @@ export class StripeService {
   }
 
   async getProduct(productId: string) {
+    if (!db) return null;
     const result = await db.execute(
       sql`SELECT * FROM stripe.products WHERE id = ${productId}`
     );
@@ -54,6 +55,7 @@ export class StripeService {
   }
 
   async listProducts(active = true) {
+    if (!db) return [];
     const result = await db.execute(
       sql`SELECT * FROM stripe.products WHERE active = ${active}`
     );
@@ -61,6 +63,7 @@ export class StripeService {
   }
 
   async listProductsWithPrices(active = true) {
+    if (!db) return [];
     const result = await db.execute(
       sql`
         SELECT 
@@ -110,6 +113,7 @@ export class StripeService {
   }
 
   async getPrice(priceId: string) {
+    if (!db) return null;
     const result = await db.execute(
       sql`SELECT * FROM stripe.prices WHERE id = ${priceId}`
     );
@@ -117,6 +121,7 @@ export class StripeService {
   }
 
   async listPrices(active = true) {
+    if (!db) return [];
     const result = await db.execute(
       sql`SELECT * FROM stripe.prices WHERE active = ${active}`
     );
@@ -124,6 +129,7 @@ export class StripeService {
   }
 
   async getSubscription(subscriptionId: string) {
+    if (!db) return null;
     const result = await db.execute(
       sql`SELECT * FROM stripe.subscriptions WHERE id = ${subscriptionId}`
     );
@@ -131,6 +137,7 @@ export class StripeService {
   }
 
   async getCustomerByEmail(email: string) {
+    if (!db) return null;
     const result = await db.execute(
       sql`SELECT * FROM stripe.customers WHERE email = ${email} LIMIT 1`
     );
@@ -138,6 +145,7 @@ export class StripeService {
   }
 
   async getCustomerSubscriptions(customerId: string) {
+    if (!db) return [];
     const result = await db.execute(
       sql`SELECT * FROM stripe.subscriptions WHERE customer = ${customerId} AND status = 'active'`
     );
@@ -156,6 +164,7 @@ export class StripeService {
     expiresAt: string | null;
   } | null> {
     try {
+      if (!db) return null;
       // Find customer by walletAddress in metadata (case-insensitive match)
       const customerResult = await db.execute(
         sql`

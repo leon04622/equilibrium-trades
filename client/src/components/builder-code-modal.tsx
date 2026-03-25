@@ -14,14 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const BUILDER_CODE = "EQUILIBRIUM_BUILDER";
-
-function buildMessage(): string {
-  return `I authorize Equilibrium (${BUILDER_CODE}) to act as my builder on Hyperliquid. This approval allows Equilibrium to submit trading orders on my behalf. I understand that I remain in full control of my funds at all times.
-
-Timestamp: ${new Date().toISOString().split("T")[0]}`;
-}
+import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
 
 type Step = "idle" | "signing" | "registering" | "complete" | "error";
 
@@ -47,7 +40,7 @@ export function BuilderCodeModal() {
     if (!signer || !address) return;
     setError(null);
 
-    const message = buildMessage();
+    const message = buildEquilibriumBuilderApprovalMessage();
 
     try {
       setStep("signing");

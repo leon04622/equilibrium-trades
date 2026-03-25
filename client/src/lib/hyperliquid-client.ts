@@ -1,13 +1,17 @@
 import { JsonRpcSigner, Wallet } from "ethers";
 import { signL1Action as sdkSignL1Action, PrivateKeySigner } from "@nktkas/hyperliquid/signing";
+import {
+  HL_BUILDER_ADDRESS as BUILDER_ADDRESS,
+  HL_BUILDER_MAX_FEE_RATE,
+  HL_BUILDER_FEE_F,
+  HL_REFERRAL_CODE as PLATFORM_REFERRAL_CODE,
+  isBuilderFeeConfigured,
+} from "@/lib/hyperliquid-platform-config";
 
 const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
 const AGENT_STORAGE_KEY = "hyperliquid_agent";
 const BUILDER_FEE_STORAGE_KEY = "hyperliquid_builder_fee_approved";
-
-// Your registered builder wallet address — users approve this once so you earn a fee on their trades
-const BUILDER_ADDRESS = (import.meta.env.VITE_BUILDER_ADDRESS || "").toLowerCase();
 
 // Get server-synced timestamp to avoid browser clock issues
 // The Replit preview can have significant clock drift compared to Hyperliquid servers
@@ -203,8 +207,10 @@ async function authorizeAgent(
 
 // Submit approveBuilderFee action to Hyperliquid so the platform earns a fee on the user's trades
 async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
-  if (!BUILDER_ADDRESS) {
-    console.warn("VITE_BUILDER_ADDRESS not configured — skipping builder fee approval");
+  if (!isBuilderFeeConfigured()) {
+    console.warn(
+      "VITE_BUILDER_ADDRESS not set or invalid — skipping builder fee approval (set in .env.production and rebuild)"
+    );
     return false;
   }
 
@@ -232,7 +238,7 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
   const message = {
     hyperliquidChain: "Mainnet",
     builder: BUILDER_ADDRESS,
-    maxFeeRate: "0.0003",
+    maxFeeRate: HL_BUILDER_MAX_FEE_RATE,
     nonce,
   };
 
@@ -277,7 +283,7 @@ export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ private
     console.log("Using existing agent:", stored.address);
 
     // If builder address is configured and fee hasn't been approved yet, do it now silently
-    if (BUILDER_ADDRESS) {
+    if (isBuilderFeeConfigured()) {
       const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
       if (!localStorage.getItem(feeKey)) {
         approveBuilderFee(signer).then((ok) => {
@@ -301,7 +307,7 @@ export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ private
   }
 
   // Approve builder fee so the platform earns on this user's trades
-  if (BUILDER_ADDRESS) {
+  if (isBuilderFeeConfigured()) {
     const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
     const feeApproved = await approveBuilderFee(signer);
     if (feeApproved) {
@@ -635,9 +641,6 @@ async function signL1ActionWithAgent(
   return signature;
 }
 
-// Platform referral code — attributed to the platform owner on every trade (https://app.hyperliquid.xyz/join/BANKS)
-const PLATFORM_REFERRAL_CODE = import.meta.env.VITE_HL_REFERRAL_CODE || "BANKS";
-
 // Attempt to register the platform referral code for a new user.
 // Silently no-ops if already done this session, or if no referral code is set.
 const referralSetForSession = new Set<string>();
@@ -739,8 +742,8 @@ export async function placeOrder(
 
     // Include builder fee in every order so the platform earns on each trade
     // (requires the user to have approved the builder fee via approveBuilderFee)
-    if (BUILDER_ADDRESS) {
-      action.builder = { b: BUILDER_ADDRESS, f: 3 }; // f=3 means 0.03% (3 ten-thousandths)
+    if (isBuilderFeeConfigured()) {
+      action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
     }
 
     console.log("Requesting signature for action:", action);
@@ -926,13 +929,21 @@ export async function placeTriggerOrder(
       },
     };
 
-    const action = {
+    const action: Record<string, unknown> = {
       type: "order",
       orders: [orderWire],
       grouping: "na",
     };
+    if (isBuilderFeeConfigured()) {
+      action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
+    }
 
-    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
+    const signature = await signL1ActionWithAgent(
+      agent.privateKey,
+      action,
+      nonce,
+      null
+    );
 
     const payload = {
       action,

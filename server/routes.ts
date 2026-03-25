@@ -10,12 +10,14 @@ import {
   getSpotTickers,
   getOrderBook, 
   getRecentTrades,
-  getCandles 
+  getCandles,
+  getPerpUniverseCoinNames,
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
 import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
+import { getPublicAppBaseUrl } from "./public-url";
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -29,15 +31,28 @@ function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>
   });
 }
 
+const SCAN_ALL_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
+
+async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
+  if (coinsParam?.trim()) {
+    return coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
+  }
+  const live = await getPerpUniverseCoinNames();
+  if (live.length > 0) return live;
+  return ["BTC", "ETH", "SOL"];
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   // Register OpenAI chat routes
   registerChatRoutes(app);
-  
-  // Register Object Storage routes for file uploads
-  registerObjectStorageRoutes(app);
+
+  // Replit Object Storage sidecar only — off by default for self-hosted (Railway, Render, VPS).
+  if (process.env.USE_REPLIT_OBJECT_STORAGE === "1") {
+    registerObjectStorageRoutes(app);
+  }
 
   // Get all subscription tiers
   app.get("/api/subscriptions", async (req: Request, res: Response) => {
@@ -286,15 +301,12 @@ export async function registerRoutes(
     try {
       const coinsParam = req.query.coins as string;
       const timeframesParam = req.query.timeframes as string;
-      
-      const coins = coinsParam 
-        ? coinsParam.split(",") 
-        : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP"];
-      
-      const timeframes = timeframesParam 
-        ? timeframesParam.split(",") 
-        : ["1m", "5m", "15m"];
-      
+
+      const coins = await resolveScanCoins(coinsParam);
+      const timeframes = timeframesParam?.trim()
+        ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
+        : SCAN_ALL_TIMEFRAMES;
+
       const patterns = await scanForEducationalPatterns(coins, timeframes);
       res.json(patterns);
     } catch (error) {
@@ -310,15 +322,12 @@ export async function registerRoutes(
     try {
       const coinsParam = req.query.coins as string;
       const timeframesParam = req.query.timeframes as string;
-      
-      const coins = coinsParam 
-        ? coinsParam.split(",") 
-        : ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI"];
-      
-      const timeframes = timeframesParam 
-        ? timeframesParam.split(",") 
-        : ["1m", "5m", "15m"];
-      
+
+      const coins = await resolveScanCoins(coinsParam);
+      const timeframes = timeframesParam?.trim()
+        ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
+        : SCAN_ALL_TIMEFRAMES;
+
       const signals = await scanForSignals(coins, timeframes);
       res.json(signals);
     } catch (error) {
@@ -877,14 +886,9 @@ export async function registerRoutes(
   // ============ STRIPE PAYMENT ROUTES ============
 
   // Get Stripe publishable key for frontend
-  app.get("/api/stripe/config", async (req: Request, res: Response) => {
-    try {
-      const publishableKey = await getStripePublishableKey();
-      res.json({ publishableKey });
-    } catch (error) {
-      console.error("Error getting Stripe config:", error);
-      res.status(500).json({ error: "Failed to get Stripe configuration" });
-    }
+  app.get("/api/stripe/config", async (_req: Request, res: Response) => {
+    const publishableKey = await getStripePublishableKey();
+    res.json({ publishableKey });
   });
 
   // Get available Stripe products and prices
@@ -1026,8 +1030,7 @@ export async function registerRoutes(
         // Keep default 'subscription' mode
       }
 
-      // Create checkout session
-      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+      const baseUrl = getPublicAppBaseUrl();
       const session = await stripeService.createCheckoutSession(
         customerId,
         priceId,
@@ -1059,7 +1062,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "No subscription found for this account" });
       }
 
-      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
+      const baseUrl = getPublicAppBaseUrl();
       const session = await stripeService.createCustomerPortalSession(
         (customer as any).id,
         `${baseUrl}/settings`

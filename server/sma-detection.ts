@@ -11,7 +11,10 @@
 // 3. Wait for BREAKOUT confirmation
 // 4. ONLY signal entry after breakout is confirmed
 
+import pLimit from "p-limit";
 import { getCandles, HyperliquidCandle } from "./hyperliquid";
+
+const DEFAULT_SCAN_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
 
 export interface SMAValues {
   sma21: number;
@@ -654,6 +657,54 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
   return null;
 }
 
+function patternsLooselyEqual(a: DetectedPattern, b: DetectedPattern): boolean {
+  return (
+    a.name === b.name &&
+    Math.abs(a.entryPrice - b.entryPrice) / Math.max(Math.abs(a.entryPrice), 1e-12) < 0.003
+  );
+}
+
+/** Pattern direction from structure only — used after OHLC detection (not from MA alignment). */
+export function getPatternStructuralBias(p: DetectedPattern): "bullish" | "bearish" | "neutral" {
+  switch (p.name) {
+    case "bull_flag":
+    case "double_bottom":
+    case "falling_wedge":
+    case "ascending_triangle":
+      return "bullish";
+    case "bear_flag":
+    case "double_top":
+    case "rising_wedge":
+    case "descending_triangle":
+      return "bearish";
+    case "symmetrical_triangle":
+    default:
+      return "neutral";
+  }
+}
+
+/** Run all geometry-based detectors without using MA bias to gate which runs. */
+export function collectPatternCandidates(
+  candles: HyperliquidCandle[],
+  timeframe: string
+): DetectedPattern[] {
+  const candidates: DetectedPattern[] = [];
+  const add = (p: DetectedPattern | null) => {
+    if (!p) return;
+    if (candidates.some((c) => patternsLooselyEqual(c, p))) return;
+    candidates.push(p);
+  };
+  add(detectFlagPattern(candles, true, timeframe));
+  add(detectFlagPattern(candles, false, timeframe));
+  add(detectTrianglePattern(candles, true, timeframe));
+  add(detectTrianglePattern(candles, false, timeframe));
+  add(detectDoublePattern(candles, true, timeframe));
+  add(detectDoublePattern(candles, false, timeframe));
+  add(detectWedgePattern(candles, true, timeframe));
+  add(detectWedgePattern(candles, false, timeframe));
+  return candidates;
+}
+
 // Detect crossovers
 export function detectCrossover(
   currentSMA: SMAValues,
@@ -700,9 +751,7 @@ export async function analyzeCoinForSignals(
     
     const currentSMA = calculateSMAFromCandles(candles);
     if (!currentSMA) return null;
-    
-    const isBullish = currentSMA.sma21 > currentSMA.sma200;
-    
+
     // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);
     const previousSMA = calculateSMAFromCandles(previousCandles);
@@ -727,33 +776,19 @@ export async function analyzeCoinForSignals(
         patternType: `SMA Crossover - ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"}`,
       };
     }
-    
-    // Scan for all pattern types (prioritize breakouts)
-    const patterns: DetectedPattern[] = [];
-    
-    // Try all pattern detectors
-    const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
-    if (flagPattern) patterns.push(flagPattern);
-    
-    const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
-    if (trianglePattern) patterns.push(trianglePattern);
-    
-    const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
-    if (doublePattern) patterns.push(doublePattern);
-    
-    const wedgePattern = detectWedgePattern(candles, isBullish, timeframe);
-    if (wedgePattern) patterns.push(wedgePattern);
-    
+
+    const patterns = collectPatternCandidates(candles, timeframe);
     if (patterns.length === 0) return null;
-    
-    // Sort: breakouts first, then by confidence
+
     patterns.sort((a, b) => {
       if (a.status === "breakout_confirmed" && b.status !== "breakout_confirmed") return -1;
       if (b.status === "breakout_confirmed" && a.status !== "breakout_confirmed") return 1;
       return b.confidence - a.confidence;
     });
-    
+
     const bestPattern = patterns[0];
+    const structuralBias = getPatternStructuralBias(bestPattern);
+    if (structuralBias === "neutral") return null;
     const risk = Math.abs(bestPattern.entryPrice - bestPattern.stopLoss);
     const reward = Math.abs(bestPattern.takeProfit - bestPattern.entryPrice);
     const rrRatio = risk > 0 ? (reward / risk).toFixed(1) : "0";
@@ -772,7 +807,7 @@ export async function analyzeCoinForSignals(
     return {
       id: `${coin}-${timeframe}-${Date.now()}`,
       coin,
-      type: isBullish ? "bullish_setup" : "bearish_setup",
+      type: structuralBias === "bullish" ? "bullish_setup" : "bearish_setup",
       status,
       timeframe,
       sma21: currentSMA.sma21,
@@ -784,8 +819,8 @@ export async function analyzeCoinForSignals(
       confidence: bestPattern.confidence,
       detectedAt: new Date(),
       description,
-      patternType: bestPattern.status === "breakout_confirmed" 
-        ? `${bestPattern.displayName} - ENTRY NOW` 
+      patternType: bestPattern.status === "breakout_confirmed"
+        ? `${bestPattern.displayName} - ENTRY NOW`
         : `${bestPattern.displayName} - WAIT`,
     };
   } catch (error) {
@@ -796,33 +831,19 @@ export async function analyzeCoinForSignals(
 
 // Scan multiple coins for signals across all timeframes
 export async function scanForSignals(
-  coins: string[] = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP"],
-  timeframes: string[] = ["1m", "5m", "15m", "1h", "4h", "1d"]
+  coins: string[],
+  timeframes: string[] = DEFAULT_SCAN_TIMEFRAMES
 ): Promise<CrossoverSignal[]> {
-  const signals: CrossoverSignal[] = [];
-  
-  for (const coin of coins) {
-    for (const timeframe of timeframes) {
-      try {
-        const signal = await analyzeCoinForSignals(coin, timeframe);
-        if (signal) {
-          signals.push(signal);
-        }
-        await new Promise(resolve => setTimeout(resolve, 50));
-      } catch (error) {
-        console.error(`Error scanning ${coin} ${timeframe}:`, error);
-      }
-    }
-  }
-  
-  // Sort: breakouts first, then by confidence
+  const limit = pLimit(10);
+  const tasks = coins.flatMap((coin) => timeframes.map((tf) => () => analyzeCoinForSignals(coin, tf)));
+  const results = await Promise.all(tasks.map((fn) => limit(fn)));
+  const signals = results.filter((x): x is CrossoverSignal => x != null);
   signals.sort((a, b) => {
     if (a.status === "breakout" && b.status !== "breakout") return -1;
     if (b.status === "breakout" && a.status !== "breakout") return 1;
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
     return b.detectedAt.getTime() - a.detectedAt.getTime();
   });
-  
   return signals;
 }
 
@@ -899,34 +920,6 @@ function getEducationalContent(
   return { educationalNote, whatToWatch, patternStatus };
 }
 
-// Educational pattern analysis - no entry/SL/TP
-// Helper function to get SMA data for a specific timeframe
-async function getSMAForTimeframe(coin: string, timeframe: string): Promise<SMAValues | null> {
-  const intervalMap: Record<string, string> = {
-    "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
-    "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1d",
-  };
-  const candleMinutes: Record<string, number> = {
-    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
-    "1h": 60, "2h": 120, "4h": 240, "1d": 1440,
-  };
-  
-  const interval = intervalMap[timeframe] || "1m";
-  const minutes = candleMinutes[timeframe] || 1;
-  const requiredCandles = 250;
-  const durationMs = requiredCandles * minutes * 60 * 1000;
-  
-  const endTime = Date.now();
-  const startTime = endTime - durationMs;
-  
-  try {
-    const candles = await getCandles(coin, interval, startTime, endTime);
-    return calculateSMAFromCandles(candles);
-  } catch {
-    return null;
-  }
-}
-
 export async function analyzeForEducationalPatterns(
   coin: string,
   timeframe: string = "1m"
@@ -956,47 +949,7 @@ export async function analyzeForEducationalPatterns(
     
     const currentSMA = calculateSMAFromCandles(candles);
     if (!currentSMA) return null;
-    
-    const isBullish = currentSMA.sma21 > currentSMA.sma200;
-    const smaGapPercent = Math.abs((currentSMA.sma21 - currentSMA.sma200) / currentSMA.sma200) * 100;
-    
-    // Determine bias
-    let bias: "bullish" | "bearish" | "neutral" = "neutral";
-    if (smaGapPercent > 0.1) {
-      bias = isBullish ? "bullish" : "bearish";
-    }
-    
-    // MULTI-TIMEFRAME VALIDATION FOR CONTINUATION PATTERNS
-    // Use the current timeframe PLUS one lower reference timeframe.
-    // This prevents false signals when the shorter TF disagrees with the current chart.
-    // Reference frames chosen by timeframe so the validation is always meaningful:
-    //   1m → validate only current TF (no lower frame available)
-    //   3m, 5m → also check 1m
-    //   15m, 30m → also check 5m
-    //   1h, 2h, 4h → also check 15m
-    //   1d → also check 4h
-    const refTfMap: Record<string, string> = {
-      "1m": "1m", "3m": "1m", "5m": "1m",
-      "15m": "5m", "30m": "5m",
-      "1h": "15m", "2h": "15m", "4h": "15m",
-      "1d": "4h",
-    };
-    const refTf = refTfMap[timeframe] || "5m";
-    const refSMA = refTf === timeframe
-      ? Promise.resolve(currentSMA)
-      : getSMAForTimeframe(coin, refTf);
 
-    let multiTimeframeBullish = false;
-    let multiTimeframeBearish = false;
-
-    const resolvedRef = await refSMA;
-    const isRefBullish = resolvedRef ? resolvedRef.sma21 > resolvedRef.sma200 : isBullish;
-    const isRefBearish = resolvedRef ? resolvedRef.sma21 < resolvedRef.sma200 : !isBullish;
-
-    // Both current TF and reference TF must agree for continuation patterns
-    multiTimeframeBullish = isBullish && isRefBullish;
-    multiTimeframeBearish = !isBullish && isRefBearish;
-    
     // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);
     const previousSMA = calculateSMAFromCandles(previousCandles);
@@ -1037,29 +990,15 @@ export async function analyzeForEducationalPatterns(
           : `Crossover detected but price has not yet confirmed the direction. Wait for price to trade ${crossover === "bullish_crossover" ? "above" : "below"} both SMAs.`,
       };
     }
-    
-    // Scan for ALL pattern types — no MA gating at detection stage.
-    // The MA filter only determines whether the pattern is "tradeable" (execution-ready).
-    const patterns: DetectedPattern[] = [];
-    
-    const flagPattern = detectFlagPattern(candles, isBullish, timeframe);
-    if (flagPattern) patterns.push(flagPattern);
-    
-    const trianglePattern = detectTrianglePattern(candles, isBullish, timeframe);
-    if (trianglePattern) patterns.push(trianglePattern);
-    
-    const doublePattern = detectDoublePattern(candles, isBullish, timeframe);
-    if (doublePattern) patterns.push(doublePattern);
-    
-    const wedgePattern = detectWedgePattern(candles, isBullish, timeframe);
-    if (wedgePattern) patterns.push(wedgePattern);
-    
-    if (patterns.length === 0) return null;
-    
-    // Sort by confidence
-    patterns.sort((a, b) => b.confidence - a.confidence);
-    
-    const bestPattern = patterns[0];
+
+    const candidates = collectPatternCandidates(candles, timeframe);
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => b.confidence - a.confidence);
+    const bestPattern = candidates[0];
+    // Pattern direction from OHLC geometry only (not from MA alignment).
+    const bias = getPatternStructuralBias(bestPattern);
+
     const { educationalNote, whatToWatch, patternStatus } = getEducationalContent(
       bestPattern.displayName,
       bias,
@@ -1068,48 +1007,41 @@ export async function analyzeForEducationalPatterns(
       currentSMA.sma200,
       currentSMA.price
     );
-    
-    // EXECUTION FILTER: determine if pattern is tradeable based on price vs MA positions.
-    // Bullish patterns require: price > 21 SMA AND price > 200 SMA
-    // Bearish patterns require: price < 21 SMA AND price < 200 SMA
+
     const price = currentSMA.price;
     const { sma21: s21, sma200: s200 } = currentSMA;
     let tradeable = false;
     let maFilterReason = "";
 
-    const isBullishPattern = bias === "bullish";
-    const isBearishPattern = bias === "bearish";
-
-    if (isBullishPattern) {
+    if (bias === "bullish") {
       tradeable = price > s21 && price > s200;
       if (tradeable) {
-        maFilterReason = `Price (${price.toFixed(2)}) is above both 21 SMA (${s21.toFixed(2)}) and 200 SMA (${s200.toFixed(2)}). MA structure confirms bullish entry.`;
+        maFilterReason = `Price (${price.toFixed(2)}) is above both 21 SMMA (${s21.toFixed(2)}) and 200 SMMA (${s200.toFixed(2)}). Execution filter passed for long-bias pattern.`;
       } else {
-        const belowWhat = price < s200 ? "both SMAs (bearish structure)" : price < s21 ? "21 SMA (momentum weak)" : "200 SMA";
-        maFilterReason = `Price is below ${belowWhat}. Wait for price to reclaim both SMAs before considering long entries on this pattern.`;
+        const belowWhat = price < s200 ? "both MAs" : price < s21 ? "21 SMMA" : "200 SMMA";
+        maFilterReason = `Bullish-structured pattern, but price is not above both MAs (below ${belowWhat}). Wait for reclaim before acting.`;
       }
-    } else if (isBearishPattern) {
+    } else if (bias === "bearish") {
       tradeable = price < s21 && price < s200;
       if (tradeable) {
-        maFilterReason = `Price (${price.toFixed(2)}) is below both 21 SMA (${s21.toFixed(2)}) and 200 SMA (${s200.toFixed(2)}). MA structure confirms bearish entry.`;
+        maFilterReason = `Price (${price.toFixed(2)}) is below both 21 SMMA (${s21.toFixed(2)}) and 200 SMMA (${s200.toFixed(2)}). Execution filter passed for short-bias pattern.`;
       } else {
-        const aboveWhat = price > s200 ? "both SMAs (bullish structure)" : price > s21 ? "21 SMA (momentum recovering)" : "200 SMA";
-        maFilterReason = `Price is above ${aboveWhat}. Wait for price to break below both SMAs before considering short entries on this pattern.`;
+        const aboveWhat = price > s200 ? "both MAs" : price > s21 ? "21 SMMA" : "200 SMMA";
+        maFilterReason = `Bearish-structured pattern, but price is not below both MAs (above ${aboveWhat}). Wait for breakdown before acting.`;
       }
     } else {
       tradeable = false;
-      maFilterReason = "Neutral bias — SMAs too close together. Study the pattern structure; wait for clearer SMA separation.";
+      maFilterReason =
+        "Neutral / symmetrical pattern — no directional execution filter. Study structure; confirm with SMMA + price on higher timeframes.";
     }
 
-    let smaRelationship: string;
-    if (bias === "bullish") {
-      smaRelationship = `21 SMA ($${s21.toFixed(2)}) is above 200 SMA ($${s200.toFixed(2)}) — BULLISH trend structure. Price is ${price > s21 ? "above" : "below"} 21 SMA and ${price > s200 ? "above" : "below"} 200 SMA.`;
-    } else if (bias === "bearish") {
-      smaRelationship = `21 SMA ($${s21.toFixed(2)}) is below 200 SMA ($${s200.toFixed(2)}) — BEARISH trend structure. Price is ${price > s21 ? "above" : "below"} 21 SMA and ${price > s200 ? "above" : "below"} 200 SMA.`;
-    } else {
-      smaRelationship = `21 SMA and 200 SMA are very close — NEUTRAL/CHOPPY conditions. Patterns detected for educational purposes.`;
-    }
-    
+    const maBull = s21 > s200;
+    const smaRelationship = maBull
+      ? `21 SMMA ($${s21.toFixed(2)}) is above 200 SMMA ($${s200.toFixed(2)}). Price is ${price > s21 ? "above" : "below"} 21 SMMA and ${price > s200 ? "above" : "below"} 200 SMMA.`
+      : s21 < s200
+        ? `21 SMMA ($${s21.toFixed(2)}) is below 200 SMMA ($${s200.toFixed(2)}). Price is ${price > s21 ? "above" : "below"} 21 SMMA and ${price > s200 ? "above" : "below"} 200 SMMA.`
+        : `21 SMMA and 200 SMMA are effectively tied — choppy SMMA structure.`;
+
     return {
       id: `${coin}-${timeframe}-${Date.now()}`,
       coin,
@@ -1135,28 +1067,16 @@ export async function analyzeForEducationalPatterns(
 
 // Scan multiple coins for educational patterns
 export async function scanForEducationalPatterns(
-  coins: string[] = ["BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "ARB", "SUI", "OP"],
-  timeframes: string[] = ["1m", "5m", "15m", "1h", "4h"]
+  coins: string[],
+  timeframes: string[] = DEFAULT_SCAN_TIMEFRAMES
 ): Promise<EducationalPatternSignal[]> {
-  const patterns: EducationalPatternSignal[] = [];
-  
-  for (const coin of coins) {
-    for (const timeframe of timeframes) {
-      try {
-        const pattern = await analyzeForEducationalPatterns(coin, timeframe);
-        if (pattern) {
-          patterns.push(pattern);
-        }
-        await new Promise(resolve => setTimeout(resolve, 50));
-      } catch (error) {
-        console.error(`Error scanning ${coin} ${timeframe}:`, error);
-      }
-    }
-  }
-  
-  // Sort by detection time (newest first)
+  const limit = pLimit(10);
+  const tasks = coins.flatMap((coin) =>
+    timeframes.map((tf) => () => analyzeForEducationalPatterns(coin, tf))
+  );
+  const results = await Promise.all(tasks.map((fn) => limit(fn)));
+  const patterns = results.filter((x): x is EducationalPatternSignal => x != null);
   patterns.sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
-  
   return patterns;
 }
 

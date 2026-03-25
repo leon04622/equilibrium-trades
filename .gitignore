@@ -1,5 +1,13 @@
 node_modules
 dist
+
+# Secrets — never push these to GitHub (set vars in Railway instead)
+.env
+.env.local
+.env.*.local
+
+# Replit editor tooling (huge rules file — not needed for Railway)
+.config/replit/
 .DS_Store
 server/public
 vite.config.ts.*

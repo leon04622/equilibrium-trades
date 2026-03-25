@@ -58,38 +58,33 @@ export interface RecentTrade {
   hash: string;
 }
 
-// Get all available trading pairs
+/** Intervals accepted by Hyperliquid `candleSnapshot` (must match UI + scanners). */
+export const HYPERLIQUID_CANDLE_INTERVALS = [
+  "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d",
+] as const;
+
+export type HyperliquidCandleInterval = (typeof HYPERLIQUID_CANDLE_INTERVALS)[number];
+
+// Get all available trading pairs (perps universe) — never fabricate markets
 export async function getAvailableCoins(): Promise<HyperliquidMeta> {
-  try {
-    const response = await fetch(HYPERLIQUID_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "meta" }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error("Error fetching Hyperliquid meta:", error);
-    // Return default coins if API fails
-    return {
-      universe: [
-        { name: "BTC", szDecimals: 5, maxLeverage: 50 },
-        { name: "ETH", szDecimals: 4, maxLeverage: 50 },
-        { name: "SOL", szDecimals: 2, maxLeverage: 20 },
-        { name: "DOGE", szDecimals: 0, maxLeverage: 20 },
-        { name: "AVAX", szDecimals: 2, maxLeverage: 20 },
-        { name: "LINK", szDecimals: 2, maxLeverage: 20 },
-        { name: "ARB", szDecimals: 1, maxLeverage: 20 },
-        { name: "SUI", szDecimals: 1, maxLeverage: 20 },
-        { name: "OP", szDecimals: 1, maxLeverage: 20 },
-        { name: "WIF", szDecimals: 0, maxLeverage: 10 },
-      ],
-    };
+  const response = await fetch(HYPERLIQUID_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "meta" }),
+  });
+
+  if (!response.ok) {
+    console.error("Error fetching Hyperliquid meta:", response.status);
+    return { universe: [] };
   }
+
+  return await response.json();
+}
+
+/** All perp coin symbols from Hyperliquid meta (e.g. BTC, ETH, …). */
+export async function getPerpUniverseCoinNames(): Promise<string[]> {
+  const meta = await getAvailableCoins();
+  return (meta.universe || []).map((u) => u.name).filter(Boolean);
 }
 
 // Get all ticker data for all coins with proper 24h stats
@@ -265,17 +260,18 @@ export async function getOrderBook(coin: string): Promise<HyperliquidOrderBook |
 // In-memory candle cache: key → { data, expiresAt }
 const candleCache = new Map<string, { data: HyperliquidCandle[]; expiresAt: number }>();
 
-// TTL per interval — shorter candles refresh more often
+// Short TTLs so charts stay aligned with Hyperliquid (still avoids hammering the API).
+// Set HL_DISABLE_CANDLE_CACHE=1 to always hit the network for default range requests.
 const CANDLE_CACHE_TTL: Record<string, number> = {
-  "1m":  8_000,
-  "3m":  12_000,
-  "5m":  15_000,
-  "15m": 20_000,
-  "30m": 25_000,
-  "1h":  30_000,
-  "2h":  40_000,
-  "4h":  50_000,
-  "1d":  60_000,
+  "1m":  2_500,
+  "3m":  3_000,
+  "5m":  4_000,
+  "15m": 5_000,
+  "30m": 6_000,
+  "1h":  8_000,
+  "2h":  10_000,
+  "4h":  12_000,
+  "1d":  15_000,
 };
 
 // Get candle data for charting
@@ -288,8 +284,8 @@ export async function getCandles(
 ): Promise<HyperliquidCandle[]> {
   try {
     const end = endTime || Date.now();
-    
-    // Calculate appropriate time range based on interval
+
+    // Calculate appropriate time range based on interval (must match Hyperliquid bar duration)
     const intervalMs: Record<string, number> = {
       "1m": 60 * 1000,
       "3m": 3 * 60 * 1000,
@@ -301,18 +297,18 @@ export async function getCandles(
       "4h": 4 * 60 * 60 * 1000,
       "1d": 24 * 60 * 60 * 1000,
     };
-    
+
     const candleCount = limit;
     const msPerCandle = intervalMs[interval] || 60 * 1000;
     const defaultRange = msPerCandle * candleCount;
     const start = startTime || end - defaultRange;
 
-    // Return cached data if still fresh (only when no explicit time bounds given)
+    const cacheDisabled = process.env.HL_DISABLE_CANDLE_CACHE === "1";
     const cacheKey = `${coin}:${interval}`;
-    if (!startTime && !endTime) {
+    if (!cacheDisabled && !startTime && !endTime) {
       const cached = candleCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
-        return cached.data;
+        return [...cached.data].sort((a, b) => a.t - b.t);
       }
     }
     
@@ -329,11 +325,11 @@ export async function getCandles(
       throw new Error(`HTTP error: ${response.status}`);
     }
     
-    const data: HyperliquidCandle[] = await response.json();
+    const raw: HyperliquidCandle[] = await response.json();
+    const data = [...raw].sort((a, b) => a.t - b.t);
 
-    // Cache result
-    if (!startTime && !endTime && data.length > 0) {
-      const ttl = CANDLE_CACHE_TTL[interval] || 15_000;
+    if (!cacheDisabled && !startTime && !endTime && data.length > 0) {
+      const ttl = CANDLE_CACHE_TTL[interval] || 4_000;
       candleCache.set(cacheKey, { data, expiresAt: Date.now() + ttl });
     }
 

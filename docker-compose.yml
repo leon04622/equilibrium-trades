@@ -1,0 +1,22 @@
+# Optional local Postgres for development / staging.
+# Start: docker compose up -d
+# DATABASE_URL=postgresql://equilibrium:equilibrium@localhost:5432/equilibrium
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: equilibrium
+      POSTGRES_PASSWORD: equilibrium
+      POSTGRES_DB: equilibrium
+    volumes:
+      - eq_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U equilibrium -d equilibrium"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  eq_pgdata:

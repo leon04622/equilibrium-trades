@@ -8,11 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
 import { apiRequest } from "@/lib/queryClient";
-
-const BUILDER_CODE = "EQUILIBRIUM_BUILDER";
-const BUILDER_MESSAGE = `I authorize Equilibrium (${BUILDER_CODE}) to act as my builder on Hyperliquid. This approval allows Equilibrium to submit trading orders on my behalf. I understand that I remain in full control of my funds at all times.
-
-Timestamp: ${new Date().toISOString().split('T')[0]}`;
+import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
 
 type OnboardingStep = "idle" | "connecting" | "signing" | "registering" | "complete" | "error";
 
@@ -87,16 +83,18 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
     }
 
     setStep("signing");
-    
+
+    const approvalMessage = buildEquilibriumBuilderApprovalMessage();
+
     try {
-      const signature = await signer.signMessage(BUILDER_MESSAGE);
-      
+      const signature = await signer.signMessage(approvalMessage);
+
       setStep("registering");
-      
+
       const response = await apiRequest("POST", "/api/wallet-user/approve-builder-code", {
         walletAddress: address,
         signature,
-        message: BUILDER_MESSAGE,
+        message: approvalMessage,
       });
 
       const data = await response.json();

@@ -65,8 +65,8 @@ function App() {
             <ChatProvider>
             <TooltipProvider delayDuration={200}>
               <WalletGate>
-              <PaywallProvider>
               <BuilderCodeModal />
+              <PaywallProvider>
               <PaywallModal />
               <SidebarProvider style={style as React.CSSProperties}>
                 <div className="flex w-full overflow-hidden" style={{ height: '100dvh' }}>

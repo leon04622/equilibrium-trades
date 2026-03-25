@@ -83,7 +83,7 @@ function loadFavorites(): Set<string> {
 }
 
 function saveFavorites(favs: Set<string>) {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favs]));
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(favs)));
 }
 
 function fmtPrice(p: number) {

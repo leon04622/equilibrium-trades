@@ -1,10 +1,7 @@
-import OpenAI from "openai";
 import type { MarketCondition } from "@shared/schema";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import { getOpenAIOrNull } from "./openai-client";
+import { getCandles } from "./hyperliquid";
+import { calculateSMAFromCandles } from "./sma-detection";
 
 interface DetectedPatternResult {
   patternId: string;
@@ -60,8 +57,14 @@ export async function analyzePatterns(
   priceData?: number[]
 ): Promise<DetectedPatternResult[]> {
   try {
-    // Generate mock price data if not provided
-    const mockPriceData = priceData || generateMockPriceData();
+    const openai = getOpenAIOrNull();
+    if (!openai) {
+      return [];
+    }
+    if (!priceData?.length) {
+      return [];
+    }
+    const mockPriceData = priceData;
     
     const response = await openai.chat.completions.create({
       model: "gpt-5.1",
@@ -136,115 +139,67 @@ Identify any patterns forming or confirmed in this data.`
   }
 }
 
-function generateMockPriceData(): number[] {
-  const basePrice = 98000 + Math.random() * 2000;
-  const prices: number[] = [];
-  let currentPrice = basePrice;
-  
-  for (let i = 0; i < 100; i++) {
-    const change = (Math.random() - 0.48) * 100; // Slight bullish bias
-    currentPrice = Math.max(90000, currentPrice + change);
-    prices.push(Math.round(currentPrice * 100) / 100);
-  }
-  
-  return prices;
+function normalizeMarketCoin(symbol: string): string | null {
+  let s = symbol.trim().toUpperCase();
+  if (s.includes(":")) s = s.split(":").pop()!;
+  s = s.replace(/\/USDT$/i, "").replace(/USDT$/i, "").replace(/\//g, "");
+  if (s.startsWith("@")) return null;
+  return s || "BTC";
 }
 
-function getDemoPatterns(symbol: string, timeframe: string): DetectedPatternResult[] {
-  const patterns: DetectedPatternResult[] = [];
-  const basePrice = symbol.includes("BTC") ? 98500 : 
-                    symbol.includes("ETH") ? 3420 : 
-                    symbol.includes("SOL") ? 187 : 100;
+const EMPTY_MARKET: MarketCondition = {
+  symbol: "",
+  currentPrice: 0,
+  sma21_1m: 0,
+  sma200_1m: 0,
+  sma200_5m: 0,
+  trend: "neutral",
+  crossoverActive: false,
+  above5mSma200: false,
+};
 
-  // Randomly select 1-3 patterns
-  const numPatterns = Math.floor(Math.random() * 3) + 1;
-  
-  const demoPatterns: DetectedPatternResult[] = [
-    {
-      patternId: "bull-flag",
-      patternName: "Bull Flag",
-      type: "continuation",
-      direction: "bullish",
-      confidence: 75 + Math.floor(Math.random() * 15),
-      entryPrice: basePrice * 1.002,
-      stopLoss: basePrice * 0.995,
-      takeProfit: basePrice * 1.015,
-      description: "Price consolidating in a downward channel after a strong upward move. Volume decreasing during consolidation."
-    },
-    {
-      patternId: "ascending-triangle",
-      patternName: "Ascending Triangle",
-      type: "continuation",
-      direction: "bullish",
-      confidence: 65 + Math.floor(Math.random() * 20),
-      entryPrice: basePrice * 1.003,
-      stopLoss: basePrice * 0.992,
-      takeProfit: basePrice * 1.018,
-      description: "Flat resistance with rising support line. Buyers becoming more aggressive at each dip."
-    },
-    {
-      patternId: "pennant",
-      patternName: "Pennant",
-      type: "continuation",
-      direction: "bullish",
-      confidence: 70 + Math.floor(Math.random() * 15),
-      entryPrice: basePrice * 1.001,
-      stopLoss: basePrice * 0.994,
-      takeProfit: basePrice * 1.012,
-      description: "Small symmetrical triangle forming after strong upward movement. Expecting continuation."
-    },
-    {
-      patternId: "bear-flag",
-      patternName: "Bear Flag",
-      type: "continuation",
-      direction: "bearish",
-      confidence: 60 + Math.floor(Math.random() * 20),
-      entryPrice: basePrice * 0.998,
-      stopLoss: basePrice * 1.005,
-      takeProfit: basePrice * 0.985,
-      description: "Price bouncing in an upward channel after sharp decline. Watch for breakdown."
-    }
-  ];
-
-  for (let i = 0; i < numPatterns; i++) {
-    const idx = Math.floor(Math.random() * demoPatterns.length);
-    patterns.push({ ...demoPatterns[idx] });
-    demoPatterns.splice(idx, 1);
-  }
-
-  return patterns;
-}
-
+/** Live SMMA 21/200 from Hyperliquid candles (matches in-app Hyperliquid chart math). */
 export async function getMarketCondition(symbol: string): Promise<MarketCondition> {
-  // Generate realistic demo market condition
-  const isBTC = symbol.includes("BTC");
-  const isETH = symbol.includes("ETH");
-  const basePrice = isBTC ? 98432 : isETH ? 3421 : 100;
-  
-  const sma21_1m = basePrice * (0.997 + Math.random() * 0.006);
-  const sma200_1m = basePrice * (0.993 + Math.random() * 0.006);
-  const sma200_5m = basePrice * (0.99 + Math.random() * 0.008);
-  
-  const crossoverActive = sma21_1m > sma200_1m;
-  const above5mSma200 = basePrice > sma200_5m;
-  
-  let trend: "bullish" | "bearish" | "neutral";
-  if (crossoverActive && above5mSma200) {
-    trend = "bullish";
-  } else if (!crossoverActive && !above5mSma200) {
-    trend = "bearish";
-  } else {
-    trend = "neutral";
+  const coin = normalizeMarketCoin(symbol);
+  if (!coin) {
+    return { ...EMPTY_MARKET, symbol };
   }
 
-  return {
-    symbol: symbol.replace("BINANCE:", "").replace("USDT", "/USDT"),
-    currentPrice: Math.round(basePrice * 100) / 100,
-    sma21_1m: Math.round(sma21_1m * 100) / 100,
-    sma200_1m: Math.round(sma200_1m * 100) / 100,
-    sma200_5m: Math.round(sma200_5m * 100) / 100,
-    trend,
-    crossoverActive,
-    above5mSma200,
-  };
+  try {
+    const now = Date.now();
+    const span1m = 250 * 60 * 1000;
+    const span5m = 250 * 5 * 60 * 1000;
+    const [c1, c5] = await Promise.all([
+      getCandles(coin, "1m", now - span1m, now, 250),
+      getCandles(coin, "5m", now - span5m, now, 250),
+    ]);
+    const s1 = calculateSMAFromCandles(c1);
+    const s5 = calculateSMAFromCandles(c5);
+    if (!s1 || !s5) {
+      return { ...EMPTY_MARKET, symbol: coin };
+    }
+
+    const currentPrice = s1.price;
+    const crossoverActive = s1.sma21 > s1.sma200;
+    const above5mSma200 = currentPrice > s5.sma200;
+
+    let trend: "bullish" | "bearish" | "neutral";
+    if (crossoverActive && above5mSma200) trend = "bullish";
+    else if (!crossoverActive && !above5mSma200) trend = "bearish";
+    else trend = "neutral";
+
+    return {
+      symbol: coin,
+      currentPrice,
+      sma21_1m: s1.sma21,
+      sma200_1m: s1.sma200,
+      sma200_5m: s5.sma200,
+      trend,
+      crossoverActive,
+      above5mSma200,
+    };
+  } catch (e) {
+    console.error("[getMarketCondition]", coin, e);
+    return { ...EMPTY_MARKET, symbol: coin };
+  }
 }

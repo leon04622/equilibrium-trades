@@ -14,7 +14,7 @@ function TradingViewChartComponent({
   symbol = "BINANCE:BTCUSDT", 
   interval = "1",
   className = "",
-  currentPrice = 0,
+  currentPrice: _currentPrice = 0,
   hideVolume = false,
 }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);

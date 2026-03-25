@@ -1,9 +1,14 @@
 import type { Express, Request, Response } from "express";
-import { openai } from "./client";
+import { getOpenAIOrNull } from "../../openai-client";
 
 export function registerImageRoutes(app: Express): void {
   app.post("/api/generate-image", async (req: Request, res: Response) => {
     try {
+      const openai = getOpenAIOrNull();
+      if (!openai) {
+        return res.status(503).json({ error: "Image generation not configured (missing OpenAI API key)" });
+      }
+
       const { prompt, size = "1024x1024" } = req.body;
 
       if (!prompt) {
@@ -17,7 +22,10 @@ export function registerImageRoutes(app: Express): void {
         size: size as "1024x1024" | "512x512" | "256x256",
       });
 
-      const imageData = response.data[0];
+      const imageData = response.data?.[0];
+      if (!imageData) {
+        return res.status(502).json({ error: "No image data returned" });
+      }
       res.json({
         url: imageData.url,
         b64_json: imageData.b64_json,

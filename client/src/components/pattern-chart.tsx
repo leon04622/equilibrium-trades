@@ -175,11 +175,11 @@ function PatternChartComponent({
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
 
   const coordinateToPrice = useCallback((clientY: number): number | null => {
-    if (!mainChartRef.current || !mainContainerRef.current) return null;
+    if (!mainContainerRef.current || !candleSeriesRef.current) return null;
     const rect = mainContainerRef.current.getBoundingClientRect();
     const yRel = clientY - rect.top;
-    const price = mainChartRef.current.priceScale("right").coordinateToPrice(yRel);
-    return price ?? null;
+    const price = candleSeriesRef.current.coordinateToPrice(yRel);
+    return price !== null && price !== undefined ? Number(price) : null;
   }, []);
 
   // Pane resize state
@@ -342,10 +342,23 @@ function PatternChartComponent({
       priceLineVisible: false, lastValueVisible: false, title: "",
     });
 
+    // lightweight-charts v5: read visible price range from the candlestick series' price scale
+    const syncVisiblePriceRange = () => {
+      const series = candleSeriesRef.current;
+      if (!series) return;
+      const range = series.priceScale().getVisibleRange();
+      if (!range) return;
+      setVisiblePriceRange({
+        min: Math.min(range.from, range.to),
+        max: Math.max(range.from, range.to),
+      });
+    };
+
     const obs = (el: HTMLDivElement, chart: IChartApi) => {
       const ro = new ResizeObserver(() => {
         if (mainChartRef.current || rsiChartRef.current || stochChartRef.current) {
           try { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch (_) {}
+          syncVisiblePriceRange();
         }
       });
       ro.observe(el);
@@ -355,13 +368,15 @@ function PatternChartComponent({
     const r1 = obs(mainContainerRef.current!, mainChart);
     const cleanups: (() => void)[] = [];
 
-    // Subscribe to visible price range so ChartOrderLines can align to the chart's scale
-    const priceRangeHandler = (range: { minValue: number; maxValue: number } | null) => {
-      if (range) setVisiblePriceRange({ min: range.minValue, max: range.maxValue });
-    };
-    mainChart.priceScale("right").subscribeVisiblePriceRangeChange(priceRangeHandler);
+    syncVisiblePriceRange();
+    const onTimeScaleChange = () => syncVisiblePriceRange();
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange(onTimeScaleChange);
+    mainChart.timeScale().subscribeVisibleTimeRangeChange(onTimeScaleChange);
     cleanups.push(() => {
-      try { mainChart.priceScale("right").unsubscribeVisiblePriceRangeChange(priceRangeHandler); } catch (_) {}
+      try {
+        mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(onTimeScaleChange);
+        mainChart.timeScale().unsubscribeVisibleTimeRangeChange(onTimeScaleChange);
+      } catch (_) {}
     });
 
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {

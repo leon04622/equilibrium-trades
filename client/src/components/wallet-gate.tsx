@@ -7,6 +7,19 @@ import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, T
 
 const PUBLIC_PATHS = ["/pricing"];
 
+/**
+ * Browse without a wallet when:
+ * - `VITE_WALLET_GATE_DISABLED=true` (or `1`) — use for Replit/production preview; unset for go-live.
+ * - Local `npm run dev` — gate is off by default so you can use Trading + Live Chat as a guest.
+ * Set `VITE_WALLET_GATE_DISABLED=false` in dev if you need to test the gate.
+ */
+function isWalletGateDisabled(): boolean {
+  const v = import.meta.env.VITE_WALLET_GATE_DISABLED;
+  if (v === "false" || v === "0") return false;
+  if (v === "true" || v === "1") return true;
+  return import.meta.env.DEV;
+}
+
 export function WalletGate({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { isConnected, isConnecting, connect, isMobile, openInWalletBrowser, detectedWallets, connectError } = useWallet();
@@ -14,7 +27,7 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
   const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
 
-  if (isConnected || PUBLIC_PATHS.includes(location)) return <>{children}</>;
+  if (isWalletGateDisabled() || isConnected || PUBLIC_PATHS.includes(location)) return <>{children}</>;
 
   const handleEmailCapture = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +91,16 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
           {isMobile && !hasWallet ? (
             <>
               <Button
+                onClick={() => openInWalletBrowser("rabby")}
+                className="w-full h-12 gap-3 text-base font-semibold"
+                data-testid="button-open-rabby-mobile"
+              >
+                <Wallet className="h-5 w-5" />
+                Open in Rabby
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => openInWalletBrowser("metamask")}
                 className="w-full h-12 gap-3 text-base font-semibold"
                 data-testid="button-open-metamask"
@@ -87,10 +110,7 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
                 <ArrowRight className="h-4 w-4 ml-auto" />
               </Button>
               <p className="text-xs text-muted-foreground">
-                Don't have MetaMask?{" "}
-                <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" className="text-primary underline">
-                  Download it free
-                </a>
+                After the app opens, unlock your wallet and use Connect when this page loads.
               </p>
             </>
           ) : hasWallet ? (

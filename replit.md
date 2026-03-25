@@ -1,5 +1,7 @@
 # Equilibrium - Beginner-Friendly Trading Platform
 
+> **Note:** This file is **historical** (Replit-era notes). The app is **self-host first**: set `PUBLIC_APP_URL`, `DATABASE_URL`, `STRIPE_SECRET_KEY`, and `STRIPE_PUBLISHABLE_KEY` on Railway, Render, or a VPS. See `HOSTING.md`.
+
 ## Overview
 Equilibrium is a beginner-friendly trading platform designed to educate users on a specific trading strategy utilizing 21 SMA and 200 SMA crossovers. The platform integrates TradingView charts with indicators, features AI-powered pattern detection, offers a comprehensive library of over 18 trading patterns with educational content, and provides subscription tiers including a premium liquidity heatmap. It supports non-custodial trading via Hyperliquid, enabling users to connect their wallets for direct order submission. The project aims to empower users with tools for learning, analysis, and execution in a secure, non-custodial environment.
 
