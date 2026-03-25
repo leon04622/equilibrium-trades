@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/lib/wallet-context";
-import { isAdminWallet } from "@shared/schema";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 const mainNavItems = [
   {
@@ -106,7 +106,7 @@ const accountNavItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { address } = useWallet();
-  const isAdmin = address ? isAdminWallet(address) : false;
+  const { isAdmin } = useIsAdmin();
 
   return (
     <Sidebar>

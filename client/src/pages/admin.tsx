@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Users, Shield, Crown, Zap, Sparkles, Check, X, 
-  RefreshCw, Search, Calendar, Mail, Download
+  RefreshCw, Search, Calendar, Mail, Download, Loader2
 } from "lucide-react";
 import type { Lead } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -36,7 +36,7 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { isAdminWallet } from "@shared/schema";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import type { WalletUser } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +48,7 @@ export default function Admin() {
   const [editTier, setEditTier] = useState<'free' | 'pro' | 'elite'>('free');
   const [editActive, setEditActive] = useState(false);
 
-  const isAdmin = address ? isAdminWallet(address) : false;
+  const { isAdmin, isLoading: adminCheckLoading } = useIsAdmin();
 
   const { data: leads = [], isLoading: leadsLoading, refetch: refetchLeads } = useQuery<Lead[]>({
     queryKey: ['/api/leads'],
@@ -165,6 +165,15 @@ export default function Admin() {
             </p>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  if (adminCheckLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[40vh] text-muted-foreground gap-2">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span>Checking access…</span>
       </div>
     );
   }

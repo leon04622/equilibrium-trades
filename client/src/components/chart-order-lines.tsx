@@ -108,13 +108,16 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   useEffect(() => {
     if (!dragging) return;
 
-    const readY = (e: MouseEvent | TouchEvent): number | null => {
+    const readY = (e: MouseEvent | TouchEvent | PointerEvent): number | null => {
+      if ("clientY" in e && typeof (e as PointerEvent).clientY === "number") {
+        return (e as PointerEvent).clientY;
+      }
       if ("touches" in e && e.touches.length > 0) return e.touches[0].clientY;
       if ("changedTouches" in e && e.changedTouches.length > 0) return e.changedTouches[0].clientY;
       return (e as MouseEvent).clientY;
     };
 
-    const onMove = (e: MouseEvent | TouchEvent) => {
+    const onMove = (e: MouseEvent | TouchEvent | PointerEvent) => {
       if (!coordinateToPrice) return;
       if ("preventDefault" in e && e.cancelable) e.preventDefault();
       const y = readY(e);
@@ -127,7 +130,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       }
     };
 
-    const onUp = async (e: MouseEvent | TouchEvent) => {
+    const onUp = async (e: MouseEvent | TouchEvent | PointerEvent) => {
       const finalDragging = draggingRef.current;
       const y = readY(e);
       const raw =
@@ -149,7 +152,10 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
 
       const result = await placeTPSL(coin, pos.size, isLong, tp, sl, pos.entryPrice);
       if (result.success) {
-        toast({ title: `${finalDragging === "tp" ? "Take Profit" : "Stop Loss"} updated` });
+        toast({
+          title: finalDragging === "tp" ? "Take Profit set" : "Stop Loss set",
+          description: `$${fmt(finalPrice)}`,
+        });
       } else {
         toast({ title: "Update failed", description: result.error, variant: "destructive" });
       }
@@ -157,12 +163,18 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onUp);
     window.addEventListener("touchcancel", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onUp);
       window.removeEventListener("touchcancel", onUp);
@@ -223,9 +235,28 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   const pnlPositive = unrealizedPnl >= 0;
   const liqPrice = position.liquidationPrice;
 
+  // Hyperliquid-style “ghost” lines when TP/SL not set yet — drag to place.
+  const markPx = position.markPrice || currentPrice || entry;
+  let ghostTp: number | null = null;
+  let ghostSl: number | null = null;
+  if (!tpPrice) {
+    ghostTp = isLong ? entry * 1.012 : entry * 0.988;
+  }
+  if (!slPrice) {
+    if (isLong) {
+      ghostSl = Math.min(entry * 0.988, markPx * 0.992);
+      if (ghostSl >= markPx) ghostSl = markPx * 0.99;
+    } else {
+      ghostSl = Math.max(entry * 1.012, markPx * 1.008);
+      if (ghostSl <= markPx) ghostSl = markPx * 1.01;
+    }
+  }
+
   const priceLevels: number[] = [currentPrice, entry].filter(p => p > 0);
   if (tpPrice) priceLevels.push(tpPrice);
   if (slPrice) priceLevels.push(slPrice);
+  if (ghostTp) priceLevels.push(ghostTp);
+  if (ghostSl) priceLevels.push(ghostSl);
   if (liqPrice && liqPrice > 0) priceLevels.push(liqPrice);
 
   const rawMin = Math.min(...priceLevels);
@@ -255,9 +286,27 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     cancelType?: "tp" | "sl";
     editType?: "tp" | "sl";
     labelSide?: "left" | "center";
+    isGhost?: boolean;
   }
 
   const lines: LineConfig[] = [];
+
+  if (ghostTp && ghostTp > 0) {
+    lines.push({
+      key: "ghost-tp",
+      price: ghostTp,
+      color: "text-[#22c55e]/80",
+      lineColor: "#22c55e",
+      dashed: true,
+      label: "TP — drag to set",
+      sizeLabel: fmtSize(size),
+      canCancel: false,
+      canEdit: true,
+      editType: "tp",
+      labelSide: "center",
+      isGhost: true,
+    });
+  }
 
   if (tpPrice && tpPrice > 0) {
     lines.push({
@@ -273,6 +322,23 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       cancelType: "tp",
       editType: "tp",
       labelSide: "center",
+    });
+  }
+
+  if (ghostSl && ghostSl > 0) {
+    lines.push({
+      key: "ghost-sl",
+      price: ghostSl,
+      color: "text-[#ef4444]/80",
+      lineColor: "#ef4444",
+      dashed: true,
+      label: "SL — drag to set",
+      sizeLabel: fmtSize(size),
+      canCancel: false,
+      canEdit: true,
+      editType: "sl",
+      labelSide: "center",
+      isGhost: true,
     });
   }
 
@@ -362,14 +428,23 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
             {/* Full-width dashed line */}
             <div
               className="absolute left-0 right-0 h-0"
-              style={{ borderTop: `1px dashed ${line.lineColor}`, opacity: 0.7 }}
+              style={{
+                borderTop: `1px dashed ${line.lineColor}`,
+                opacity: line.isGhost ? 0.45 : 0.75,
+              }}
             />
 
-            {/* Drag handle strip for TP and SL — invisible but interactive */}
+            {/* Drag handle strip for TP and SL (including ghost “set” lines) */}
             {(line.editType === "tp" || line.editType === "sl") && coordinateToPrice && (
               <div
                 className="absolute left-0 right-0 touch-none"
-                style={{ height: 18, top: -9, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25, touchAction: "none" }}
+                style={{ height: 22, top: -11, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25, touchAction: "none" }}
+                onPointerDown={(e) => {
+                  if (e.button !== 0 && e.pointerType === "mouse") return;
+                  e.preventDefault();
+                  dragPriceRef.current = null;
+                  setDragging(line.editType!);
+                }}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   dragPriceRef.current = null;
@@ -434,13 +509,14 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                   <div
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-semibold",
-                      "bg-[#1a1f2e] border border-white/15 shadow-lg select-none whitespace-nowrap",
+                      "bg-[#1a1f2e] border shadow-lg select-none whitespace-nowrap",
+                      line.isGhost ? "border-dashed border-white/25" : "border-white/15",
                       line.color,
                     )}
                   >
                     <span>{line.label}</span>
                     <span className="opacity-50">{line.sizeLabel}</span>
-                    {line.canEdit && (
+                    {line.canEdit && !line.isGhost && (
                       <button
                         className="opacity-60 hover:opacity-100 transition-opacity"
                         onClick={() => startEdit(line.editType!)}

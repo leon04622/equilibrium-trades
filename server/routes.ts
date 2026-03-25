@@ -18,6 +18,8 @@ import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
 import { getPublicAppBaseUrl } from "./public-url";
+import { isAdminAddress } from "./admin-access";
+import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -30,8 +32,6 @@ function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>
     return data;
   });
 }
-
-const SCAN_ALL_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
 
 async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   if (coinsParam?.trim()) {
@@ -46,6 +46,11 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
+    const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+    res.json({ isAdmin: isAdminAddress(walletAddress) });
+  });
+
   // Register OpenAI chat routes
   registerChatRoutes(app);
 
@@ -305,7 +310,7 @@ export async function registerRoutes(
       const coins = await resolveScanCoins(coinsParam);
       const timeframes = timeframesParam?.trim()
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
-        : SCAN_ALL_TIMEFRAMES;
+        : [...SCAN_ALL_TIMEFRAMES];
 
       const patterns = await scanForEducationalPatterns(coins, timeframes);
       res.json(patterns);
@@ -326,7 +331,7 @@ export async function registerRoutes(
       const coins = await resolveScanCoins(coinsParam);
       const timeframes = timeframesParam?.trim()
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
-        : SCAN_ALL_TIMEFRAMES;
+        : [...SCAN_ALL_TIMEFRAMES];
 
       const signals = await scanForSignals(coins, timeframes);
       res.json(signals);
@@ -426,10 +431,10 @@ export async function registerRoutes(
   // Create video - admin only
   app.post("/api/videos", async (req: Request, res: Response) => {
     try {
-      const { insertVideoSchema, isAdminWallet } = await import("@shared/schema");
+      const { insertVideoSchema } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       
-      if (!walletAddress || !isAdminWallet(walletAddress)) {
+      if (!walletAddress || !isAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -448,10 +453,9 @@ export async function registerRoutes(
   // Delete video - admin only
   app.delete("/api/videos/:id", async (req: Request, res: Response) => {
     try {
-      const { isAdminWallet } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       
-      if (!walletAddress || !isAdminWallet(walletAddress)) {
+      if (!walletAddress || !isAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -596,9 +600,8 @@ export async function registerRoutes(
   app.get("/api/admin/users", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      const { isAdminWallet } = await import("@shared/schema");
       
-      if (!walletAddress || !isAdminWallet(walletAddress)) {
+      if (!walletAddress || !isAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -614,10 +617,9 @@ export async function registerRoutes(
   app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
     try {
       const { walletAddress } = req.params;
-      const { isAdminWallet } = await import("@shared/schema");
       
       // Admin wallet always gets elite access
-      if (isAdminWallet(walletAddress)) {
+      if (isAdminAddress(walletAddress)) {
         return res.json({ tier: 'elite', active: true, expiresAt: null });
       }
 
@@ -664,9 +666,9 @@ export async function registerRoutes(
   app.patch("/api/admin/users/:walletAddress/subscription", async (req: Request, res: Response) => {
     try {
       const adminWallet = req.headers["x-wallet-address"] as string | undefined;
-      const { isAdminWallet, updateSubscriptionSchema } = await import("@shared/schema");
+      const { updateSubscriptionSchema } = await import("@shared/schema");
       
-      if (!adminWallet || !isAdminWallet(adminWallet)) {
+      if (!adminWallet || !isAdminAddress(adminWallet)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -734,8 +736,7 @@ export async function registerRoutes(
   app.get("/api/leads", async (req: Request, res: Response) => {
     try {
       const adminWallet = req.headers["x-wallet-address"] as string | undefined;
-      const { isAdminWallet } = await import("@shared/schema");
-      if (!adminWallet || !isAdminWallet(adminWallet)) {
+      if (!adminWallet || !isAdminAddress(adminWallet)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       const allLeads = await storage.getAllLeads();
@@ -753,8 +754,7 @@ export async function registerRoutes(
       return { valid: false, isAdmin: false, error: "Wallet address required" };
     }
     
-    const { isAdminWallet } = await import("@shared/schema");
-    const isAdmin = isAdminWallet(walletAddress);
+    const isAdmin = isAdminAddress(walletAddress);
     
     if (requireAdmin && !isAdmin) {
       return { valid: false, isAdmin: false, error: "Admin access required" };
@@ -775,8 +775,7 @@ export async function registerRoutes(
       const sessionId = req.headers["x-session-id"] as string | undefined;
       const conversationId = req.params.conversationId.toLowerCase();
 
-      const { isAdminWallet } = await import("@shared/schema");
-      const isAdmin = walletAddress ? isAdminWallet(walletAddress) : false;
+      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
 
       if (!isAdmin) {
         const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
@@ -814,11 +813,11 @@ export async function registerRoutes(
   // Send a message — wallet users, guest sessions, and admins can all post
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
-      const { insertSupportMessageSchema, isAdminWallet } = await import("@shared/schema");
+      const { insertSupportMessageSchema } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       const sessionId = req.headers["x-session-id"] as string | undefined;
 
-      const isAdmin = walletAddress ? isAdminWallet(walletAddress) : false;
+      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
 
       const conversationId = (req.body.conversationId || "").toLowerCase();
 
@@ -874,8 +873,7 @@ export async function registerRoutes(
   // Check if wallet is admin
   app.get("/api/admin/check/:walletAddress", async (req: Request, res: Response) => {
     try {
-      const { isAdminWallet } = await import("@shared/schema");
-      const isAdmin = isAdminWallet(req.params.walletAddress);
+      const isAdmin = isAdminAddress(req.params.walletAddress);
       res.json({ isAdmin });
     } catch (error) {
       console.error("Error checking admin status:", error);

@@ -497,19 +497,37 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       };
       setTradeHistory(th => [tradeRecord, ...th]);
       
-      // Auto-grade the trade
+      // Auto-grade the trade (use real TP/SL trigger orders when present)
       try {
         const walletAddress = await signer.getAddress();
-        // Estimate SL/TP based on position (2% SL, 4% TP typical)
-        const slDistance = position.entryPrice * 0.02;
-        const tpDistance = position.entryPrice * 0.04;
-        const estimatedSL = position.side === "long" 
-          ? position.entryPrice - slDistance 
-          : position.entryPrice + slDistance;
-        const estimatedTP = position.side === "long"
-          ? position.entryPrice + tpDistance
-          : position.entryPrice - tpDistance;
-        
+        const entry = position.entryPrice;
+        const isLong = position.side === "long";
+
+        const classify = (o: HLOpenOrder): "tp" | "sl" | "other" => {
+          const ot = (o.orderType || "").toLowerCase();
+          if (ot.includes("take profit") || ot === "take_profit") return "tp";
+          if (ot.includes("stop") || ot === "stop_loss") return "sl";
+          const trigPx = o.triggerPx ? parseFloat(o.triggerPx) : parseFloat(o.limitPx);
+          if (!trigPx || isNaN(trigPx)) return "other";
+          return isLong ? (trigPx > entry ? "tp" : "sl") : (trigPx < entry ? "tp" : "sl");
+        };
+
+        const coinOrders = openOrders.filter(o => o.coin === position.coin && o.triggerPx);
+        const tpPx = coinOrders.find(o => classify(o) === "tp");
+        const slPx = coinOrders.find(o => classify(o) === "sl");
+        const tpFromOrder = tpPx ? parseFloat(tpPx.triggerPx || tpPx.limitPx) : NaN;
+        const slFromOrder = slPx ? parseFloat(slPx.triggerPx || slPx.limitPx) : NaN;
+
+        const slDistance = entry * 0.02;
+        const tpDistance = entry * 0.04;
+        const estimatedSL = isLong ? entry - slDistance : entry + slDistance;
+        const estimatedTP = isLong ? entry + tpDistance : entry - tpDistance;
+
+        const stopLoss =
+          slFromOrder > 0 && !isNaN(slFromOrder) ? slFromOrder : Math.max(estimatedSL, 1e-8);
+        const takeProfit =
+          tpFromOrder > 0 && !isNaN(tpFromOrder) ? tpFromOrder : Math.max(estimatedTP, 1e-8);
+
         await fetch("/api/journal/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -517,12 +535,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             walletAddress,
             coin: position.coin,
             side: position.side,
-            entryPrice: position.entryPrice,
+            entryPrice: entry,
             exitPrice,
-            stopLoss: estimatedSL,
-            takeProfit: estimatedTP,
+            stopLoss,
+            takeProfit,
             leverage: position.leverage,
             size: position.size,
+            patternType: "SMMA 21/200 trend",
+            timeframe: "multi",
           }),
         });
       } catch (gradeError) {
@@ -539,7 +559,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsClosingPosition(false);
     }
-  }, [positions, signer, refreshAccount]);
+  }, [positions, signer, refreshAccount, openOrders]);
 
   const cancelOrder = useCallback((orderId: string) => {
     setOrders(prev => {

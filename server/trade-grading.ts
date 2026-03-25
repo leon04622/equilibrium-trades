@@ -23,7 +23,9 @@ function scoreToGrade(score: number): "A" | "B" | "C" | "D" | "F" {
 }
 
 export function gradeTrade(input: TradeInput): InsertTradeGrade {
-  const notes: string[] = [];
+  const notes: string[] = [
+    "Equilibrium lens: align with 21/200 SMMA bias on higher timeframes, plan R:R before entry, size for the stop — not the ego.",
+  ];
   
   const pnl = input.side === "long" 
     ? (input.exitPrice - input.entryPrice) * input.size

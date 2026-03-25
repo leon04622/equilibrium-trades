@@ -18,6 +18,7 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { usePaywall } from "@/lib/paywall-context";
 import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
+import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
 import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
 
@@ -86,6 +87,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const { updatePrices } = useTrading();
   const { openPaywall } = usePaywall();
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
+  const { builderCodeApproved, isCheckingApproval: builderCheckLoading } = useWallet();
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
@@ -258,9 +260,16 @@ export default function Trading({ visible = true }: TradingProps) {
     )}>
       {/* Top Header - Symbol info bar - hidden in fullscreen on mobile */}
       <div className={cn(
-        "flex items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50",
-        isFullscreen && "hidden md:flex"
+        "relative flex flex-wrap items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50",
+        isFullscreen && "hidden md:flex",
+        isConnected && !builderCheckLoading && !builderCodeApproved && "pt-10 md:pt-10"
       )}>
+        {isConnected && !builderCheckLoading && !builderCodeApproved && (
+          <div className="absolute left-0 right-0 top-0 z-[60] flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/40 px-3 py-2 text-[11px] md:text-xs text-amber-200">
+            <span className="font-medium">Complete builder setup</span>
+            <span className="hidden sm:inline opacity-90">— Approve the dialog to trade. You stay on Equilibrium.</span>
+          </div>
+        )}
         <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
         
         <Separator orientation="vertical" className="h-6 hidden sm:block" />
@@ -394,23 +403,23 @@ export default function Trading({ visible = true }: TradingProps) {
 
             <div
               className="flex items-center gap-0.5 shrink-0 border-r border-border/50 pr-1 mr-0.5"
-              title="Hyperliquid = native chart + TP/SL lines. TradingView = embed (no TP/SL overlay)."
+              title="AI = native chart, patterns, TP/SL. TV = TradingView embed."
             >
               <Button
                 type="button"
                 variant={chartEngine === "hyperliquid" ? "secondary" : "ghost"}
                 size="sm"
-                className="h-6 px-1.5 text-[10px] font-mono"
+                className="h-6 px-2 text-[10px] font-semibold"
                 onClick={() => setChartEngine("hyperliquid")}
-                data-testid="chart-engine-hl"
+                data-testid="chart-engine-ai"
               >
-                HL
+                AI
               </Button>
               <Button
                 type="button"
                 variant={chartEngine === "tradingview" ? "secondary" : "ghost"}
                 size="sm"
-                className="h-6 px-1.5 text-[10px] font-mono"
+                className="h-6 px-2 text-[10px] font-semibold"
                 onClick={() => setChartEngine("tradingview")}
                 data-testid="chart-engine-tv"
               >
@@ -433,7 +442,7 @@ export default function Trading({ visible = true }: TradingProps) {
               ))}
             </div>
             
-            <div className="hidden md:flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2 md:gap-4 justify-end shrink-0">
               {chartEngine === "hyperliquid" && (
                 <>
                   <div className="flex items-center gap-1.5">
@@ -467,7 +476,7 @@ export default function Trading({ visible = true }: TradingProps) {
                   )}
                 </>
               )}
-              <div className="flex items-center gap-1.5">
+              <div className="hidden md:flex items-center gap-1.5">
                 <Switch 
                   checked={showOrderBook} 
                   onCheckedChange={setShowOrderBook}
@@ -497,7 +506,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       symbol={coin} 
                       interval={chartInterval}
                       currentPrice={price}
-                      showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                      patternScanEnabled={canUseAIPatterns && !isSpot}
                       hideIndicators={!showIndicators}
                       className="absolute inset-0" 
                     />
@@ -531,7 +540,7 @@ export default function Trading({ visible = true }: TradingProps) {
                   symbol={coin} 
                   interval={chartInterval}
                   currentPrice={price}
-                  showSignals={showAIChart && canUseAIPatterns && !isSpot}
+                  patternScanEnabled={canUseAIPatterns && !isSpot}
                   hideIndicators={!showIndicators}
                   className="h-full" 
                 />

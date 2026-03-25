@@ -1,6 +1,6 @@
 /** Default [Stripe Payment Links](https://stripe.com/docs/payment-links) — override via Vite env for staging. */
-const DEFAULT_PRO = "https://buy.stripe.com/28EfZggCd8QQ0dk81L0oM05";
-const DEFAULT_MENTORING = "https://buy.stripe.com/eVqeVc3Prc326BI6XH0oM04";
+const DEFAULT_PRO = "https://buy.stripe.com/aFa00idq15EE2ls6XH0oM07";
+const DEFAULT_MENTORING = "https://buy.stripe.com/00wdR83Pr7MMbW295P0oM06";
 
 export const STRIPE_PAYMENT_LINK_PRO =
   (import.meta.env.VITE_STRIPE_PAYMENT_LINK_PRO as string | undefined)?.trim() ||

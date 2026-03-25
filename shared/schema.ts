@@ -329,7 +329,7 @@ export const insertLeadSchema = createInsertSchema(leads).omit({ id: true, creat
 export type InsertLead = z.infer<typeof insertLeadSchema>;
 export type Lead = typeof leads.$inferSelect;
 
-// Admin users for video management and chat
+// Built-in admin wallets (video CRUD, leads, user subs, support). Add more via ADMIN_WALLET_ADDRESSES on the server.
 export const adminWallets = [
   "0x115560812df8e7515eecc957b6796531e936edd9",
   "0xad9be64fd7a35d99a138b87cb212baefbcdcf045",

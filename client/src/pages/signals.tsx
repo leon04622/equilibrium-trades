@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { SubscriptionGate } from "@/components/subscription-gate";
+import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 
 interface PatternSignal {
   id: string;
@@ -178,18 +179,21 @@ function LoadingSkeleton() {
 }
 
 function SignalsContent() {
-  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(["1m", "5m", "15m"]);
+  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() => [...SCAN_ALL_TIMEFRAMES]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
+  const tfParam =
+    selectedTimeframes.length > 0 ? selectedTimeframes.join(",") : [...SCAN_ALL_TIMEFRAMES].join(",");
+
   const { data: signals = [], isLoading, refetch, isFetching } = useQuery<PatternSignal[]>({
-    queryKey: ["/api/signals/patterns", selectedTimeframes.join(",")],
+    queryKey: ["/api/signals/patterns", tfParam],
     queryFn: async () => {
-      const response = await fetch(`/api/signals/patterns?timeframes=${selectedTimeframes.join(",")}`);
+      const response = await fetch(`/api/signals/patterns?timeframes=${encodeURIComponent(tfParam)}`);
       if (!response.ok) throw new Error("Failed to fetch patterns");
       return response.json();
     },
-    refetchInterval: 60000,
-    staleTime: 30000,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -259,24 +263,26 @@ function SignalsContent() {
         </AlertDescription>
       </Alert>
 
-      <div className="flex items-center gap-2 md:gap-4 flex-wrap">
-        <span className="text-xs md:text-sm font-medium">Timeframes:</span>
-        {["1m", "5m", "15m", "1h", "4h"].map(tf => (
-          <Badge 
-            key={tf}
-            variant={selectedTimeframes.includes(tf) ? "default" : "outline"}
-            className={cn(
-              "cursor-pointer transition-all text-[10px] md:text-xs",
-              selectedTimeframes.includes(tf) && "bg-primary"
-            )}
-            onClick={() => toggleTimeframe(tf)}
-            data-testid={`badge-timeframe-${tf}`}
-          >
-            {tf}
-          </Badge>
-        ))}
-        <span className="text-[10px] md:text-xs text-muted-foreground ml-auto hidden sm:inline">
-          Auto-scans every minute
+      <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+        <span className="text-xs md:text-sm font-medium shrink-0">Timeframes:</span>
+        <div className="flex flex-wrap gap-1.5 md:gap-2">
+          {SCAN_ALL_TIMEFRAMES.map((tf) => (
+            <Badge
+              key={tf}
+              variant={selectedTimeframes.includes(tf) ? "default" : "outline"}
+              className={cn(
+                "cursor-pointer transition-all text-[10px] md:text-xs",
+                selectedTimeframes.includes(tf) && "bg-primary"
+              )}
+              onClick={() => toggleTimeframe(tf)}
+              data-testid={`badge-timeframe-${tf}`}
+            >
+              {tf}
+            </Badge>
+          ))}
+        </div>
+        <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
+          Full market scan every 60s (all selected TFs). Tap a badge to exclude a timeframe.
         </span>
       </div>
 

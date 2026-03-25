@@ -43,7 +43,8 @@ interface PatternChartProps {
   interval?: string;
   className?: string;
   currentPrice?: number;
-  showSignals?: boolean;
+  /** When true, fetches educational patterns for this symbol/timeframe and shows the top-left alert card (Pro). */
+  patternScanEnabled?: boolean;
   hideIndicators?: boolean;
 }
 
@@ -61,7 +62,7 @@ const BG_IND = "#1b2035";
 const GRID = "#1e2535";
 const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
-const HANDLE_PX = 4;
+const HANDLE_PX = 6;
 
 function calcSMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
   const out: { time: Time; value: number }[] = [];
@@ -140,7 +141,7 @@ function PatternChartComponent({
   interval = "5m",
   className = "",
   currentPrice = 0,
-  showSignals = false,
+  patternScanEnabled = false,
   hideIndicators = false,
 }: PatternChartProps) {
   const outerRef = useRef<HTMLDivElement>(null);
@@ -231,27 +232,31 @@ function PatternChartComponent({
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
     queryKey: [`/api/signals/patterns?timeframes=${interval}`],
-    refetchInterval: 60000,
-    enabled: showSignals,
+    refetchInterval: 60_000,
+    enabled: patternScanEnabled,
   });
 
   const parsePrice = useCallback((val: number | string): number =>
     typeof val === "string" ? parseFloat(val) : val, []);
 
-  // ── Drag-to-resize logic ──
-  const startDrag = useCallback((handleIdx: number) => (e: React.MouseEvent) => {
+  // ── Pointer drag-to-resize (mouse + touch) ──
+  const startResizeDrag = useCallback((handleIdx: number) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
     e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
     const container = outerRef.current;
     if (!container) return;
     const startY = e.clientY;
     const startWeights = [...weights];
-    const totalH = container.clientHeight - HANDLE_PX * 2;
+    const totalH = Math.max(1, container.clientHeight - HANDLE_PX * 2);
     const totalW = startWeights.reduce((a, b) => a + b, 0);
-    const a = handleIdx, b = handleIdx + 1;
+    const a = handleIdx;
+    const b = handleIdx + 1;
     const minW = totalW * 0.07;
     const combined = startWeights[a] + startWeights[b];
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const delta = ((ev.clientY - startY) / totalH) * totalW;
       const newA = Math.max(minW, Math.min(combined - minW, startWeights[a] + delta));
       const next = [...startWeights];
@@ -259,12 +264,19 @@ function PatternChartComponent({
       next[b] = combined - newA;
       setWeights(next);
     };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+    const onUp = (ev: PointerEvent) => {
+      try {
+        el.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
     };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   }, [weights]);
 
   // ── SMA status for signal card ──
@@ -741,9 +753,9 @@ function PatternChartComponent({
           </span>
         </div>
 
-        {/* Signal overlay card */}
-        {showSignals && activeSignal ? (
-          <Card className="absolute top-8 left-1 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-[#2a3249] shadow-xl max-w-[260px] z-10">
+        {/* Pattern alert — top-left; independent of “AI Chart” drawing toggle */}
+        {patternScanEnabled && activeSignal ? (
+          <Card className="absolute top-2 left-2 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-primary/30 shadow-xl max-w-[min(92vw,280px)] z-30 pointer-events-auto">
             {/* Header */}
             <div className="flex items-center gap-1.5 mb-2">
               {activeSignal.bias === "bullish"
@@ -785,12 +797,18 @@ function PatternChartComponent({
             </div>
 
             {/* Educational note */}
-            <div className="border-t border-[#2a3249] pt-1.5">
+            <div className="border-t border-[#2a3249] pt-1.5 space-y-1.5">
               <p className="text-[9px] text-[#6b7a99] leading-relaxed">{activeSignal.educationalNote}</p>
+              {activeSignal.whatToWatch ? (
+                <p className="text-[9px] text-amber-200/90 leading-relaxed">
+                  <span className="font-semibold text-amber-400">Next: </span>
+                  {activeSignal.whatToWatch}
+                </p>
+              ) : null}
             </div>
           </Card>
         ) : smaStatus ? (
-          <div className="absolute top-8 left-1 z-10 pointer-events-none">
+          <div className="absolute top-2 left-2 z-10 pointer-events-none max-w-[min(90vw,220px)]">
             <div className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${isBullish ? "text-green-400" : "text-red-400"}`}
               style={{ background: "rgba(19,23,34,0.7)" }}>
               {isBullish ? "21 > 200 · Bullish bias" : "21 < 200 · Bearish bias"}
@@ -801,13 +819,16 @@ function PatternChartComponent({
 
       {!hideIndicators && (
         <>
-          {/* ── Drag handle 1 ── */}
+          {/* ── Drag handle: main (price + volume) ↔ RSI ── */}
           <div
-            onMouseDown={startDrag(0)}
-            className="flex-shrink-0 cursor-row-resize group"
+            role="separator"
+            aria-orientation="horizontal"
+            title="Drag to resize chart vs indicators"
+            onPointerDown={startResizeDrag(0)}
+            className="flex-shrink-0 cursor-row-resize touch-none group select-none"
             style={{ height: HANDLE_PX, background: BORDER }}
           >
-            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
+            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
           </div>
 
           {/* ── RSI pane ── */}
@@ -820,13 +841,16 @@ function PatternChartComponent({
             </div>
           </div>
 
-          {/* ── Drag handle 2 ── */}
+          {/* ── Drag handle: RSI ↔ Stoch ── */}
           <div
-            onMouseDown={startDrag(1)}
-            className="flex-shrink-0 cursor-row-resize group"
+            role="separator"
+            aria-orientation="horizontal"
+            title="Drag to resize RSI vs Stoch"
+            onPointerDown={startResizeDrag(1)}
+            className="flex-shrink-0 cursor-row-resize touch-none group select-none"
             style={{ height: HANDLE_PX, background: BORDER }}
           >
-            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors" />
+            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
           </div>
 
           {/* ── Stoch RSI pane ── */}

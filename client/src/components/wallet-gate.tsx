@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useWallet } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, ExternalLink, AlertCircle } from "lucide-react";
+import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, AlertCircle } from "lucide-react";
 
 const PUBLIC_PATHS = ["/pricing"];
 
@@ -80,6 +80,11 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
         {/* Connect section */}
         <div className="w-full space-y-3">
           <p className="text-sm font-medium text-foreground">Connect your wallet to get started</p>
+          <p className="text-xs text-muted-foreground text-left leading-relaxed">
+            Use a standard <strong>Ethereum (EVM)</strong> wallet (e.g. Rabby, MetaMask, Coinbase Wallet) — the same kind Hyperliquid supports.
+            You&apos;ll stay on Equilibrium; we don&apos;t send you to Hyperliquid&apos;s site. After connecting, you&apos;ll approve our{" "}
+            <strong>builder code</strong> once (in your wallet) before live trading.
+          </p>
 
           {connectError && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -151,19 +156,24 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
               )}
             </>
           ) : (
-            <div className="space-y-3">
-              <Button
-                onClick={() => window.open("https://metamask.io/download/", "_blank")}
-                className="w-full h-12 gap-3 text-base font-semibold"
-                data-testid="button-install-metamask"
-              >
-                <ExternalLink className="h-5 w-5" />
-                Install MetaMask
-                <ArrowRight className="h-4 w-4 ml-auto" />
-              </Button>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="space-y-3 w-full">
+              <div className="rounded-xl border border-border/60 bg-card/60 p-4 text-left text-sm text-muted-foreground space-y-2">
+                <p className="font-medium text-foreground text-sm">No wallet detected</p>
+                <ul className="list-disc pl-4 space-y-1.5 text-xs leading-relaxed">
+                  <li>
+                    Install <strong>Rabby</strong> or <strong>MetaMask</strong> from your browser&apos;s extension store (Chrome, Edge, Firefox, Brave).
+                  </li>
+                  <li>
+                    On mobile, open this page inside your wallet app&apos;s browser, or use the &quot;Open in Rabby / MetaMask&quot; options when shown.
+                  </li>
+                  <li>
+                    Everything after that happens here — connect, approve builder access, then trade. No Hyperliquid website redirect.
+                  </li>
+                </ul>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground justify-center">
                 <Monitor className="h-3.5 w-3.5" />
-                <span>Or open this site in your wallet's browser</span>
+                <span>Desktop extension or phone wallet browser</span>
                 <Smartphone className="h-3.5 w-3.5" />
               </div>
             </div>

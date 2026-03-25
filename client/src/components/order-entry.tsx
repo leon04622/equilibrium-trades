@@ -38,7 +38,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const isSpot = isSpotCoin(coin);
 
   const { balance, refreshAccount, placeTPSL } = useTrading();
-  const { isConnected, signer, connect } = useWallet();
+  const { isConnected, signer, connect, builderCodeApproved, isCheckingApproval } = useWallet();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -77,6 +77,19 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
 
     if (!signer) {
       toast({ title: "Wallet not ready", description: "Please connect your wallet first.", variant: "destructive" });
+      return;
+    }
+
+    if (isCheckingApproval) {
+      toast({ title: "One moment", description: "Checking your account setup…" });
+      return;
+    }
+    if (!builderCodeApproved) {
+      toast({
+        title: "Builder approval required",
+        description: "Approve the Equilibrium builder message in the dialog to trade on Hyperliquid through this platform.",
+        variant: "destructive",
+      });
       return;
     }
 

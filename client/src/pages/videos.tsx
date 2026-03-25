@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useUpload } from "@/hooks/use-upload";
 import { useWallet } from "@/lib/wallet-context";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { SubscriptionGate } from "@/components/subscription-gate";
 import type { TutorialVideo } from "@shared/schema";
 
@@ -474,18 +475,7 @@ function VideosContent() {
   const [playingVideo, setPlayingVideo] = useState<TutorialVideo | null>(null);
   const { toast } = useToast();
   const { address } = useWallet();
-
-  const { data: isAdminData } = useQuery<{ isAdmin: boolean }>({
-    queryKey: ["/api/admin/check", address],
-    queryFn: async () => {
-      if (!address) return { isAdmin: false };
-      const res = await fetch(`/api/admin/check/${address}`);
-      return res.json();
-    },
-    enabled: !!address,
-  });
-
-  const isAdmin = isAdminData?.isAdmin ?? false;
+  const { isAdmin } = useIsAdmin();
 
   const { data: videos = [], isLoading } = useQuery<TutorialVideo[]>({
     queryKey: ["/api/videos"],
