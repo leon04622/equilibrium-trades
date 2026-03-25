@@ -19,6 +19,8 @@ import { usePaywall } from "@/lib/paywall-context";
 import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
+import { hasHyperliquidBuilderFeeApproved } from "@/lib/hyperliquid-client";
+import { isBuilderFeeConfigured } from "@/lib/hyperliquid-platform-config";
 import { cn } from "@/lib/utils";
 import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
 
@@ -88,12 +90,20 @@ export default function Trading({ visible = true }: TradingProps) {
   const { openPaywall } = usePaywall();
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
   const {
+    address: walletAddr,
     builderCodeApproved,
     isCheckingApproval: builderCheckLoading,
     hyperliquidSessionReady,
     isPreparingHyperliquidSession,
     prepareHyperliquidSession,
   } = useWallet();
+
+  const showBuilderFeeNudge =
+    Boolean(walletAddr) &&
+    builderCodeApproved &&
+    hyperliquidSessionReady &&
+    isBuilderFeeConfigured() &&
+    !hasHyperliquidBuilderFeeApproved(walletAddr!);
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
@@ -271,13 +281,13 @@ export default function Trading({ visible = true }: TradingProps) {
         isFullscreen && "hidden md:flex",
         isConnected &&
           !builderCheckLoading &&
-          (!builderCodeApproved || !hyperliquidSessionReady) &&
+          (!builderCodeApproved || !hyperliquidSessionReady || showBuilderFeeNudge) &&
           "pt-10 md:pt-10"
       )}>
         {isConnected && !builderCheckLoading && !builderCodeApproved && (
           <div className="absolute left-0 right-0 top-0 z-[60] flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/40 px-3 py-2 text-[11px] md:text-xs text-amber-200">
-            <span className="font-medium">Complete builder setup</span>
-            <span className="hidden sm:inline opacity-90">— Approve the dialog to trade. You stay on Equilibrium.</span>
+            <span className="font-medium">Sign in to Equilibrium</span>
+            <span className="hidden sm:inline opacity-90">— One wallet signature in the dialog (no gas). Required to trade.</span>
           </div>
         )}
         {isConnected &&
@@ -298,6 +308,26 @@ export default function Trading({ visible = true }: TradingProps) {
                 onClick={() => prepareHyperliquidSession()}
               >
                 {isPreparingHyperliquidSession ? "Waiting for wallet…" : "Continue in wallet"}
+              </Button>
+            </div>
+          )}
+        {isConnected &&
+          !builderCheckLoading &&
+          showBuilderFeeNudge && (
+            <div className="absolute left-0 right-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-violet-500/10 border-b border-violet-500/30 px-3 py-2 text-[11px] md:text-xs text-violet-100">
+              <span className="font-medium">Optional: approve builder fee</span>
+              <span className="hidden sm:inline opacity-90">
+                — Adds platform attribution on your Hyperliquid orders. You can trade without it.
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-7 text-[10px] md:text-xs shrink-0"
+                disabled={isPreparingHyperliquidSession}
+                onClick={() => prepareHyperliquidSession()}
+              >
+                {isPreparingHyperliquidSession ? "Wallet…" : "Approve in wallet"}
               </Button>
             </div>
           )}

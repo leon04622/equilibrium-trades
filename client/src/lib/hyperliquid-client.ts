@@ -118,6 +118,21 @@ function builderFeeApprovedKey(userAddress: string): string {
   return `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
 }
 
+/** True after the user completed Hyperliquid's EIP-712 approveBuilderFee for this wallet (stored locally). */
+export function hasHyperliquidBuilderFeeApproved(userAddress: string): boolean {
+  if (!isBuilderFeeConfigured()) return false;
+  try {
+    return localStorage.getItem(builderFeeApprovedKey(userAddress)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Attach HL order `builder` only when configured and the user has approved max fee on-chain (HL requirement). */
+function shouldAttachBuilderToOrders(userAddress: string): boolean {
+  return isBuilderFeeConfigured() && hasHyperliquidBuilderFeeApproved(userAddress);
+}
+
 /** Clear delegated Hyperliquid agent + local builder-fee flag (call on wallet disconnect). */
 export function clearHyperliquidTradingSession(walletAddress: string): void {
   try {
@@ -131,18 +146,11 @@ export function clearHyperliquidTradingSession(walletAddress: string): void {
 }
 
 /**
- * True when a stored HL API-style agent exists and (if builder fee is configured) the user has
- * approved max fee on Hyperliquid for this app. Used to skip redundant wallet prompts.
+ * True when a stored HL API-style agent exists (approveAgent completed).
+ * Builder fee approval is separate — see {@link hasHyperliquidBuilderFeeApproved}; it only affects order attribution.
  */
 export function isHyperliquidTradingSessionReady(walletAddress: string): boolean {
-  const agent = getStoredAgent(walletAddress);
-  if (!agent) return false;
-  if (!isBuilderFeeConfigured()) return true;
-  try {
-    return localStorage.getItem(builderFeeApprovedKey(walletAddress)) === "1";
-  } catch {
-    return false;
-  }
+  return !!getStoredAgent(walletAddress);
 }
 
 /**
@@ -191,17 +199,13 @@ export async function ensureHyperliquidTradingSession(
         if (feeResult === "ok") {
           localStorage.setItem(feeKey, "1");
         } else if (feeResult === "user_cancelled") {
-          return {
-            success: false,
-            error:
-              "You cancelled the Hyperliquid builder fee step in your wallet. Approve it once so routed orders can include the platform fee, then try again.",
-          };
+          console.warn(
+            "[Hyperliquid] User skipped builder fee approval — trading still works; platform fee on orders is omitted until approved.",
+          );
         } else {
-          return {
-            success: false,
-            error:
-              "Hyperliquid builder fee approval failed. Check your connection and try again.",
-          };
+          console.warn(
+            "[Hyperliquid] Builder fee approval failed — trading still works; retry from the trading banner when convenient.",
+          );
         }
       }
     }
@@ -813,9 +817,7 @@ export async function placeOrder(
       grouping: "na",
     };
 
-    // Include builder fee in every order so the platform earns on each trade
-    // (requires the user to have approved the builder fee via approveBuilderFee)
-    if (isBuilderFeeConfigured()) {
+    if (shouldAttachBuilderToOrders(signerAddress)) {
       action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
     }
 
@@ -1000,12 +1002,14 @@ export async function placeTriggerOrder(
       },
     };
 
+    const signerAddress = await signer.getAddress();
+
     const action: Record<string, unknown> = {
       type: "order",
       orders: [orderWire],
       grouping: "na",
     };
-    if (isBuilderFeeConfigured()) {
+    if (shouldAttachBuilderToOrders(signerAddress)) {
       action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
     }
 

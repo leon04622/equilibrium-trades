@@ -94,8 +94,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     }
     if (!builderCodeApproved) {
       toast({
-        title: "Builder approval required",
-        description: "Approve the Equilibrium builder message in the dialog to trade on Hyperliquid through this platform.",
+        title: "Sign in required",
+        description: "Complete the Equilibrium sign-in dialog (one signature, no gas), then try again.",
         variant: "destructive",
       });
       return;

@@ -11,15 +11,11 @@ import { apiRequest } from "@/lib/queryClient";
 import { getAddress } from "ethers";
 import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
 import { isUserRejectedWalletError, parseApiRequestError } from "@/lib/wallet-errors";
-import { ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
-import { ensureHyperliquidTradingSession } from "@/lib/hyperliquid-client";
-
 type OnboardingStep =
   | "idle"
   | "connecting"
   | "signing"
   | "registering"
-  | "hyperliquid"
   | "complete"
   | "error";
 
@@ -37,10 +33,8 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
     isConnecting,
     connect,
     signer,
-    provider,
-    chainId,
-    switchToArbitrum,
     refreshApprovalStatus,
+    confirmBuilderCodeApproved,
   } = useWallet();
   const [step, setStep] = useState<OnboardingStep>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +118,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
 
     const timestampMs = Date.now();
     const approvalMessage = buildEquilibriumBuilderApprovalMessage(normalizedAddress, timestampMs);
-    let phase: "equilibrium" | "api" | "hyperliquid" = "equilibrium";
+    let phase: "equilibrium" | "api" = "equilibrium";
 
     try {
       phase = "equilibrium";
@@ -167,48 +161,14 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
         return;
       }
 
-      await refreshApprovalStatus();
-
-      if (provider && chainId !== null && chainId !== ARBITRUM_CHAIN_ID) {
-        try {
-          await switchToArbitrum();
-        } catch {
-          throw new Error(
-            "Switch to Arbitrum One (chain 42161) in your wallet for Hyperliquid setup, then try again.",
-          );
-        }
-        const net = await provider.getNetwork();
-        if (Number(net.chainId) !== ARBITRUM_CHAIN_ID) {
-          throw new Error(
-            "Wrong network: Hyperliquid setup needs Arbitrum One (42161). Switch in your wallet and try again.",
-          );
-        }
-      }
-
-      setStep("hyperliquid");
-      phase = "hyperliquid";
-      const hl = await ensureHyperliquidTradingSession(signer);
-      if (!hl.success) {
-        setError(
-          hl.error ||
-            "Hyperliquid setup did not finish. Approve the wallet prompts, then continue from the trading page banner if needed.",
-        );
-        setStep("idle");
-        toast({
-          title: "Hyperliquid setup incomplete",
-          description: hl.error || "Approve the Hyperliquid prompts in your wallet and try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
+      confirmBuilderCodeApproved();
       await refreshApprovalStatus();
       setIsApproved(true);
       setStep("complete");
 
       toast({
         title: "Account ready",
-        description: "You're set up. Redirecting to trading…",
+        description: "Complete Hyperliquid setup from the trading page when you place your first order.",
       });
 
       if (onComplete) {
@@ -227,13 +187,6 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
         toast({ title: "Verification failed", description: msg, variant: "destructive" });
         return;
       }
-      if (phase === "hyperliquid") {
-        const msg = err instanceof Error ? err.message : "Hyperliquid setup failed.";
-        setError(msg);
-        setStep("idle");
-        toast({ title: "Error", description: msg, variant: "destructive" });
-        return;
-      }
       const msg = err instanceof Error ? err.message : "Failed to complete onboarding";
       setError(msg);
       setStep("error");
@@ -249,8 +202,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
     switch (step) {
       case "connecting": return 33;
       case "signing": return 66;
-      case "registering": return 82;
-      case "hyperliquid": return 94;
+      case "registering": return 90;
       case "complete": return 100;
       default: return 0;
     }
@@ -261,7 +213,6 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
       case "connecting": return "Connecting wallet...";
       case "signing": return "Awaiting signature approval...";
       case "registering": return "Creating your account...";
-      case "hyperliquid": return "Hyperliquid session (one-time wallet prompts)...";
       case "complete": return "Account ready!";
       default: return "";
     }
@@ -387,12 +338,11 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
               )}
             </div>
             <div className="flex-1">
-              <h4 className="font-medium">Approve Builder Code</h4>
+              <h4 className="font-medium">Verify wallet</h4>
               <p className="text-sm text-muted-foreground">
-                {step === "complete" 
-                  ? "Builder code approved"
-                  : "Sign to authorize Equilibrium trading"
-                }
+                {step === "complete"
+                  ? "Signed in — Hyperliquid setup happens when you trade"
+                  : "Sign once to create your Equilibrium account"}
               </p>
             </div>
           </div>

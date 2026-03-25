@@ -36,6 +36,8 @@ interface WalletContextType {
   disconnect: () => void;
   switchToArbitrum: () => Promise<void>;
   refreshApprovalStatus: () => Promise<void>;
+  /** Call right after POST /approve-builder-code succeeds so UI unlocks before the next GET round-trip. */
+  confirmBuilderCodeApproved: () => void;
   openInWalletBrowser: (walletType: WalletType) => void;
 }
 
@@ -259,6 +261,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, [rebuildDetectedWallets]);
 
+  const confirmBuilderCodeApproved = useCallback(() => {
+    setBuilderCodeApproved(true);
+  }, []);
+
   const refreshApprovalStatus = useCallback(async () => {
     if (!address) {
       setBuilderCodeApproved(false);
@@ -334,8 +340,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [signer, address]);
 
   // Do NOT auto-open Hyperliquid wallet prompts here — that caused blank screens / frozen tabs for some
-  // users right after login. HL session is completed in BuilderCodeModal, onboarding, the trading banner,
-  // or the first order via prepareHyperliquidSession.
+  // users right after login. HL session (agent + optional builder fee) runs from the trading banner or first order.
   useEffect(() => {
     if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;
     if (!isHyperliquidTradingSessionReady(address)) return;
@@ -626,6 +631,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       disconnect,
       switchToArbitrum,
       refreshApprovalStatus,
+      confirmBuilderCodeApproved,
       openInWalletBrowser,
     }}>
       {children}
