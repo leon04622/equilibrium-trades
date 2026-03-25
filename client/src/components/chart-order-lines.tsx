@@ -40,6 +40,12 @@ const HL_SL = "#f6465d";
 const HL_TP_DIM = "rgba(14, 203, 129, 0.45)";
 const HL_SL_DIM = "rgba(246, 70, 93, 0.45)";
 
+/** Right strip for labels — matches ~lightweight-charts price scale so lines read like TV/HL. */
+const HL_GUTTER_PX = 60;
+
+/** TV-style panel behind order tags (Hyperliquid dark chart UI). */
+const HL_TAG_BG = "rgba(19, 23, 34, 0.96)";
+
 /** Snap to sensible price increments (Hyperliquid-style tick by magnitude). */
 function snapOrderPrice(price: number, refPrice: number): number {
   if (!Number.isFinite(price) || price <= 0) return price;
@@ -112,6 +118,9 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   const dragPriceRef = useRef<number | null>(null);
   const draggingRef = useRef<null | "tp" | "sl">(null);
   draggingRef.current = dragging;
+  /** Price when drag started (skip API if unchanged — HL-style no-op release). */
+  const dragStartPriceRef = useRef<number | null>(null);
+  const dragFromGhostRef = useRef(false);
 
   useEffect(() => {
     onDraggingChange?.(!!dragging);
@@ -125,6 +134,20 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     };
     document.addEventListener("wheel", blockWheel, { passive: false, capture: true });
     return () => document.removeEventListener("wheel", blockWheel, { capture: true });
+  }, [dragging]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      dragPriceRef.current = null;
+      dragStartPriceRef.current = null;
+      dragFromGhostRef.current = false;
+      setDragging(null);
+      setDragPrice(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [dragging]);
 
   useEffect(() => {
@@ -167,6 +190,16 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
 
       const pos = positions.find(p => p.coin === coin);
       if (!pos) return;
+
+      const fromGhost = dragFromGhostRef.current;
+      dragFromGhostRef.current = false;
+      const startP = dragStartPriceRef.current;
+      dragStartPriceRef.current = null;
+      if (!fromGhost && startP != null) {
+        const a = snapOrderPrice(startP, currentPrice);
+        const b = snapOrderPrice(finalPrice, currentPrice);
+        if (a === b) return;
+      }
 
       const isLong = pos.side === "long";
       const tp = finalDragging === "tp" ? finalPrice : (tpPrice ?? undefined);
@@ -312,6 +345,17 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     rowZ?: number;
   }
 
+  const beginTpslDrag = useCallback((e: React.PointerEvent, line: LineConfig) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragPriceRef.current = null;
+    dragStartPriceRef.current = line.price;
+    dragFromGhostRef.current = !!line.isGhost;
+    setDragging(line.editType!);
+  }, []);
+
   const lines: LineConfig[] = [];
 
   lines.push({
@@ -432,18 +476,43 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
         const previewColor = dragging === "tp" ? HL_TP : HL_SL;
         return (
           <div
-            className="absolute left-0 right-0 pointer-events-none"
+            className="absolute inset-x-0 pointer-events-none"
             style={{ top: `${yPct}%`, transform: "translateY(-50%)", zIndex: 50 }}
           >
             <div
-              className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px"
-              style={{ backgroundColor: previewColor, opacity: 0.95 }}
+              className="absolute left-0 top-1/2 -translate-y-1/2 h-px"
+              style={{
+                right: HL_GUTTER_PX,
+                backgroundColor: previewColor,
+                opacity: 0.95,
+                boxShadow: `0 0 6px ${previewColor}33`,
+              }}
             />
             <div
-              className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold tabular-nums shadow-md border border-white/10"
-              style={{ background: "rgba(10, 14, 22, 0.92)", color: previewColor }}
+              className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
+              style={{
+                right: HL_GUTTER_PX - 3,
+                width: 6,
+                height: 6,
+                backgroundColor: previewColor,
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
+              }}
+            />
+            <div
+              className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-end gap-1 px-1 py-0.5 font-mono tabular-nums border-y border-r border-white/[0.08] rounded-r-sm rounded-l-none"
+              style={{
+                width: HL_GUTTER_PX,
+                minHeight: 22,
+                background: HL_TAG_BG,
+                borderLeft: `2px solid ${previewColor}`,
+              }}
             >
-              {dragging === "tp" ? "TP" : "SL"} {fmt(dragPrice)}
+              <span className="text-[9px] uppercase leading-none opacity-75" style={{ color: previewColor }}>
+                {dragging === "tp" ? "TP" : "SL"}
+              </span>
+              <span className="text-[11px] font-semibold leading-none truncate" style={{ color: previewColor }}>
+                {fmt(dragPrice)}
+              </span>
             </div>
           </div>
         );
@@ -467,67 +536,98 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                 : { top: `${yPct}%`, transform: "translateY(-50%)", zIndex: z }
             }
           >
-            {/* Full-width price line (solid on HL-like active TP/SL, dashed for ghosts / entry / liq) */}
-            <div
-              className={cn(
-                "absolute left-0 right-0 pointer-events-none top-1/2 -translate-y-1/2",
-                line.dashed ? "h-0 border-t" : "h-px"
-              )}
-              style={
-                line.dashed
-                  ? {
-                      borderTopWidth: 1,
-                      borderTopStyle: "dashed",
-                      borderTopColor: line.lineColor,
-                      opacity: line.isGhost ? 0.5 : 0.72,
-                    }
-                  : {
-                      backgroundColor: line.lineColor,
-                      opacity: line.isGhost ? 0.55 : 0.9,
-                    }
-              }
-            />
+            {/* Price line: TP/SL stop before right gutter (TV/HL); entry/liq span full width. */}
+            {useDragBand ? (
+              <div
+                className="absolute left-0 pointer-events-none top-1/2 -translate-y-1/2"
+                style={
+                  line.dashed
+                    ? {
+                        right: HL_GUTTER_PX,
+                        height: 0,
+                        borderTopWidth: 1,
+                        borderTopStyle: "dashed",
+                        borderTopColor: line.lineColor,
+                        opacity: line.isGhost ? 0.55 : 0.8,
+                      }
+                    : {
+                        right: HL_GUTTER_PX,
+                        height: 1,
+                        backgroundColor: line.lineColor,
+                        opacity: line.isGhost ? 0.6 : 0.92,
+                        boxShadow: line.isGhost ? undefined : `0 0 5px ${line.lineColor}2a`,
+                      }
+                }
+              />
+            ) : (
+              <div
+                className={cn(
+                  "absolute left-0 right-0 pointer-events-none top-1/2 -translate-y-1/2",
+                  line.dashed ? "h-0 border-t" : "h-px"
+                )}
+                style={
+                  line.dashed
+                    ? {
+                        borderTopWidth: 1,
+                        borderTopStyle: "dashed",
+                        borderTopColor: line.lineColor,
+                        opacity: line.isGhost ? 0.5 : 0.72,
+                      }
+                    : {
+                        backgroundColor: line.lineColor,
+                        opacity: line.isGhost ? 0.55 : 0.9,
+                      }
+                }
+              />
+            )}
 
-            {/* Full-height hit band for TP/SL — parent has real 44px height so drags register */}
             {useDragBand && (
               <div
-                className="absolute inset-0 touch-none"
-                style={{ cursor: "ns-resize", pointerEvents: "auto", touchAction: "none" }}
-                title="Drag to move TP/SL"
-                onPointerDown={(e) => {
-                  if (e.button !== 0 && e.pointerType === "mouse") return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dragPriceRef.current = null;
-                  setDragging(line.editType!);
+                className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
+                style={{
+                  right: HL_GUTTER_PX - 3,
+                  width: 6,
+                  height: 6,
+                  backgroundColor: line.dashed ? line.lineColor : line.lineColor,
+                  opacity: line.isGhost ? 0.65 : 1,
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
                 }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dragPriceRef.current = null;
-                  setDragging(line.editType!);
+              />
+            )}
+
+            {/* Chart-area strip; right tag also starts drag (Hyperliquid-style). */}
+            {useDragBand && (
+              <div
+                className="absolute left-0 top-0 bottom-0 touch-none"
+                style={{
+                  right: HL_GUTTER_PX,
+                  cursor: "ns-resize",
+                  pointerEvents: "auto",
+                  touchAction: "none",
+                  zIndex: z + 2,
                 }}
-                onTouchStart={(e) => {
-                  e.preventDefault();
-                  dragPriceRef.current = null;
-                  setDragging(line.editType!);
-                }}
+                title="Drag to move · double-click tag to edit · Esc to cancel"
+                onPointerDown={(e) => beginTpslDrag(e, line)}
                 data-testid={`drag-handle-${line.key}`}
               />
             )}
 
             {line.labelSide === "right" ? (
               <div
-                className="absolute right-1 flex flex-col items-end justify-center gap-0"
+                className="absolute right-0 flex flex-col items-stretch justify-center"
                 style={{
                   top: useDragBand ? "50%" : undefined,
-                  transform: useDragBand ? "translateY(-50%)" : "translateY(-50%)",
+                  transform: "translateY(-50%)",
+                  width: HL_GUTTER_PX,
                   pointerEvents: "auto",
                   zIndex: z + 4,
                 }}
               >
                 {isEditing ? (
-                  <div className="flex items-center gap-1 px-2 py-1 rounded border border-white/20 shadow-lg bg-[rgba(10,14,22,0.95)]">
+                  <div
+                    className="flex flex-col gap-1 p-1 border border-white/20 rounded-sm shadow-lg"
+                    style={{ background: HL_TAG_BG }}
+                  >
                     <input
                       ref={inputRef}
                       type="number"
@@ -538,74 +638,109 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                         if (e.key === "Escape") cancelEdit();
                       }}
                       className={cn(
-                        "w-24 bg-transparent text-[11px] font-mono font-semibold outline-none tabular-nums",
+                        "w-full min-w-0 bg-transparent text-[11px] font-mono font-semibold outline-none tabular-nums px-0.5",
                         line.color
                       )}
                       disabled={isSubmitting}
                       data-testid={`edit-input-${line.key}`}
                     />
-                    <button
-                      type="button"
-                      onClick={confirmEdit}
-                      disabled={isSubmitting}
-                      className="text-[#0ecb81] hover:opacity-90 transition-opacity disabled:opacity-40"
-                      data-testid={`confirm-edit-${line.key}`}
-                    >
-                      <Check className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      className="text-white/50 hover:text-white/80 transition-colors"
-                      data-testid={`cancel-edit-${line.key}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    className={cn(
-                      "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold tabular-nums select-none",
-                      "border shadow-md bg-[rgba(10,14,22,0.92)]",
-                      line.isGhost ? "border-dashed border-white/20" : "border-white/10",
-                    )}
-                  >
-                    <div className="flex flex-col items-end leading-tight">
-                      <span className={cn("uppercase tracking-wide text-[9px]", line.color)}>
-                        {line.label}
-                      </span>
-                      <span className={cn("text-[11px] tabular-nums", line.color)}>
-                        {fmt(line.price)}
-                      </span>
-                      {line.isGhost && (
-                        <span className="text-[8px] font-normal text-white/35 normal-case tracking-normal">
-                          drag to place
-                        </span>
-                      )}
-                      {!line.isGhost && (
-                        <span className="text-[9px] text-white/40 font-normal">{line.sizeLabel}</span>
-                      )}
-                    </div>
-                    {line.canEdit && !line.isGhost && (
+                    <div className="flex justify-end gap-0.5">
                       <button
                         type="button"
-                        className="opacity-50 hover:opacity-100 transition-opacity p-0.5 text-white/70"
-                        onClick={() => startEdit(line.editType!)}
-                        data-testid={`edit-${line.key}`}
+                        onClick={confirmEdit}
+                        disabled={isSubmitting}
+                        className="text-[#0ecb81] hover:opacity-90 p-0.5 disabled:opacity-40"
+                        data-testid={`confirm-edit-${line.key}`}
                       >
-                        <Pencil className="h-3 w-3" />
+                        <Check className="h-3 w-3" />
                       </button>
-                    )}
-                    {line.canCancel && (
                       <button
                         type="button"
-                        className="opacity-50 hover:opacity-100 transition-opacity p-0.5 text-white/70"
-                        onClick={() => handleCancel(line.cancelType!)}
-                        data-testid={`cancel-${line.key}`}
+                        onClick={cancelEdit}
+                        className="text-white/50 hover:text-white/80 p-0.5"
+                        data-testid={`cancel-edit-${line.key}`}
                       >
                         <X className="h-3 w-3" />
                       </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      "group flex items-center justify-between gap-0.5 pl-1 pr-0.5 py-0.5 font-mono tabular-nums select-none touch-none",
+                      "border-y border-r border-white/[0.08] rounded-r-sm rounded-l-none",
+                      line.isGhost && "border-dashed",
                     )}
+                    style={{
+                      minHeight: 22,
+                      background: HL_TAG_BG,
+                      borderLeft: `2px solid ${line.lineColor}`,
+                      borderLeftStyle: line.isGhost ? "dashed" : "solid",
+                      cursor: "ns-resize",
+                      touchAction: "none",
+                    }}
+                    title="Drag · double-click to edit price"
+                    onPointerDown={(e) => beginTpslDrag(e, line)}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!line.isGhost && line.canEdit) startEdit(line.editType!);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !line.isGhost && line.canEdit) startEdit(line.editType!);
+                    }}
+                  >
+                    <div className="flex flex-col items-end leading-tight min-w-0 flex-1 overflow-hidden">
+                      <div className="flex items-baseline gap-1 justify-end w-full">
+                        <span className={cn("text-[9px] uppercase leading-none shrink-0 opacity-80", line.color)}>
+                          {line.label}
+                        </span>
+                        <span className={cn("text-[11px] font-semibold leading-none truncate", line.color)}>
+                          {fmt(line.price)}
+                        </span>
+                      </div>
+                      {line.isGhost ? (
+                        <span className="text-[7px] leading-tight text-white/30 normal-case text-right w-full">
+                          drag
+                        </span>
+                      ) : (
+                        <span className="text-[8px] text-white/35 font-normal truncate text-right w-full">
+                          {line.sizeLabel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-center shrink-0 gap-0">
+                      {line.canEdit && !line.isGhost && (
+                        <button
+                          type="button"
+                          data-tpsl-chip
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0 text-white/55 hover:text-white/90 cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEdit(line.editType!);
+                          }}
+                          data-testid={`edit-${line.key}`}
+                        >
+                          <Pencil className="h-2.5 w-2.5" />
+                        </button>
+                      )}
+                      {line.canCancel && (
+                        <button
+                          type="button"
+                          data-tpsl-chip
+                          className="opacity-70 hover:opacity-100 p-0 text-white/55 hover:text-red-400/90 cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancel(line.cancelType!);
+                          }}
+                          data-testid={`cancel-${line.key}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
