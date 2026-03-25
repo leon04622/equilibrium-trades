@@ -620,10 +620,10 @@ function PatternChartComponent({
 
     const series = candleSeriesRef.current;
 
-    positionLineRefs.current.forEach(line => {
+    priceLineRefs.current.forEach(line => {
       try { series.removePriceLine(line); } catch (e) {}
     });
-    positionLineRefs.current = [];
+    priceLineRefs.current = [];
 
     const position = positions.find(p => p.coin === coin);
     if (!position) return;
@@ -638,7 +638,7 @@ function PatternChartComponent({
       axisLabelVisible: true,
       title: "Entry",
     });
-    positionLineRefs.current.push(entryLine);
+    priceLineRefs.current.push(entryLine);
 
     if (position.liquidationPrice && position.liquidationPrice > 0) {
       const liqLine = series.createPriceLine({
@@ -649,7 +649,7 @@ function PatternChartComponent({
         axisLabelVisible: true,
         title: "Liq",
       });
-      positionLineRefs.current.push(liqLine);
+      priceLineRefs.current.push(liqLine);
     }
 
     for (const order of coinOrders) {
@@ -668,7 +668,7 @@ function PatternChartComponent({
         axisLabelVisible: true,
         title: isTP ? "TP" : "SL",
       });
-      positionLineRefs.current.push(orderLine);
+      priceLineRefs.current.push(orderLine);
     }
   }, [positions, openOrders, coin]);
 
