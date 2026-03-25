@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
+import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
 interface EducationalPatternSignal {
   id: string;
@@ -162,8 +163,17 @@ function PatternChartComponent({
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochKSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const priceLineRefs = useRef<IPriceLine[]>([]);
   const isSyncingRef = useRef(false);
+
+  /** Native canvas TP/SL (and ghost) — updated live while dragging via applyOptions. */
+  const tpslLineRefs = useRef<{
+    tp: IPriceLine | null;
+    sl: IPriceLine | null;
+    ghostTp: IPriceLine | null;
+    ghostSl: IPriceLine | null;
+  }>({ tp: null, sl: null, ghostTp: null, ghostSl: null });
+  const tpslDraggingRef = useRef(false);
+  tpslDraggingRef.current = tpslDragging;
 
   // Tracking state for smart setData vs update()
   // Key combines coin + interval so any change to either triggers a full reload
@@ -175,6 +185,8 @@ function PatternChartComponent({
   // when candles/coin/interval haven't changed, so the fresh chart always gets populated.
   const [chartVersion, setChartVersion] = useState(0);
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
+  /** Bumps on throttled chart interaction so TP/SL overlay re-reads priceToCoordinate after Y-scale changes. */
+  const [chartLayoutTick, setChartLayoutTick] = useState(0);
 
   // Y must be relative to the candlestick pane (LW v5 multi-pane / volume subplot).
   const coordinateToPrice = useCallback((clientY: number): number | null => {
@@ -190,6 +202,31 @@ function PatternChartComponent({
       return price !== null && price !== undefined ? Number(price) : null;
     } catch {
       return null;
+    }
+  }, []);
+
+  /** Pixel Y from price — must match candlestick series mapping (LW v5). */
+  const priceToCoordinate = useCallback((price: number): number | null => {
+    try {
+      const series = candleSeriesRef.current;
+      if (!series) return null;
+      const c = series.priceToCoordinate(price);
+      if (c === null || c === undefined) return null;
+      const n = Number(c);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const onTpslDragVisual = useCallback((kind: "tp" | "sl", price: number) => {
+    const r = tpslLineRefs.current;
+    if (kind === "tp") {
+      if (r.tp) r.tp.applyOptions({ price });
+      else r.ghostTp?.applyOptions({ price });
+    } else {
+      if (r.sl) r.sl.applyOptions({ price });
+      else r.ghostSl?.applyOptions({ price });
     }
   }, []);
 
@@ -250,6 +287,7 @@ function PatternChartComponent({
     typeof val === "string" ? parseFloat(val) : val, []);
 
   const onTpslDraggingChange = useCallback((dragging: boolean) => {
+    tpslDraggingRef.current = dragging;
     setTpslDragging(dragging);
   }, []);
 
@@ -405,6 +443,35 @@ function PatternChartComponent({
       } catch (_) {}
     });
 
+    // LW v5 has no price-scale visible-range subscription; refresh Y-range when series data changes
+    // (time-axis + resize observers already call syncVisiblePriceRange).
+    const onSeriesData = () => syncVisiblePriceRange();
+    candleSeries.subscribeDataChanged(onSeriesData);
+    cleanups.push(() => {
+      try {
+        candleSeries.unsubscribeDataChanged(onSeriesData);
+      } catch {
+        /* disposed */
+      }
+    });
+
+    let layoutThrottle = 0;
+    const onCrosshairLayout = () => {
+      syncVisiblePriceRange();
+      const now = Date.now();
+      if (now - layoutThrottle < 48) return;
+      layoutThrottle = now;
+      setChartLayoutTick((t) => t + 1);
+    };
+    mainChart.subscribeCrosshairMove(onCrosshairLayout);
+    cleanups.push(() => {
+      try {
+        mainChart.unsubscribeCrosshairMove(onCrosshairLayout);
+      } catch {
+        /* disposed */
+      }
+    });
+
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
       const indOpts = {
         ...chartOpts,
@@ -490,7 +557,7 @@ function PatternChartComponent({
       sma200SeriesRef.current = null;
       volumeSeriesRef.current = null;
       volumeSmaSeriesRef.current = null;
-      priceLineRefs.current = [];
+      tpslLineRefs.current = { tp: null, sl: null, ghostTp: null, ghostSl: null };
       chartDataReadyRef.current = false;
       // Reset prevDataKeyRef so the next data effect treats incoming candles as a key change
       prevDataKeyRef.current = "";
@@ -672,48 +739,87 @@ function PatternChartComponent({
     }
   }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
 
-  // TP/SL/Entry/Liq lines are rendered by <ChartOrderLines> as an interactive overlay.
-  // The native createPriceLine() approach has been replaced to avoid double lines and to
-  // enable inline editing and drag-to-update functionality.
+  // Entry / Liq: HTML overlay in ChartOrderLines (labels + PnL). TP / SL: native createPriceLine
+  // on the candlestick series (HL-style horizontal rules) + overlay for drag / tags only.
 
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
-
     const series = candleSeriesRef.current;
+    if (!series) return;
 
-    priceLineRefs.current.forEach(line => {
-      try { series.removePriceLine(line); } catch (e) {}
-    });
-    priceLineRefs.current = [];
+    if (tpslDraggingRef.current) return;
 
-    const position = positions.find(p => p.coin === coin);
+    const removeKey = (key: "tp" | "sl" | "ghostTp" | "ghostSl") => {
+      const line = tpslLineRefs.current[key];
+      if (line) {
+        try {
+          series.removePriceLine(line);
+        } catch {
+          /* disposed */
+        }
+        tpslLineRefs.current[key] = null;
+      }
+    };
+
+    (["tp", "sl", "ghostTp", "ghostSl"] as const).forEach(removeKey);
+
+    const position = positions.find((p) => p.coin === coin);
     if (!position) return;
 
-    const entryLine = series.createPriceLine({
-      price: position.entryPrice,
-      color: "#60a5fa",
-      lineWidth: 1,
-      lineStyle: 0,
-      axisLabelVisible: true,
-      title: "Entry",
-    });
-    priceLineRefs.current.push(entryLine);
+    const { tpPrice, slPrice } = selectTpSlOrders(coin, position, openOrders);
+    const markPx = position.markPrice || currentPrice || position.entryPrice;
+    const isLong = position.side === "long";
+    const { ghostTp, ghostSl } = ghostTpslPrices(
+      position.entryPrice,
+      markPx,
+      isLong,
+      tpPrice != null,
+      slPrice != null,
+    );
 
-    if (position.liquidationPrice && position.liquidationPrice > 0) {
-      const liqLine = series.createPriceLine({
-        price: position.liquidationPrice,
-        color: "#f97316",
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "Liq",
+    const HL_TP = "#0ecb81";
+    const HL_SL = "#f6465d";
+
+    if (tpPrice != null) {
+      tpslLineRefs.current.tp = series.createPriceLine({
+        price: tpPrice,
+        color: HL_TP,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: false,
       });
-      priceLineRefs.current.push(liqLine);
+    } else if (ghostTp != null) {
+      tpslLineRefs.current.ghostTp = series.createPriceLine({
+        price: ghostTp,
+        color: "rgba(14, 203, 129, 0.5)",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: false,
+      });
     }
 
-    // TP/SL are NOT drawn on the canvas — only on <ChartOrderLines> so drag/edit hit-tests work.
-    // Native price lines sat on the series and stole pointer events from the HTML overlay.
-  }, [positions, coin]);
+    if (slPrice != null) {
+      tpslLineRefs.current.sl = series.createPriceLine({
+        price: slPrice,
+        color: HL_SL,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: false,
+      });
+    } else if (ghostSl != null) {
+      tpslLineRefs.current.ghostSl = series.createPriceLine({
+        price: ghostSl,
+        color: "rgba(246, 70, 93, 0.5)",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: false,
+      });
+    }
+
+    return () => {
+      if (tpslDraggingRef.current) return;
+      (["tp", "sl", "ghostTp", "ghostSl"] as const).forEach(removeKey);
+    };
+  }, [positions, openOrders, coin, currentPrice, chartVersion]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -722,13 +828,20 @@ function PatternChartComponent({
     <div ref={outerRef} className={`flex flex-col overflow-hidden ${className}`} style={{ background: BG }}>
 
       {/* ── Main chart pane ── */}
-      <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative isolate overflow-hidden">
+      <div
+        style={{ flexGrow: weights[0], minHeight: 100 }}
+        className="relative isolate overflow-hidden"
+        data-chart-layout-tick={chartLayoutTick}
+      >
         <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
         <ChartOrderLines
           coin={coin}
           currentPrice={currentPrice ?? 0}
           visiblePriceRange={visiblePriceRange}
           coordinateToPrice={coordinateToPrice}
+          priceToCoordinate={priceToCoordinate}
+          nativeTpslLines
+          onTpslDragVisual={onTpslDragVisual}
           onDraggingChange={onTpslDraggingChange}
         />
 

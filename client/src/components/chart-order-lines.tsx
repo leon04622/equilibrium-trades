@@ -1,20 +1,27 @@
 /**
- * Interactive TP/SL overlay aligned to lightweight-charts v5 via candlestick series coordinateToPrice.
- * Native createPriceLine() is not used for TP/SL — those lines sit on the canvas and intercept pointer events,
- * which breaks drag. Entry/Liq remain as canvas price lines in pattern-chart.tsx.
+ * TP/SL interaction layer over lightweight-charts v5.
+ * Horizontal rules use series.createPriceLine() on the candlestick series (pattern-chart);
+ * this overlay provides drag bands, right-side tags (HL-style), and uses coordinateToPrice /
+ * priceToCoordinate for pixel-accurate mapping — no linear price↔Y approximation when the chart API is available.
  */
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import { useTrading } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { X, Pencil, Check } from "lucide-react";
+import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
 interface ChartOrderLinesProps {
   coin: string;
   currentPrice: number;
   visiblePriceRange?: { min: number; max: number } | null;
   coordinateToPrice?: (clientY: number) => number | null;
-  /** Notifies parent so the chart can disable pan/zoom while dragging TP/SL (Hyperliquid-like). */
+  /** Candlestick series priceToCoordinate — positions overlay rows to match canvas lines. */
+  priceToCoordinate?: (price: number) => number | null;
+  /** When true, TP/SL horizontal lines are drawn on canvas; overlay only handles drag + tags. */
+  nativeTpslLines?: boolean;
+  /** Live-update native IPriceLine while dragging. */
+  onTpslDragVisual?: (kind: "tp" | "sl", price: number) => void;
   onDraggingChange?: (dragging: boolean) => void;
 }
 
@@ -26,7 +33,6 @@ function fmt(p: number): string {
   return p.toFixed(4);
 }
 
-/** Label text like Hyperliquid: "TP: $12,345.6" */
 function fmtUsdLabel(prefix: "TP" | "SL", p: number): string {
   return `${prefix}: $${fmt(p)}`;
 }
@@ -44,19 +50,11 @@ function fmtPnl(pnl: number): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
-/** Line colors aligned with Hyperliquid / TradingView perp chart (green TP, red SL). */
 const HL_TP = "#0ecb81";
 const HL_SL = "#f6465d";
-const HL_TP_DIM = "rgba(14, 203, 129, 0.45)";
-const HL_SL_DIM = "rgba(246, 70, 93, 0.45)";
-
-/** Right strip for labels — matches ~lightweight-charts price scale so lines read like TV/HL. */
 const HL_GUTTER_PX = 72;
-
-/** TV-style panel behind order tags (Hyperliquid dark chart UI). */
 const HL_TAG_BG = "rgba(19, 23, 34, 0.96)";
 
-/** Snap to sensible price increments (Hyperliquid-style tick by magnitude). */
 function snapOrderPrice(price: number, refPrice: number): number {
   if (!Number.isFinite(price) || price <= 0) return price;
   const r = refPrice > 0 ? refPrice : price;
@@ -86,7 +84,6 @@ function tickSize(refPrice: number): number {
   return 0.0000001;
 }
 
-/** Keep dragged TP/SL inside visible scale + valid side of entry / mark (HL rules). */
 function clampTpslDragPrice(
   kind: "tp" | "sl",
   price: number,
@@ -95,7 +92,7 @@ function clampTpslDragPrice(
   mark: number,
   refPrice: number,
   visMin: number | null,
-  visMax: number | null
+  visMax: number | null,
 ): number {
   let p = snapOrderPrice(price, refPrice);
   const tick = tickSize(refPrice || entry || mark);
@@ -129,7 +126,34 @@ function clampTpslDragPrice(
   return p;
 }
 
-export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordinateToPrice, onDraggingChange }: ChartOrderLinesProps) {
+type LineLayout =
+  | { mode: "px"; y: number }
+  | { mode: "pct"; pct: number };
+
+function layoutForPrice(
+  price: number,
+  priceToCoordinate: ((p: number) => number | null) | undefined,
+  effMin: number,
+  effMax: number,
+): LineLayout {
+  if (priceToCoordinate) {
+    const y = priceToCoordinate(price);
+    if (y !== null && Number.isFinite(y)) return { mode: "px", y };
+  }
+  const span = effMax - effMin || 1;
+  return { mode: "pct", pct: ((effMax - price) / span) * 100 };
+}
+
+export function ChartOrderLines({
+  coin,
+  currentPrice,
+  visiblePriceRange,
+  coordinateToPrice,
+  priceToCoordinate,
+  nativeTpslLines = false,
+  onTpslDragVisual,
+  onDraggingChange,
+}: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
   const [containerHeight, setContainerHeight] = useState(400);
@@ -157,26 +181,11 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     }
   }, [editMode]);
 
-  const position = useMemo(() => positions.find(p => p.coin === coin), [positions, coin]);
+  const position = useMemo(() => positions.find((p) => p.coin === coin), [positions, coin]);
 
-  const getOrderType = useCallback((order: any): "tp" | "sl" | "other" => {
-    if (!position) return "other";
-    const ot = (order.orderType || "").toLowerCase();
-    if (ot.includes("take profit") || ot === "take_profit") return "tp";
-    if (ot.includes("stop") || ot === "stop_loss") return "sl";
-    const trigPx = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    if (!trigPx || isNaN(trigPx)) return "other";
-    return position.side === "long"
-      ? trigPx > (position.entryPrice || currentPrice) ? "tp" : "sl"
-      : trigPx < (position.entryPrice || currentPrice) ? "tp" : "sl";
-  }, [position, currentPrice]);
-
-  const coinOrders = useMemo(() => openOrders.filter(o => o.coin === coin), [openOrders, coin]);
-  const tpOrder = useMemo(() => coinOrders.find(o => getOrderType(o) === "tp"), [coinOrders, getOrderType]);
-  const slOrder = useMemo(() => coinOrders.find(o => getOrderType(o) === "sl"), [coinOrders, getOrderType]);
-
-  const tpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
-  const slPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
+  const { tpOrder, slOrder, tpPrice, slPrice } = useMemo(() => {
+    return selectTpSlOrders(coin, position, openOrders);
+  }, [coin, position, openOrders]);
 
   const positionRef = useRef(position);
   positionRef.current = position;
@@ -194,23 +203,19 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   slPriceRef.current = slPrice;
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  const onTpslDragVisualRef = useRef(onTpslDragVisual);
+  onTpslDragVisualRef.current = onTpslDragVisual;
 
-  // Drag-to-update: track mouse while dragging a TP or SL line.
-  // Uses a ref for the live price so we don't re-subscribe on every mousemove.
   const dragPriceRef = useRef<number | null>(null);
   const draggingRef = useRef<null | "tp" | "sl">(null);
   draggingRef.current = dragging;
-  /** Price when drag started (skip API if unchanged — HL-style no-op release). */
   const dragStartPriceRef = useRef<number | null>(null);
   const dragFromGhostRef = useRef(false);
-  const dragRafRef = useRef<number | null>(null);
-  const pendingClientYRef = useRef<number | null>(null);
 
   useEffect(() => {
     onDraggingChange?.(!!dragging);
   }, [dragging, onDraggingChange]);
 
-  // Block wheel zoom on the page while dragging so lightweight-charts does not fight the drag.
   useEffect(() => {
     if (!dragging) return;
     const blockWheel = (e: WheelEvent) => {
@@ -224,11 +229,6 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     if (!dragging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (dragRafRef.current !== null) {
-        cancelAnimationFrame(dragRafRef.current);
-        dragRafRef.current = null;
-      }
-      pendingClientYRef.current = null;
       dragPriceRef.current = null;
       dragStartPriceRef.current = null;
       dragFromGhostRef.current = false;
@@ -272,17 +272,11 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
         mark,
         refPx,
         vmin,
-        vmax
+        vmax,
       );
       dragPriceRef.current = clamped;
       setDragPrice(clamped);
-    };
-
-    const flushDragFrame = () => {
-      dragRafRef.current = null;
-      const y = pendingClientYRef.current;
-      if (y === null) return;
-      applyDragFromY(y);
+      onTpslDragVisualRef.current?.(kind, clamped);
     };
 
     const onMove = (e: MouseEvent | TouchEvent | PointerEvent) => {
@@ -290,22 +284,12 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       if ("preventDefault" in e && e.cancelable) e.preventDefault();
       const y = readY(e);
       if (y === null) return;
-      pendingClientYRef.current = y;
-      if (dragRafRef.current === null) {
-        dragRafRef.current = requestAnimationFrame(flushDragFrame);
-      }
+      applyDragFromY(y);
     };
 
     const onUp = async (e: MouseEvent | TouchEvent | PointerEvent) => {
-      if (dragRafRef.current !== null) {
-        cancelAnimationFrame(dragRafRef.current);
-        dragRafRef.current = null;
-      }
-      pendingClientYRef.current = null;
-
-      const finalDragging = draggingRef.current;
       const y = readY(e);
-      const pos = positionsRef.current.find(p => p.coin === coinRef.current);
+      const pos = positionsRef.current.find((p) => p.coin === coinRef.current);
       const refPx = currentPriceRef.current;
       const coordFn = coordinateToPriceRef.current;
       const vr = visibleRangeRef.current;
@@ -313,10 +297,9 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       let raw = dragPriceRef.current;
       if (raw === null && coordFn && y !== null) {
         const r = coordFn(y);
-        if (r !== null && r > 0) {
-          raw = snapOrderPrice(r, refPx);
-        }
+        if (r !== null && r > 0) raw = snapOrderPrice(r, refPx);
       }
+      const finalDragging = draggingRef.current;
       let finalPrice =
         raw !== null && raw > 0 && pos && finalDragging
           ? clampTpslDragPrice(
@@ -327,7 +310,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
               pos.markPrice || refPx,
               refPx,
               vr?.min ?? null,
-              vr?.max ?? null
+              vr?.max ?? null,
             )
           : null;
 
@@ -371,9 +354,6 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     window.addEventListener("touchend", onUp);
     window.addEventListener("touchcancel", onUp);
     return () => {
-      if (dragRafRef.current !== null) cancelAnimationFrame(dragRafRef.current);
-      dragRafRef.current = null;
-      pendingClientYRef.current = null;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       window.removeEventListener("pointermove", onMove);
@@ -385,20 +365,28 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     };
   }, [dragging, placeTPSL, toast]);
 
-  const handleCancel = useCallback(async (type: "tp" | "sl") => {
-    const order = type === "tp" ? tpOrder : slOrder;
-    if (!order) return;
-    const result = await cancelHLOrder(coin, order.oid);
-    toast(result.success
-      ? { title: `${type === "tp" ? "Take Profit" : "Stop Loss"} cancelled` }
-      : { title: "Cancel failed", description: result.error, variant: "destructive" });
-  }, [tpOrder, slOrder, coin, cancelHLOrder, toast]);
+  const handleCancel = useCallback(
+    async (type: "tp" | "sl") => {
+      const order = type === "tp" ? tpOrder : slOrder;
+      if (!order) return;
+      const result = await cancelHLOrder(coin, order.oid);
+      toast(
+        result.success
+          ? { title: `${type === "tp" ? "Take Profit" : "Stop Loss"} cancelled` }
+          : { title: "Cancel failed", description: result.error, variant: "destructive" },
+      );
+    },
+    [tpOrder, slOrder, coin, cancelHLOrder, toast],
+  );
 
-  const startEdit = useCallback((type: "tp" | "sl") => {
-    const price = type === "tp" ? tpPrice : slPrice;
-    setEditInput(price ? fmt(price) : "");
-    setEditMode(type);
-  }, [tpPrice, slPrice]);
+  const startEdit = useCallback(
+    (type: "tp" | "sl") => {
+      const price = type === "tp" ? tpPrice : slPrice;
+      setEditInput(price ? fmt(price) : "");
+      setEditMode(type);
+    },
+    [tpPrice, slPrice],
+  );
 
   const cancelEdit = useCallback(() => {
     setEditMode(null);
@@ -423,7 +411,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       mark,
       currentPrice,
       vmin,
-      vmax
+      vmax,
     );
     setIsSubmitting(true);
     try {
@@ -443,50 +431,36 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     }
   }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast, currentPrice, visiblePriceRange]);
 
-  // Must be declared before any early return — hooks cannot run conditionally (React #310).
-  const beginTpslDrag = useCallback((e: React.PointerEvent, line: {
-    price: number;
-    isGhost?: boolean;
-    editType?: "tp" | "sl";
-  }) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-    if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragStartPriceRef.current = line.price;
-    dragFromGhostRef.current = !!line.isGhost;
-    dragPriceRef.current = line.price;
-    setDragPrice(line.price);
-    setDragging(line.editType!);
-  }, []);
+  const beginTpslDrag = useCallback(
+    (e: React.PointerEvent, line: { price: number; isGhost?: boolean; editType?: "tp" | "sl" }) => {
+      if (e.button !== 0 && e.pointerType === "mouse") return;
+      if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragStartPriceRef.current = line.price;
+      dragFromGhostRef.current = !!line.isGhost;
+      dragPriceRef.current = line.price;
+      setDragPrice(line.price);
+      setDragging(line.editType!);
+      onTpslDragVisual?.(line.editType!, line.price);
+    },
+    [onTpslDragVisual],
+  );
 
   if (!position) return null;
 
   const isLong = position.side === "long";
   const entry = position.entryPrice;
   const size = position.size;
-  const unrealizedPnl = position.unrealizedPnl ?? (isLong ? size * (currentPrice - entry) : size * (entry - currentPrice));
+  const unrealizedPnl =
+    position.unrealizedPnl ?? (isLong ? size * (currentPrice - entry) : size * (entry - currentPrice));
   const pnlPositive = unrealizedPnl >= 0;
   const liqPrice = position.liquidationPrice;
 
-  // Hyperliquid-style “ghost” lines when TP/SL not set yet — drag to place.
   const markPx = position.markPrice || currentPrice || entry;
-  let ghostTp: number | null = null;
-  let ghostSl: number | null = null;
-  if (!tpPrice) {
-    ghostTp = isLong ? entry * 1.012 : entry * 0.988;
-  }
-  if (!slPrice) {
-    if (isLong) {
-      ghostSl = Math.min(entry * 0.988, markPx * 0.992);
-      if (ghostSl >= markPx) ghostSl = markPx * 0.99;
-    } else {
-      ghostSl = Math.max(entry * 1.012, markPx * 1.008);
-      if (ghostSl <= markPx) ghostSl = markPx * 1.01;
-    }
-  }
+  const { ghostTp, ghostSl } = ghostTpslPrices(entry, markPx, isLong, tpPrice != null, slPrice != null);
 
-  const priceLevels: number[] = [currentPrice, entry].filter(p => p > 0);
+  const priceLevels: number[] = [currentPrice, entry].filter((p) => p > 0);
   if (tpPrice) priceLevels.push(tpPrice);
   if (slPrice) priceLevels.push(slPrice);
   if (ghostTp) priceLevels.push(ghostTp);
@@ -499,12 +473,8 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   const pad = span * 0.25;
   const rMin = rawMin - pad;
   const rMax = rawMax + pad;
-
-  // Use the chart's actual visible price range when available for pixel-perfect alignment
   const effMin = visiblePriceRange?.min ?? rMin;
   const effMax = visiblePriceRange?.max ?? rMax;
-
-  const toYPct = (price: number): number => ((effMax - price) / (effMax - effMin)) * 100;
 
   interface LineConfig {
     key: string;
@@ -522,6 +492,8 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     labelSide?: "left" | "right";
     isGhost?: boolean;
     rowZ?: number;
+    /** Canvas draws the rule; overlay only hit-target + tag. */
+    canvasLine?: boolean;
   }
 
   const lines: LineConfig[] = [];
@@ -557,13 +529,12 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     });
   }
 
-  // TP/SL after entry/liq so they stack above; labels on the right like Hyperliquid + TradingView order lines.
   if (ghostTp && ghostTp > 0) {
     lines.push({
       key: "ghost-tp",
       price: ghostTp,
       color: "text-[#0ecb81]/90",
-      lineColor: HL_TP_DIM,
+      lineColor: "rgba(14, 203, 129, 0.45)",
       dashed: true,
       label: "TP",
       sizeLabel: fmtSize(size),
@@ -573,6 +544,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       labelSide: "right",
       isGhost: true,
       rowZ: 40,
+      canvasLine: nativeTpslLines,
     });
   }
 
@@ -591,6 +563,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       editType: "tp",
       labelSide: "right",
       rowZ: 42,
+      canvasLine: nativeTpslLines,
     });
   }
 
@@ -599,7 +572,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       key: "ghost-sl",
       price: ghostSl,
       color: "text-[#f6465d]/90",
-      lineColor: HL_SL_DIM,
+      lineColor: "rgba(246, 70, 93, 0.45)",
       dashed: true,
       label: "SL",
       sizeLabel: fmtSize(size),
@@ -609,6 +582,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       labelSide: "right",
       isGhost: true,
       rowZ: 40,
+      canvasLine: nativeTpslLines,
     });
   }
 
@@ -627,8 +601,26 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       editType: "sl",
       labelSide: "right",
       rowZ: 42,
+      canvasLine: nativeTpslLines,
     });
   }
+
+  const rowStyleFromLayout = (layout: LineLayout, bandHalfPx: number): CSSProperties => {
+    if (layout.mode === "px") {
+      return { top: layout.y - bandHalfPx, height: bandHalfPx * 2 };
+    }
+    return { top: `calc(${layout.pct}% - ${bandHalfPx}px)`, height: bandHalfPx * 2 };
+  };
+
+  const centerStyleFromLayout = (layout: LineLayout): CSSProperties => {
+    if (layout.mode === "px") {
+      return { top: layout.y, transform: "translateY(-50%)" };
+    }
+    return { top: `${layout.pct}%`, transform: "translateY(-50%)" };
+  };
+
+  const showHtmlDragPreview =
+    dragging && dragPrice !== null && !nativeTpslLines;
 
   return (
     <div
@@ -637,55 +629,59 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
       style={{ pointerEvents: "none", height: containerHeight || undefined }}
       data-testid="chart-order-lines"
     >
-      {/* Drag preview line while dragging */}
-      {dragging && dragPrice !== null && (() => {
-        const yPct = toYPct(dragPrice);
-        if (yPct < 0 || yPct > 100) return null;
-        const previewColor = dragging === "tp" ? HL_TP : HL_SL;
-        return (
-          <div
-            className="absolute inset-x-0 pointer-events-none"
-            style={{ top: `${yPct}%`, transform: "translateY(-50%)", zIndex: 50 }}
-          >
-            <div
-              className="absolute left-0 top-1/2 -translate-y-1/2 h-px"
-              style={{
-                right: HL_GUTTER_PX,
-                backgroundColor: previewColor,
-                opacity: 0.95,
-                boxShadow: `0 0 6px ${previewColor}33`,
-              }}
-            />
-            <div
-              className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
-              style={{
-                right: HL_GUTTER_PX - 3,
-                width: 6,
-                height: 6,
-                backgroundColor: previewColor,
-                boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
-              }}
-            />
-            <div
-              className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-end px-1 py-0.5 font-mono tabular-nums border-y border-r border-white/[0.08] rounded-r-sm rounded-l-none"
-              style={{
-                width: HL_GUTTER_PX,
-                minHeight: 22,
-                background: HL_TAG_BG,
-                borderLeft: `2px solid ${previewColor}`,
-              }}
-            >
-              <span className="text-[10px] font-semibold leading-tight truncate w-full text-right" style={{ color: previewColor }}>
-                {fmtUsdLabel(dragging === "tp" ? "TP" : "SL", dragPrice)}
-              </span>
+      {showHtmlDragPreview &&
+        (() => {
+          const layout = layoutForPrice(dragPrice!, priceToCoordinate, effMin, effMax);
+          if (layout.mode === "pct" && (layout.pct < -8 || layout.pct > 108)) return null;
+          if (layout.mode === "px" && (layout.y < -20 || layout.y > containerHeight + 20)) return null;
+          const previewColor = dragging === "tp" ? HL_TP : HL_SL;
+          const s = centerStyleFromLayout(layout);
+          return (
+            <div className="absolute inset-x-0 pointer-events-none" style={{ ...s, zIndex: 50 }}>
+              <div
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-px"
+                style={{
+                  right: HL_GUTTER_PX,
+                  backgroundColor: previewColor,
+                  opacity: 0.95,
+                  boxShadow: `0 0 6px ${previewColor}33`,
+                }}
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
+                style={{
+                  right: HL_GUTTER_PX - 3,
+                  width: 6,
+                  height: 6,
+                  backgroundColor: previewColor,
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
+                }}
+              />
+              <div
+                className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-end px-1 py-0.5 font-mono tabular-nums border-y border-r border-white/[0.08] rounded-r-sm rounded-l-none"
+                style={{
+                  width: HL_GUTTER_PX,
+                  minHeight: 22,
+                  background: HL_TAG_BG,
+                  borderLeft: `2px solid ${previewColor}`,
+                }}
+              >
+                <span
+                  className="text-[10px] font-semibold leading-tight truncate w-full text-right"
+                  style={{ color: previewColor }}
+                >
+                  {fmtUsdLabel(dragging === "tp" ? "TP" : "SL", dragPrice!)}
+                </span>
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
-      {lines.map(line => {
-        const yPct = toYPct(line.price);
-        if (yPct < -8 || yPct > 108) return null;
+      {lines.map((line) => {
+        const layout = layoutForPrice(line.price, priceToCoordinate, effMin, effMax);
+        if (layout.mode === "pct" && (layout.pct < -8 || layout.pct > 108)) return null;
+        if (layout.mode === "px" && (layout.y < -40 || layout.y > containerHeight + 40)) return null;
+
         const isEditing = editMode === line.editType;
         const isTpSl = line.editType === "tp" || line.editType === "sl";
         const useDragBand = isTpSl && !!coordinateToPrice;
@@ -693,80 +689,108 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
         const z = line.rowZ ?? (useDragBand ? 32 : 16);
         const tpslHot = useDragBand && (line.editType === "tp" || line.editType === "sl");
         const tpslActive = tpslHot && dragging === line.editType;
+
+        const bandStyle = rowStyleFromLayout(layout, 22);
+        const centerStyle = centerStyleFromLayout(layout);
+        const outerStyle: CSSProperties = useDragBand
+          ? { ...bandStyle, zIndex: z }
+          : { position: "absolute", left: 0, right: 0, ...centerStyle, zIndex: z };
+
         return (
           <div
             key={line.key}
             className={cn("absolute left-0 right-0", tpslHot && "group/tpsl")}
-            style={
-              useDragBand
-                ? { top: `calc(${yPct}% - 22px)`, height: 44, zIndex: z }
-                : { top: `${yPct}%`, transform: "translateY(-50%)", zIndex: z }
-            }
+            style={outerStyle}
           >
-            {/* Price line: TP/SL stop before right gutter (TV/HL); entry/liq span full width. */}
-            {useDragBand ? (
+            {!line.canvasLine && (
               <div
                 className={cn(
-                  "absolute left-0 pointer-events-none top-1/2 -translate-y-1/2 transition-all duration-100",
+                  "absolute left-0 pointer-events-none top-1/2 -translate-y-1/2",
                   tpslActive ? "opacity-100" : "opacity-[0.78] group-hover/tpsl:opacity-100",
                 )}
                 style={
-                  line.dashed
-                    ? {
-                        right: HL_GUTTER_PX,
-                        height: 0,
-                        borderTopWidth: tpslActive ? 2 : 1,
-                        borderTopStyle: "dashed",
-                        borderTopColor: line.lineColor,
-                        opacity: line.isGhost ? (tpslActive ? 0.75 : 0.55) : undefined,
-                        filter: tpslActive ? `drop-shadow(0 0 4px ${line.lineColor})` : undefined,
-                      }
-                    : {
-                        right: HL_GUTTER_PX,
-                        height: tpslActive ? 2 : 1,
-                        backgroundColor: line.lineColor,
-                        opacity: line.isGhost ? (tpslActive ? 0.85 : 0.6) : tpslActive ? 1 : 0.92,
-                        boxShadow: line.isGhost ? undefined : tpslActive ? `0 0 8px ${line.lineColor}55` : `0 0 5px ${line.lineColor}2a`,
-                      }
-                }
-              />
-            ) : (
-              <div
-                className={cn(
-                  "absolute left-0 right-0 pointer-events-none top-1/2 -translate-y-1/2",
-                  line.dashed ? "h-0 border-t" : "h-px"
-                )}
-                style={
-                  line.dashed
-                    ? {
-                        borderTopWidth: 1,
-                        borderTopStyle: "dashed",
-                        borderTopColor: line.lineColor,
-                        opacity: line.isGhost ? 0.5 : 0.72,
-                      }
-                    : {
-                        backgroundColor: line.lineColor,
-                        opacity: line.isGhost ? 0.55 : 0.9,
-                      }
+                  useDragBand
+                    ? line.dashed
+                      ? {
+                          right: HL_GUTTER_PX,
+                          height: 0,
+                          borderTopWidth: tpslActive ? 2 : 1,
+                          borderTopStyle: "dashed",
+                          borderTopColor: line.lineColor,
+                          opacity: line.isGhost ? (tpslActive ? 0.75 : 0.55) : undefined,
+                          filter: tpslActive ? `drop-shadow(0 0 4px ${line.lineColor})` : undefined,
+                        }
+                      : {
+                          right: HL_GUTTER_PX,
+                          height: tpslActive ? 2 : 1,
+                          backgroundColor: line.lineColor,
+                          opacity: line.isGhost ? (tpslActive ? 0.85 : 0.6) : tpslActive ? 1 : 0.92,
+                          boxShadow:
+                            line.isGhost ? undefined : tpslActive
+                              ? `0 0 8px ${line.lineColor}55`
+                              : `0 0 5px ${line.lineColor}2a`,
+                        }
+                    : line.dashed
+                      ? {
+                          left: 0,
+                          right: 0,
+                          height: 0,
+                          borderTopWidth: 1,
+                          borderTopStyle: "dashed",
+                          borderTopColor: line.lineColor,
+                          opacity: line.isGhost ? 0.5 : 0.72,
+                        }
+                      : {
+                          left: 0,
+                          right: 0,
+                          height: "1px",
+                          backgroundColor: line.lineColor,
+                          opacity: line.isGhost ? 0.55 : 0.9,
+                        }
                 }
               />
             )}
 
-            {useDragBand && (
+            {line.canvasLine && tpslActive && (
+              <div
+                className="absolute left-0 pointer-events-none top-1/2 -translate-y-1/2 rounded-sm"
+                style={{
+                  right: HL_GUTTER_PX,
+                  height: 40,
+                  marginTop: -20,
+                  background: `linear-gradient(180deg, ${line.lineColor}12 0%, ${line.lineColor}22 50%, ${line.lineColor}12 100%)`,
+                }}
+              />
+            )}
+
+            {useDragBand && !line.canvasLine && (
               <div
                 className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
                 style={{
                   right: HL_GUTTER_PX - 3,
                   width: 6,
                   height: 6,
-                  backgroundColor: line.dashed ? line.lineColor : line.lineColor,
+                  backgroundColor: line.lineColor,
                   opacity: line.isGhost ? 0.65 : 1,
                   boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
                 }}
               />
             )}
 
-            {/* Chart-area strip; right tag also starts drag (Hyperliquid-style). */}
+            {useDragBand && line.canvasLine && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
+                style={{
+                  right: HL_GUTTER_PX - 3,
+                  width: 6,
+                  height: 6,
+                  backgroundColor: line.lineColor,
+                  opacity: line.isGhost ? 0.65 : 1,
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
+                }}
+              />
+            )}
+
             {useDragBand && (
               <div
                 className="absolute left-0 top-0 bottom-0 touch-none"
@@ -787,8 +811,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
               <div
                 className="absolute right-0 flex flex-col items-stretch justify-center"
                 style={{
-                  top: useDragBand ? "50%" : undefined,
-                  transform: "translateY(-50%)",
+                  ...centerStyle,
                   width: HL_GUTTER_PX,
                   pointerEvents: "auto",
                   zIndex: z + 4,
@@ -803,14 +826,14 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                       ref={inputRef}
                       type="number"
                       value={editInput}
-                      onChange={e => setEditInput(e.target.value)}
-                      onKeyDown={e => {
+                      onChange={(e) => setEditInput(e.target.value)}
+                      onKeyDown={(e) => {
                         if (e.key === "Enter") confirmEdit();
                         if (e.key === "Escape") cancelEdit();
                       }}
                       className={cn(
                         "w-full min-w-0 bg-transparent text-[11px] font-mono font-semibold outline-none tabular-nums px-0.5",
-                        line.color
+                        line.color,
                       )}
                       disabled={isSubmitting}
                       data-testid={`edit-input-${line.key}`}
@@ -843,6 +866,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                       "group flex items-center justify-between gap-0.5 pl-1 pr-0.5 py-0.5 font-mono tabular-nums select-none touch-none",
                       "border-y border-r border-white/[0.08] rounded-r-sm rounded-l-none",
                       line.isGhost && "border-dashed",
+                      tpslHot && !tpslActive && "opacity-90 group-hover/tpsl:opacity-100",
                     )}
                     style={{
                       minHeight: 22,
@@ -865,19 +889,15 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                     }}
                   >
                     <div className="flex flex-col items-end leading-tight min-w-0 flex-1 overflow-hidden">
-                      <span
-                        className={cn("text-[10px] font-semibold leading-tight truncate w-full text-right", line.color)}
-                      >
-                        {fmtUsdLabel(line.label as "TP" | "SL", line.price)}
+                      <span className={cn("text-[10px] font-semibold leading-tight truncate w-full text-right", line.color)}>
+                        {fmtUsdLabel(line.label as "TP" | "SL", dragging === line.editType && dragPrice != null ? dragPrice : line.price)}
                       </span>
                       {line.isGhost ? (
                         <span className="text-[7px] leading-tight text-white/30 normal-case text-right w-full">
                           drag to place
                         </span>
                       ) : (
-                        <span className="text-[8px] text-white/35 font-normal truncate text-right w-full">
-                          {line.sizeLabel}
-                        </span>
+                        <span className="text-[8px] text-white/35 font-normal truncate text-right w-full">{line.sizeLabel}</span>
                       )}
                     </div>
                     <div className="flex flex-col items-center shrink-0 gap-0">
@@ -914,10 +934,9 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                 )}
               </div>
             ) : (
-              /* Left-side label for Entry and Liq */
               <div
                 className="absolute left-2"
-                style={{ transform: "translateY(-50%)", pointerEvents: "auto", zIndex: 30 }}
+                style={{ ...centerStyle, pointerEvents: "auto", zIndex: 30 }}
               >
                 <div
                   className={cn(
@@ -928,10 +947,9 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                 >
                   {line.pnlLabel ? (
                     <>
-                      <span className={cn(
-                        "text-[10px] font-semibold",
-                        pnlPositive ? "text-[#22c55e]" : "text-[#ef4444]"
-                      )}>
+                      <span
+                        className={cn("text-[10px] font-semibold", pnlPositive ? "text-[#22c55e]" : "text-[#ef4444]")}
+                      >
                         {line.pnlLabel}
                       </span>
                       <span className="opacity-50">{line.sizeLabel}</span>
