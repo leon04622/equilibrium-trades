@@ -279,6 +279,8 @@ export const updateSubscriptionSchema = z.object({
   subscriptionTier: z.enum(['free', 'pro', 'elite']),
   subscriptionActive: z.boolean(),
   subscriptionExpiresAt: z.string().optional().nullable(),
+  /** When set, updates builder onboarding flag (e.g. pre-approve test wallets). */
+  builderCodeApproved: z.boolean().optional(),
 });
 
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;

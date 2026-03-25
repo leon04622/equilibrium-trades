@@ -9,6 +9,8 @@ interface ChartOrderLinesProps {
   currentPrice: number;
   visiblePriceRange?: { min: number; max: number } | null;
   coordinateToPrice?: (clientY: number) => number | null;
+  /** Notifies parent so the chart can disable pan/zoom while dragging TP/SL (Hyperliquid-like). */
+  onDraggingChange?: (dragging: boolean) => void;
 }
 
 function fmt(p: number): string {
@@ -50,7 +52,7 @@ function snapOrderPrice(price: number, refPrice: number): number {
   return parseFloat(rounded.toFixed(dec));
 }
 
-export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordinateToPrice }: ChartOrderLinesProps) {
+export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordinateToPrice, onDraggingChange }: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
   const [containerHeight, setContainerHeight] = useState(400);
@@ -104,6 +106,20 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   const dragPriceRef = useRef<number | null>(null);
   const draggingRef = useRef<null | "tp" | "sl">(null);
   draggingRef.current = dragging;
+
+  useEffect(() => {
+    onDraggingChange?.(!!dragging);
+  }, [dragging, onDraggingChange]);
+
+  // Block wheel zoom on the page while dragging so lightweight-charts does not fight the drag.
+  useEffect(() => {
+    if (!dragging) return;
+    const blockWheel = (e: WheelEvent) => {
+      e.preventDefault();
+    };
+    document.addEventListener("wheel", blockWheel, { passive: false, capture: true });
+    return () => document.removeEventListener("wheel", blockWheel, { capture: true });
+  }, [dragging]);
 
   useEffect(() => {
     if (!dragging) return;

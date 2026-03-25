@@ -150,6 +150,7 @@ function PatternChartComponent({
   const stochContainerRef = useRef<HTMLDivElement>(null);
 
   const mainChartRef = useRef<IChartApi | null>(null);
+  const [tpslDragging, setTpslDragging] = useState(false);
   const rsiChartRef = useRef<IChartApi | null>(null);
   const stochChartRef = useRef<IChartApi | null>(null);
 
@@ -238,6 +239,10 @@ function PatternChartComponent({
 
   const parsePrice = useCallback((val: number | string): number =>
     typeof val === "string" ? parseFloat(val) : val, []);
+
+  const onTpslDraggingChange = useCallback((dragging: boolean) => {
+    setTpslDragging(dragging);
+  }, []);
 
   // ── Pointer drag-to-resize (mouse + touch) ──
   const startResizeDrag = useCallback((handleIdx: number) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -487,6 +492,26 @@ function PatternChartComponent({
     };
   }, [theme, hideIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // While dragging TP/SL, disable chart pan/zoom so movement only updates the order line (HL-style).
+  useEffect(() => {
+    const chart = mainChartRef.current;
+    if (!chart || !tpslDragging) return;
+    chart.applyOptions({
+      handleScroll: { mouseWheel: false, pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false },
+      handleScale: { mouseWheel: false, pinch: false, axisPressedMouseMove: false },
+    });
+    return () => {
+      try {
+        chart.applyOptions({
+          handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+          handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+        });
+      } catch {
+        /* chart may be disposed */
+      }
+    };
+  }, [tpslDragging, chartVersion]);
+
   // ── Data update — smart setData vs update() ──
   useEffect(() => {
     if (!candles || candles.length === 0) return;
@@ -695,6 +720,7 @@ function PatternChartComponent({
           currentPrice={currentPrice ?? 0}
           visiblePriceRange={visiblePriceRange}
           coordinateToPrice={coordinateToPrice}
+          onDraggingChange={onTpslDraggingChange}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}

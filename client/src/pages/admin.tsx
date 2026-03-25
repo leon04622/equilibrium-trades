@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Users, Shield, Crown, Zap, Sparkles, Check, X, 
-  RefreshCw, Search, Calendar, Mail, Download, Loader2
+  RefreshCw, Search, Calendar, Mail, Download, Loader2, UserPlus
 } from "lucide-react";
 import type { Lead } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -40,6 +40,8 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import type { WalletUser } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
+const ETH_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
 export default function Admin() {
   const { address } = useWallet();
   const { toast } = useToast();
@@ -47,6 +49,10 @@ export default function Admin() {
   const [editingUser, setEditingUser] = useState<WalletUser | null>(null);
   const [editTier, setEditTier] = useState<'free' | 'pro' | 'elite'>('free');
   const [editActive, setEditActive] = useState(false);
+  const [grantWallet, setGrantWallet] = useState("");
+  const [grantTier, setGrantTier] = useState<'free' | 'pro' | 'elite'>("pro");
+  const [grantActive, setGrantActive] = useState(true);
+  const [grantBuilderApproved, setGrantBuilderApproved] = useState(true);
 
   const { isAdmin, isLoading: adminCheckLoading } = useIsAdmin();
 
@@ -79,10 +85,28 @@ export default function Admin() {
   });
 
   const updateSubscriptionMutation = useMutation({
-    mutationFn: async ({ walletAddress, tier, active }: { walletAddress: string; tier: string; active: boolean }) => {
-      const response = await fetch(`/api/admin/users/${walletAddress}/subscription`, {
+    mutationFn: async ({
+      walletAddress,
+      tier,
+      active,
+      builderCodeApproved,
+    }: {
+      walletAddress: string;
+      tier: string;
+      active: boolean;
+      builderCodeApproved?: boolean;
+    }) => {
+      const encoded = encodeURIComponent(walletAddress.trim());
+      const body: Record<string, unknown> = {
+        subscriptionTier: tier,
+        subscriptionActive: active,
+      };
+      if (typeof builderCodeApproved === "boolean") {
+        body.builderCodeApproved = builderCodeApproved;
+      }
+      const response = await fetch(`/api/admin/users/${encoded}/subscription`, {
         method: 'PATCH',
-        body: JSON.stringify({ subscriptionTier: tier, subscriptionActive: active }),
+        body: JSON.stringify(body),
         headers: {
           'Content-Type': 'application/json',
           'x-wallet-address': address || ''
@@ -122,8 +146,29 @@ export default function Admin() {
     updateSubscriptionMutation.mutate({
       walletAddress: editingUser.walletAddress,
       tier: editTier,
-      active: editActive
+      active: editActive,
     });
+  };
+
+  const handleGrantWallet = () => {
+    const w = grantWallet.trim();
+    if (!ETH_ADDRESS_RE.test(w)) {
+      toast({
+        title: "Invalid wallet",
+        description: "Use a full 42-character address starting with 0x.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateSubscriptionMutation.mutate(
+      {
+        walletAddress: w,
+        tier: grantTier,
+        active: grantActive,
+        builderCodeApproved: grantBuilderApproved,
+      },
+      { onSuccess: () => setGrantWallet("") }
+    );
   };
 
   const filteredUsers = users.filter(user => 
@@ -279,6 +324,65 @@ export default function Admin() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-1">
+            <CardTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-primary" />
+              Grant or bootstrap user
+            </CardTitle>
+            <CardDescription>
+              Create or update a user by wallet even if they never registered in-app. Encodes the address for the API path (checksum-safe).
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="grant-wallet">Wallet address (0x…)</Label>
+            <Input
+              id="grant-wallet"
+              placeholder="0x…"
+              value={grantWallet}
+              onChange={(e) => setGrantWallet(e.target.value)}
+              className="font-mono text-sm"
+              data-testid="input-grant-wallet"
+            />
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
+            <div className="space-y-2 flex-1">
+              <Label>Tier</Label>
+              <Select value={grantTier} onValueChange={(v) => setGrantTier(v as 'free' | 'pro' | 'elite')}>
+                <SelectTrigger data-testid="select-grant-tier">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="free">Free</SelectItem>
+                  <SelectItem value="pro">AI Pro</SelectItem>
+                  <SelectItem value="elite">Elite</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between gap-4 sm:justify-start sm:pb-2">
+              <div className="flex items-center gap-2">
+                <Switch checked={grantActive} onCheckedChange={setGrantActive} id="grant-active" />
+                <Label htmlFor="grant-active" className="cursor-pointer">Subscription active</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={grantBuilderApproved} onCheckedChange={setGrantBuilderApproved} id="grant-builder" />
+                <Label htmlFor="grant-builder" className="cursor-pointer">Builder approved</Label>
+              </div>
+            </div>
+            <Button
+              onClick={handleGrantWallet}
+              disabled={updateSubscriptionMutation.isPending || !grantWallet.trim()}
+              data-testid="button-grant-wallet"
+            >
+              {updateSubscriptionMutation.isPending ? "Saving…" : "Apply"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -681,26 +681,29 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
       }
       
-      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt } = validated.data;
+      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved } = validated.data;
       const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
-      
-      const user = await storage.updateWalletUserSubscription(
-        req.params.walletAddress,
+      const paramWallet = decodeURIComponent(req.params.walletAddress);
+
+      let user = await storage.updateWalletUserSubscription(
+        paramWallet,
         subscriptionTier as 'free' | 'pro' | 'elite',
         subscriptionActive,
         expiresAt
       );
-      
+
       if (!user) {
-        // Create user if they don't exist yet so we can grant them a subscription
-        const newUser = await storage.createWalletUser({
-          walletAddress: req.params.walletAddress,
+        user = await storage.createWalletUser({
+          walletAddress: paramWallet,
           subscriptionTier: subscriptionTier as 'free' | 'pro' | 'elite',
           subscriptionActive: subscriptionActive,
+          builderCodeApproved: builderCodeApproved ?? false,
         });
-        return res.json({ success: true, user: newUser });
+      } else if (typeof builderCodeApproved === "boolean") {
+        await storage.updateWalletUserApproval(paramWallet, builderCodeApproved);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
-      
+
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating subscription:", error);
