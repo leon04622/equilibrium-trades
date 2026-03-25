@@ -178,15 +178,19 @@ function PatternChartComponent({
 
   // Y must be relative to the candlestick pane (LW v5 multi-pane / volume subplot).
   const coordinateToPrice = useCallback((clientY: number): number | null => {
-    const series = candleSeriesRef.current;
-    const chart = mainChartRef.current;
-    if (!series || !chart) return null;
-    const pane0 = chart.panes()[0];
-    const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
-    if (!paneEl) return null;
-    const yRel = clientY - paneEl.getBoundingClientRect().top;
-    const price = series.coordinateToPrice(yRel);
-    return price !== null && price !== undefined ? Number(price) : null;
+    try {
+      const series = candleSeriesRef.current;
+      const chart = mainChartRef.current;
+      if (!series || !chart) return null;
+      const pane0 = chart.panes()[0];
+      const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
+      if (!paneEl) return null;
+      const yRel = clientY - paneEl.getBoundingClientRect().top;
+      const price = series.coordinateToPrice(yRel);
+      return price !== null && price !== undefined ? Number(price) : null;
+    } catch {
+      return null;
+    }
   }, []);
 
   // Pane resize state

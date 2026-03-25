@@ -25,6 +25,13 @@ export function useSubscription() {
     enabled: isConnected && !!address,
     staleTime: 30000,
     refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const res = await fetch(`/api/stripe/subscription/${address}`);
+      if (!res.ok) {
+        return { tier: "free", active: false, expiresAt: null } satisfies SubscriptionStatus;
+      }
+      return res.json() as Promise<SubscriptionStatus>;
+    },
   });
 
   const isPro = subscription?.active && (subscription.tier === 'pro' || subscription.tier === 'elite');

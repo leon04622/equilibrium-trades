@@ -339,7 +339,8 @@ export const adminWallets = [
 
 export function isAdminWallet(walletAddress: string | null): boolean {
   if (!walletAddress) return false;
-  return adminWallets.includes(walletAddress.toLowerCase());
+  const a = walletAddress.toLowerCase();
+  return adminWallets.some((w) => w.toLowerCase() === a);
 }
 
 // Re-export chat models

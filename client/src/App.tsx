@@ -31,6 +31,7 @@ import Videos from "@/pages/videos";
 import Candles from "@/pages/candles";
 import Admin from "@/pages/admin";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AppErrorBoundary } from "@/components/app-error-boundary";
 
 function OtherRoutes() {
   return (
@@ -60,6 +61,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
+        <AppErrorBoundary>
         <WalletProvider>
           <TradingProvider>
             <ChatProvider>
@@ -100,6 +102,7 @@ function App() {
             </ChatProvider>
           </TradingProvider>
         </WalletProvider>
+        </AppErrorBoundary>
       </ThemeProvider>
     </QueryClientProvider>
   );

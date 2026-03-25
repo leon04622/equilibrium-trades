@@ -266,8 +266,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
     
     setIsCheckingApproval(true);
+    const ac = new AbortController();
+    const t = window.setTimeout(() => ac.abort(), 20_000);
     try {
-      let response = await fetch(`/api/wallet-user/${address}`);
+      let response = await fetch(`/api/wallet-user/${address}`, { signal: ac.signal });
       let data = await response.json();
 
       if (!data.exists) {
@@ -276,8 +278,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ walletAddress: address }),
+            signal: ac.signal,
           });
-          response = await fetch(`/api/wallet-user/${address}`);
+          response = await fetch(`/api/wallet-user/${address}`, { signal: ac.signal });
           data = await response.json();
         } catch (regError) {
           console.error("Error auto-registering wallet user:", regError);
@@ -289,6 +292,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       console.error("Error checking approval status:", error);
       setBuilderCodeApproved(false);
     } finally {
+      clearTimeout(t);
       setIsCheckingApproval(false);
     }
   }, [address]);
@@ -329,34 +333,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [signer, address]);
 
-  // After Equilibrium builder approval: one-time Hyperliquid agent + builder fee (EIP-712), then referral.
+  // Do NOT auto-open Hyperliquid wallet prompts here — that caused blank screens / frozen tabs for some
+  // users right after login. HL session is completed in BuilderCodeModal, onboarding, the trading banner,
+  // or the first order via prepareHyperliquidSession.
   useEffect(() => {
     if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;
-
-    if (isHyperliquidTradingSessionReady(address)) {
-      setHyperliquidSessionReady(true);
-      trySetReferrer(signer).catch(() => {});
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      setIsPreparingHyperliquidSession(true);
-      try {
-        const result = await ensureHyperliquidTradingSession(signer);
-        if (cancelled) return;
-        if (result.success) {
-          setHyperliquidSessionReady(true);
-          await trySetReferrer(signer);
-        }
-      } finally {
-        if (!cancelled) setIsPreparingHyperliquidSession(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    if (!isHyperliquidTradingSessionReady(address)) return;
+    setHyperliquidSessionReady(true);
+    trySetReferrer(signer).catch(() => {});
   }, [signer, address, builderCodeApproved, isCheckingApproval]);
 
   const handleAccountsChanged = useCallback(async (accounts: string[]) => {
