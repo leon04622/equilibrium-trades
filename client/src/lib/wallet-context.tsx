@@ -267,22 +267,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     
     setIsCheckingApproval(true);
     try {
-      const response = await fetch(`/api/wallet-user/${address}`);
-      const data = await response.json();
-      
+      let response = await fetch(`/api/wallet-user/${address}`);
+      let data = await response.json();
+
       if (!data.exists) {
         try {
-          await fetch('/api/wallet-user/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ walletAddress: address })
+          await fetch("/api/wallet-user/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ walletAddress: address }),
           });
+          response = await fetch(`/api/wallet-user/${address}`);
+          data = await response.json();
         } catch (regError) {
           console.error("Error auto-registering wallet user:", regError);
         }
       }
-      
-      setBuilderCodeApproved(data.exists && data.builderCodeApproved);
+
+      setBuilderCodeApproved(Boolean(data.exists && data.builderCodeApproved));
     } catch (error) {
       console.error("Error checking approval status:", error);
       setBuilderCodeApproved(false);

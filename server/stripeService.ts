@@ -144,6 +144,36 @@ export class StripeService {
     return result.rows[0] || null;
   }
 
+  /** Resolve Stripe customer row by wallet (metadata or completed checkout client_reference_id). */
+  async getCustomerByWalletAddress(walletAddress: string) {
+    if (!db) return null;
+    const byMeta = await db.execute(
+      sql`
+        SELECT * FROM stripe.customers
+        WHERE LOWER(metadata->>'walletAddress') = LOWER(${walletAddress})
+        LIMIT 1
+      `
+    );
+    if (byMeta.rows.length > 0) return byMeta.rows[0];
+
+    const sessionResult = await db.execute(
+      sql`
+        SELECT customer FROM stripe.checkout_sessions
+        WHERE LOWER(client_reference_id) = LOWER(${walletAddress})
+          AND status = 'complete'
+          AND customer IS NOT NULL
+        ORDER BY created DESC
+        LIMIT 1
+      `
+    );
+    if (sessionResult.rows.length === 0) return null;
+    const customerId = (sessionResult.rows[0] as { customer: string }).customer;
+    const cust = await db.execute(
+      sql`SELECT * FROM stripe.customers WHERE id = ${customerId} LIMIT 1`
+    );
+    return cust.rows[0] || null;
+  }
+
   async getCustomerSubscriptions(customerId: string) {
     if (!db) return [];
     const result = await db.execute(

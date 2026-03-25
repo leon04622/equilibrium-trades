@@ -1,16 +1,13 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { useWallet } from "./wallet-context";
-import { 
-  getAccountState, 
-  getPositions, 
-  getOpenOrders, 
+import {
+  getAccountState,
+  getPositions,
+  getOpenOrders,
   closePosition as hlClosePosition,
-  placeOrder as hlPlaceOrder,
   cancelOrder as hlCancelOrder,
   placeTriggerOrder,
-  type Position as HLPosition, 
-  type OpenOrder, 
-  type AccountState 
+  type AccountState,
 } from "./hyperliquid-client";
 
 export interface Position {
@@ -26,21 +23,6 @@ export interface Position {
   unrealizedPnlPercent: number;
   liquidationPrice: number;
   openedAt: Date;
-}
-
-export interface Order {
-  id: string;
-  coin: string;
-  side: "buy" | "sell";
-  type: "market" | "limit";
-  quantity: number;
-  price?: number;
-  stopLoss?: number;
-  takeProfit?: number;
-  leverage: number;
-  status: "pending" | "filled" | "cancelled";
-  createdAt: Date;
-  filledAt?: Date;
 }
 
 export interface TradeRecord {
@@ -63,11 +45,6 @@ export interface Indicator {
   color: string;
 }
 
-interface OrderResult {
-  success: boolean;
-  error?: string;
-}
-
 export interface HLOpenOrder {
   coin: string;
   oid: number;
@@ -88,7 +65,6 @@ interface TradingContextType {
   accountValue: number;
   marginUsed: number;
   positions: Position[];
-  orders: Order[];
   openOrders: HLOpenOrder[];
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
@@ -98,9 +74,7 @@ interface TradingContextType {
   isClosingPosition: boolean;
   connect: (address?: string) => void;
   disconnect: () => void;
-  placeOrder: (order: Omit<Order, "id" | "status" | "createdAt">) => Promise<OrderResult>;
   closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
-  cancelOrder: (orderId: string) => void;
   cancelHLOrder: (coin: string, oid: number) => Promise<{ success: boolean; error?: string }>;
   placeTPSL: (coin: string, size: number, isLong: boolean, tpPrice?: number, slPrice?: number, entryPriceOverride?: number) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
@@ -175,7 +149,6 @@ const STORAGE_KEYS = {
   address: "equilibrium_address",
   balance: "equilibrium_balance",
   positions: "equilibrium_positions",
-  orders: "equilibrium_orders",
   tradeHistory: "equilibrium_trade_history",
   indicators: "equilibrium_indicators",
 };
@@ -186,7 +159,7 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
     const stored = localStorage.getItem(key);
     if (!stored) return defaultValue;
     const parsed = JSON.parse(stored);
-    // Handle date conversion for positions, orders, and trades
+    // Handle date conversion for positions and trades
     if (Array.isArray(parsed)) {
       return parsed.map((item: any) => ({
         ...item,
@@ -218,7 +191,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [accountValue, setAccountValue] = useState(0);
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
-  const [orders, setOrders] = useState<Order[]>(() => loadFromStorage(STORAGE_KEYS.orders, []));
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
@@ -231,7 +203,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const address = walletAddress || "";
 
   // Persist state changes to localStorage
-  useEffect(() => { saveToStorage(STORAGE_KEYS.orders, orders); }, [orders]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.tradeHistory, tradeHistory); }, [tradeHistory]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.indicators, indicators); }, [indicators]);
 
@@ -348,113 +319,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     // Wallet disconnection is handled by WalletContext
     setPositions([]);
-    setOrders([]);
   }, []);
-
-  const createPositionFromOrder = useCallback((order: Order, fillPrice: number) => {
-    const positionSide = order.side === "buy" ? "long" : "short";
-    const margin = (order.quantity * fillPrice) / order.leverage;
-    const liquidationDistance = fillPrice * (0.9 / order.leverage);
-    const liquidationPrice = positionSide === "long" 
-      ? fillPrice - liquidationDistance 
-      : fillPrice + liquidationDistance;
-
-    const newPosition: Position = {
-      id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      coin: order.coin,
-      side: positionSide,
-      size: order.quantity,
-      entryPrice: fillPrice,
-      markPrice: fillPrice,
-      leverage: order.leverage,
-      margin: margin,
-      unrealizedPnl: 0,
-      unrealizedPnlPercent: 0,
-      liquidationPrice: liquidationPrice,
-      openedAt: new Date(),
-    };
-
-    return { position: newPosition, margin };
-  }, []);
-
-  const placeOrder = useCallback(async (orderData: Omit<Order, "id" | "status" | "createdAt">): Promise<OrderResult> => {
-    const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const now = new Date();
-    
-    // For market orders, ALWAYS use authoritative price from context
-    // For limit orders, use the user-specified price but validate context has data
-    const livePrice = currentPrices[orderData.coin];
-    
-    if (!livePrice || livePrice <= 0) {
-      return { success: false, error: `Price for ${orderData.coin} not available. Please wait for market data.` };
-    }
-    
-    // Market orders use live price, limit orders use specified price
-    const fillPrice = orderData.type === "market" ? livePrice : (orderData.price || livePrice);
-    
-    if (fillPrice <= 0) {
-      return { success: false, error: "Invalid price. Please try again." };
-    }
-    
-    const margin = (orderData.quantity * fillPrice) / orderData.leverage;
-
-    if (margin <= 0) {
-      return { success: false, error: "Invalid order amount." };
-    }
-    
-    if (margin > balance) {
-      return { success: false, error: "Insufficient balance for this order." };
-    }
-
-    if (orderData.type === "market") {
-      const positionSide = orderData.side === "buy" ? "long" : "short";
-      const liquidationDistance = fillPrice * (0.9 / orderData.leverage);
-      const liquidationPrice = positionSide === "long" 
-        ? fillPrice - liquidationDistance 
-        : fillPrice + liquidationDistance;
-
-      const newPosition: Position = {
-        id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        coin: orderData.coin,
-        side: positionSide,
-        size: orderData.quantity,
-        entryPrice: fillPrice,
-        markPrice: fillPrice,
-        leverage: orderData.leverage,
-        margin: margin,
-        unrealizedPnl: 0,
-        unrealizedPnlPercent: 0,
-        liquidationPrice: liquidationPrice,
-        openedAt: now,
-      };
-
-      setPositions(prev => [...prev, newPosition]);
-      setBalance(prev => prev - margin);
-
-      const tradeRecord: TradeRecord = {
-        id: `trade-${Date.now()}`,
-        coin: orderData.coin,
-        side: orderData.side,
-        size: orderData.quantity,
-        price: fillPrice,
-        fee: margin * 0.001,
-        timestamp: now,
-      };
-      setTradeHistory(prev => [tradeRecord, ...prev]);
-      return { success: true };
-    } else {
-      setBalance(prev => prev - margin);
-      
-      const newOrder: Order = {
-        ...orderData,
-        id: orderId,
-        status: "pending",
-        createdAt: now,
-      };
-      setOrders(prev => [...prev, newOrder]);
-      return { success: true };
-    }
-  }, [balance, currentPrices]);
 
   const closePosition = useCallback(async (positionId: string): Promise<{ success: boolean; error?: string }> => {
     const position = positions.find(p => p.id === positionId);
@@ -561,19 +426,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [positions, signer, refreshAccount, openOrders]);
 
-  const cancelOrder = useCallback((orderId: string) => {
-    setOrders(prev => {
-      const order = prev.find(o => o.id === orderId);
-      if (order && order.status === "pending" && order.price) {
-        const margin = (order.quantity * order.price) / order.leverage;
-        setBalance(b => b + margin);
-      }
-      return prev.map(o => 
-        o.id === orderId ? { ...o, status: "cancelled" as const } : o
-      );
-    });
-  }, []);
-  
   const cancelHLOrder = useCallback(async (coin: string, oid: number): Promise<{ success: boolean; error?: string }> => {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
@@ -732,56 +584,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         unrealizedPnlPercent,
       };
     }));
-
-    setOrders(prev => {
-      const updatedOrders: Order[] = [];
-      const filledOrders: Order[] = [];
-      
-      prev.forEach(order => {
-        if (order.status !== "pending" || !order.price) {
-          updatedOrders.push(order);
-          return;
-        }
-        
-        const currentPrice = currentPrices[order.coin];
-        if (!currentPrice) {
-          updatedOrders.push(order);
-          return;
-        }
-
-        const shouldFill = order.side === "buy" 
-          ? currentPrice <= order.price
-          : currentPrice >= order.price;
-
-        if (shouldFill) {
-          filledOrders.push(order);
-          updatedOrders.push({ ...order, status: "filled", filledAt: new Date() });
-        } else {
-          updatedOrders.push(order);
-        }
-      });
-
-      if (filledOrders.length > 0) {
-        filledOrders.forEach(order => {
-          const { position } = createPositionFromOrder(order, order.price!);
-          setPositions(p => [...p, position]);
-          
-          const tradeRecord: TradeRecord = {
-            id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 4)}`,
-            coin: order.coin,
-            side: order.side,
-            size: order.quantity,
-            price: order.price!,
-            fee: (order.quantity * order.price!) / order.leverage * 0.001,
-            timestamp: new Date(),
-          };
-          setTradeHistory(th => [tradeRecord, ...th]);
-        });
-      }
-
-      return updatedOrders;
-    });
-  }, [currentPrices, createPositionFromOrder]);
+  }, [currentPrices]);
 
   return (
     <TradingContext.Provider value={{
@@ -792,7 +595,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       accountValue,
       marginUsed,
       positions,
-      orders,
       openOrders,
       tradeHistory,
       indicators,
@@ -802,9 +604,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       isClosingPosition,
       connect,
       disconnect,
-      placeOrder,
       closePosition,
-      cancelOrder,
       cancelHLOrder,
       placeTPSL,
       setIndicators,

@@ -1057,8 +1057,11 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Wallet address or email required" });
       }
 
-      const customer = email ? await stripeService.getCustomerByEmail(email) : null;
-      
+      let customer = email ? await stripeService.getCustomerByEmail(email) : null;
+      if (!customer && walletAddress) {
+        customer = await stripeService.getCustomerByWalletAddress(walletAddress);
+      }
+
       if (!customer) {
         return res.status(404).json({ error: "No subscription found for this account" });
       }
