@@ -443,6 +443,23 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     }
   }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast, currentPrice, visiblePriceRange]);
 
+  // Must be declared before any early return — hooks cannot run conditionally (React #310).
+  const beginTpslDrag = useCallback((e: React.PointerEvent, line: {
+    price: number;
+    isGhost?: boolean;
+    editType?: "tp" | "sl";
+  }) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragStartPriceRef.current = line.price;
+    dragFromGhostRef.current = !!line.isGhost;
+    dragPriceRef.current = line.price;
+    setDragPrice(line.price);
+    setDragging(line.editType!);
+  }, []);
+
   if (!position) return null;
 
   const isLong = position.side === "long";
@@ -506,18 +523,6 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
     isGhost?: boolean;
     rowZ?: number;
   }
-
-  const beginTpslDrag = useCallback((e: React.PointerEvent, line: LineConfig) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-    if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragStartPriceRef.current = line.price;
-    dragFromGhostRef.current = !!line.isGhost;
-    dragPriceRef.current = line.price;
-    setDragPrice(line.price);
-    setDragging(line.editType!);
-  }, []);
 
   const lines: LineConfig[] = [];
 
