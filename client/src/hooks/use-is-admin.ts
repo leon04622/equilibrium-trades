@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useWallet } from "@/lib/wallet-context";
+import { isAdminWallet } from "@shared/schema";
 
 export function useIsAdmin() {
   const { address } = useWallet();
+  const builtInAdmin = address ? isAdminWallet(address) : false;
 
   const query = useQuery({
     queryKey: ["/api/wallet/is-admin", address],
@@ -13,13 +15,13 @@ export function useIsAdmin() {
       if (!res.ok) return { isAdmin: false };
       return res.json() as Promise<{ isAdmin: boolean }>;
     },
-    enabled: !!address,
+    enabled: !!address && !builtInAdmin,
     staleTime: 60_000,
   });
 
   return {
-    isAdmin: query.data?.isAdmin ?? false,
-    isLoading: query.isLoading,
+    isAdmin: builtInAdmin || query.data?.isAdmin === true,
+    isLoading: !builtInAdmin && !!address && query.isLoading,
     refetch: query.refetch,
   };
 }

@@ -391,7 +391,7 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 z-10 overflow-hidden"
+      className="absolute inset-0 z-[15] overflow-hidden"
       style={{ pointerEvents: "none", height: containerHeight || undefined }}
       data-testid="chart-order-lines"
     >
@@ -418,35 +418,47 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
         const yPct = toYPct(line.price);
         if (yPct < -8 || yPct > 108) return null;
         const isEditing = editMode === line.editType;
+        const isTpSl = line.editType === "tp" || line.editType === "sl";
+        const useDragBand = isTpSl && !!coordinateToPrice;
 
         return (
           <div
             key={line.key}
             className="absolute left-0 right-0"
-            style={{ top: `${yPct}%`, transform: "translateY(-50%)" }}
+            style={
+              useDragBand
+                ? { top: `calc(${yPct}% - 22px)`, height: 44, zIndex: 24 }
+                : { top: `${yPct}%`, transform: "translateY(-50%)" }
+            }
           >
-            {/* Full-width dashed line */}
+            {/* Full-width dashed price line */}
             <div
-              className="absolute left-0 right-0 h-0"
+              className={cn(
+                "absolute left-0 right-0 h-0 pointer-events-none",
+                useDragBand && "top-1/2 -translate-y-1/2"
+              )}
               style={{
                 borderTop: `1px dashed ${line.lineColor}`,
                 opacity: line.isGhost ? 0.45 : 0.75,
               }}
             />
 
-            {/* Drag handle strip for TP and SL (including ghost “set” lines) */}
-            {(line.editType === "tp" || line.editType === "sl") && coordinateToPrice && (
+            {/* Full-height hit band for TP/SL — parent has real 44px height so drags register */}
+            {useDragBand && (
               <div
-                className="absolute left-0 right-0 touch-none"
-                style={{ height: 22, top: -11, cursor: "ns-resize", pointerEvents: "auto", zIndex: 25, touchAction: "none" }}
+                className="absolute inset-0 touch-none"
+                style={{ cursor: "ns-resize", pointerEvents: "auto", touchAction: "none" }}
+                title="Drag to move TP/SL"
                 onPointerDown={(e) => {
                   if (e.button !== 0 && e.pointerType === "mouse") return;
                   e.preventDefault();
+                  e.stopPropagation();
                   dragPriceRef.current = null;
                   setDragging(line.editType!);
                 }}
                 onMouseDown={(e) => {
                   e.preventDefault();
+                  e.stopPropagation();
                   dragPriceRef.current = null;
                   setDragging(line.editType!);
                 }}
@@ -464,9 +476,10 @@ export function ChartOrderLines({ coin, currentPrice, visiblePriceRange, coordin
                 className="absolute"
                 style={{
                   left: "50%",
+                  top: useDragBand ? "50%" : undefined,
                   transform: "translateX(-50%) translateY(-50%)",
                   pointerEvents: "auto",
-                  zIndex: 30,
+                  zIndex: 36,
                 }}
               >
                 {isEditing ? (

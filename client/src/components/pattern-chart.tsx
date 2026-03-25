@@ -655,8 +655,6 @@ function PatternChartComponent({
     const position = positions.find(p => p.coin === coin);
     if (!position) return;
 
-    const coinOrders = openOrders.filter(o => o.coin === coin);
-
     const entryLine = series.createPriceLine({
       price: position.entryPrice,
       color: "#60a5fa",
@@ -679,25 +677,9 @@ function PatternChartComponent({
       priceLineRefs.current.push(liqLine);
     }
 
-    for (const order of coinOrders) {
-      const isTP = order.orderType === "take_profit" ||
-        (position.side === "long"
-          ? parseFloat(order.triggerPx || order.limitPx) > position.entryPrice
-          : parseFloat(order.triggerPx || order.limitPx) < position.entryPrice);
-      const orderPrice = parseFloat(order.triggerPx || order.limitPx);
-      if (!orderPrice || isNaN(orderPrice)) continue;
-
-      const orderLine = series.createPriceLine({
-        price: orderPrice,
-        color: isTP ? "#22c55e" : "#ef4444",
-        lineWidth: 1,
-        lineStyle: 1,
-        axisLabelVisible: true,
-        title: isTP ? "TP" : "SL",
-      });
-      priceLineRefs.current.push(orderLine);
-    }
-  }, [positions, openOrders, coin]);
+    // TP/SL are NOT drawn on the canvas — only on <ChartOrderLines> so drag/edit hit-tests work.
+    // Native price lines sat on the series and stole pointer events from the HTML overlay.
+  }, [positions, coin]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -706,8 +688,8 @@ function PatternChartComponent({
     <div ref={outerRef} className={`flex flex-col overflow-hidden ${className}`} style={{ background: BG }}>
 
       {/* ── Main chart pane ── */}
-      <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative overflow-hidden">
-        <div ref={mainContainerRef} className="absolute inset-0" data-testid="pattern-chart" />
+      <div style={{ flexGrow: weights[0], minHeight: 100 }} className="relative isolate overflow-hidden">
+        <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
         <ChartOrderLines
           coin={coin}
           currentPrice={currentPrice ?? 0}

@@ -401,6 +401,11 @@ export default function Trading({ visible = true }: TradingProps) {
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
 
+            {chartEngine === "tradingview" && (
+              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[140px] leading-tight shrink-0">
+                TV chart: switch to <strong className="text-foreground">AI</strong> for draggable TP/SL
+              </span>
+            )}
             <div
               className="flex items-center gap-0.5 shrink-0 border-r border-border/50 pr-1 mr-0.5"
               title="AI = native chart, patterns, TP/SL. TV = TradingView embed."
