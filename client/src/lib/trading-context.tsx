@@ -699,7 +699,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } finally {
       isPlacingTPSLRef.current = false;
     }
-  }, [signer, openOrders, positions, refreshAccount]);
+  }, [signer, openOrders, positions, refreshAccount, currentPrices]);
 
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);

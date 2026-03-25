@@ -176,11 +176,16 @@ function PatternChartComponent({
   const [chartVersion, setChartVersion] = useState(0);
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
 
+  // Y must be relative to the candlestick pane (LW v5 multi-pane / volume subplot).
   const coordinateToPrice = useCallback((clientY: number): number | null => {
-    if (!mainContainerRef.current || !candleSeriesRef.current) return null;
-    const rect = mainContainerRef.current.getBoundingClientRect();
-    const yRel = clientY - rect.top;
-    const price = candleSeriesRef.current.coordinateToPrice(yRel);
+    const series = candleSeriesRef.current;
+    const chart = mainChartRef.current;
+    if (!series || !chart) return null;
+    const pane0 = chart.panes()[0];
+    const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
+    if (!paneEl) return null;
+    const yRel = clientY - paneEl.getBoundingClientRect().top;
+    const price = series.coordinateToPrice(yRel);
     return price !== null && price !== undefined ? Number(price) : null;
   }, []);
 
