@@ -105,6 +105,16 @@ try {
     throw new Error("candles expected non-empty array");
   console.log("verify: ✓ GET /api/hyperliquid/candles/BTC");
 
+  // Ensures bundled CJS + p-limit (educational scan) work — regression caught on Railway.
+  const pat = await fetch(
+    `${base}/api/signals/patterns?coins=BTC&timeframes=1h`
+  );
+  if (!pat.ok) throw new Error(`/api/signals/patterns ${pat.status}`);
+  const patterns = await pat.json();
+  if (!Array.isArray(patterns))
+    throw new Error(`/api/signals/patterns expected array, got ${typeof patterns}`);
+  console.log("verify: ✓ GET /api/signals/patterns (educational scan)");
+
   const idx = await fetch(`${base}/`);
   if (!idx.ok) throw new Error(`GET / ${idx.status}`);
   console.log("verify: ✓ GET / (static)");
