@@ -14,74 +14,158 @@ import {
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getAddress } from "ethers";
 import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
-import { ensureHyperliquidTradingSession } from "@/lib/hyperliquid-client";
+import {
+  ensureHyperliquidTradingSession,
+  isHyperliquidTradingSessionReady,
+} from "@/lib/hyperliquid-client";
+import { ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
+import { isUserRejectedWalletError, parseApiRequestError } from "@/lib/wallet-errors";
 
 type Step = "idle" | "signing" | "registering" | "hyperliquid" | "complete" | "error";
 
 export function BuilderCodeModal() {
-  const { address, isConnected, signer, builderCodeApproved, isCheckingApproval, refreshApprovalStatus } = useWallet();
+  const {
+    address,
+    isConnected,
+    signer,
+    builderCodeApproved,
+    isCheckingApproval,
+    refreshApprovalStatus,
+    provider,
+    chainId,
+    switchToArbitrum,
+  } = useWallet();
   const { toast } = useToast();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  // Stay open through Hyperliquid agent + builder-fee signatures after Equilibrium API approval.
+  const hlReady = Boolean(address && isHyperliquidTradingSessionReady(address));
+
+  // Stay open until Equilibrium approval + Hyperliquid session; keep open if HL failed after API success.
   const isOpen =
     isConnected &&
     !isCheckingApproval &&
     step !== "complete" &&
     (!builderCodeApproved ||
+      !hlReady ||
       step === "signing" ||
       step === "registering" ||
       step === "hyperliquid");
 
   useEffect(() => {
-    if (builderCodeApproved) {
+    if (builderCodeApproved && hlReady) {
       setStep("complete");
     }
-  }, [builderCodeApproved]);
+  }, [builderCodeApproved, hlReady]);
 
   const handleSign = async () => {
     if (!signer || !address) return;
     setError(null);
 
-    const message = buildEquilibriumBuilderApprovalMessage();
+    let normalizedAddress: string;
+    try {
+      normalizedAddress = getAddress(address);
+      const signerAddr = getAddress(await signer.getAddress());
+      if (signerAddr !== normalizedAddress) {
+        setError(
+          "Wallet mismatch: the active signer does not match your connected address. Reconnect your wallet and try again.",
+        );
+        setStep("idle");
+        return;
+      }
+    } catch {
+      setError("Could not read your wallet address. Reconnect and try again.");
+      setStep("idle");
+      return;
+    }
+
+    const timestampMs = Date.now();
+    const message = buildEquilibriumBuilderApprovalMessage(normalizedAddress, timestampMs);
+    let phase: "equilibrium" | "api" | "hyperliquid" = "equilibrium";
 
     try {
       setStep("signing");
-      const signature = await signer.signMessage(message);
+      phase = "equilibrium";
+      let signature: string;
+      try {
+        signature = await signer.signMessage(message);
+      } catch (e) {
+        if (isUserRejectedWalletError(e)) {
+          setError("You cancelled the Equilibrium sign-in message in your wallet. Tap Approve & Continue to try again.");
+          setStep("idle");
+          return;
+        }
+        throw e;
+      }
 
       setStep("registering");
+      phase = "api";
       const res = await apiRequest("POST", "/api/wallet-user/approve-builder-code", {
-        walletAddress: address,
+        walletAddress: normalizedAddress,
         signature,
         message,
       });
       const data = await res.json();
 
-      if (data.success) {
-        setStep("hyperliquid");
-        const hl = await ensureHyperliquidTradingSession(signer);
-        if (!hl.success) {
-          throw new Error(hl.error || "Hyperliquid trading session setup failed.");
-        }
-        await refreshApprovalStatus();
-        setStep("complete");
-        toast({
-          title: "You're ready to trade",
-          description: "Equilibrium is linked and Hyperliquid will no longer ask for a signature on each order.",
-        });
-      } else {
-        throw new Error(data.error || "Approval failed");
-      }
-    } catch (err: any) {
-      if (err.code === 4001 || err.message?.includes("rejected") || err.message?.includes("denied")) {
-        setError("Signature rejected. Please approve the message to access the platform.");
+      if (!data.success) {
+        setError(data.error || "Approval was not saved. Please try again.");
         setStep("idle");
-      } else {
-        setError(err.message || "Something went wrong. Please try again.");
-        setStep("error");
+        return;
       }
+
+      await refreshApprovalStatus();
+
+      if (provider && chainId !== null && chainId !== ARBITRUM_CHAIN_ID) {
+        try {
+          await switchToArbitrum();
+        } catch {
+          throw new Error(
+            "Switch to Arbitrum One (chain 42161) in your wallet for Hyperliquid setup, then tap Approve & Continue again.",
+          );
+        }
+        const net = await provider.getNetwork();
+        if (Number(net.chainId) !== ARBITRUM_CHAIN_ID) {
+          throw new Error(
+            "Wrong network: Hyperliquid setup needs Arbitrum One (42161). Switch in your wallet and try again.",
+          );
+        }
+      }
+
+      setStep("hyperliquid");
+      phase = "hyperliquid";
+      const hl = await ensureHyperliquidTradingSession(signer);
+      if (!hl.success) {
+        setError(
+          hl.error ||
+            "Hyperliquid setup did not finish. Approve the agent and builder-fee prompts in your wallet, then try again.",
+        );
+        setStep("idle");
+        return;
+      }
+
+      await refreshApprovalStatus();
+      setStep("complete");
+      toast({
+        title: "You're ready to trade",
+        description: "Equilibrium is linked and Hyperliquid will no longer ask for a signature on each order.",
+      });
+    } catch (err: unknown) {
+      console.error("Builder / HL setup:", err);
+      if (phase === "api") {
+        const apiMsg = parseApiRequestError(err);
+        setError(apiMsg ?? (err instanceof Error ? err.message : "Could not verify your signature. Please try again."));
+        setStep("idle");
+        return;
+      }
+      if (phase === "hyperliquid") {
+        setError(err instanceof Error ? err.message : "Hyperliquid setup failed.");
+        setStep("idle");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setStep("error");
     }
   };
 

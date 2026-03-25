@@ -8,7 +8,10 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
 import { apiRequest } from "@/lib/queryClient";
+import { getAddress } from "ethers";
 import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
+import { isUserRejectedWalletError, parseApiRequestError } from "@/lib/wallet-errors";
+import { ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
 import { ensureHyperliquidTradingSession } from "@/lib/hyperliquid-client";
 
 type OnboardingStep =
@@ -28,7 +31,17 @@ interface OnboardingFlowProps {
 export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const { address, isConnected, isConnecting, connect, signer } = useWallet();
+  const {
+    address,
+    isConnected,
+    isConnecting,
+    connect,
+    signer,
+    provider,
+    chainId,
+    switchToArbitrum,
+    refreshApprovalStatus,
+  } = useWallet();
   const [step, setStep] = useState<OnboardingStep>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isApproved, setIsApproved] = useState(false);
@@ -92,61 +105,143 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
 
     setStep("signing");
 
-    const approvalMessage = buildEquilibriumBuilderApprovalMessage();
+    let normalizedAddress: string;
+    try {
+      normalizedAddress = getAddress(address);
+      const signerAddr = getAddress(await signer.getAddress());
+      if (signerAddr !== normalizedAddress) {
+        setError(
+          "Wallet mismatch: the active signer does not match your connected address. Reconnect and try again.",
+        );
+        setStep("idle");
+        return;
+      }
+    } catch {
+      setError("Could not read your wallet address. Reconnect and try again.");
+      setStep("idle");
+      return;
+    }
+
+    const timestampMs = Date.now();
+    const approvalMessage = buildEquilibriumBuilderApprovalMessage(normalizedAddress, timestampMs);
+    let phase: "equilibrium" | "api" | "hyperliquid" = "equilibrium";
 
     try {
-      const signature = await signer.signMessage(approvalMessage);
+      phase = "equilibrium";
+      let signature: string;
+      try {
+        signature = await signer.signMessage(approvalMessage);
+      } catch (e) {
+        if (isUserRejectedWalletError(e)) {
+          setError("You cancelled the Equilibrium sign-in message in your wallet. Tap continue to try again.");
+          setStep("idle");
+          toast({
+            title: "Signature cancelled",
+            description: "You need to sign once to continue. You can try again anytime.",
+            variant: "destructive",
+          });
+          return;
+        }
+        throw e;
+      }
 
       setStep("registering");
+      phase = "api";
 
       const response = await apiRequest("POST", "/api/wallet-user/approve-builder-code", {
-        walletAddress: address,
+        walletAddress: normalizedAddress,
         signature,
         message: approvalMessage,
       });
 
       const data = await response.json();
-      
-      if (data.success) {
-        setStep("hyperliquid");
-        const hl = await ensureHyperliquidTradingSession(signer);
-        if (!hl.success) {
-          throw new Error(hl.error || "Hyperliquid trading session setup failed.");
-        }
-        setIsApproved(true);
-        setStep("complete");
 
-        toast({
-          title: "Account ready",
-          description: "You're set up. Redirecting to trading…",
-        });
-
-        if (onComplete) {
-          onComplete();
-        } else {
-          setTimeout(() => navigate("/trading"), 1500);
-        }
-      } else {
-        throw new Error(data.error || "Failed to approve builder code");
-      }
-    } catch (err: any) {
-      if (err.code === 4001 || err.message?.includes("rejected")) {
-        setError("Signature rejected. Please approve the message to continue.");
+      if (!data.success) {
+        setError(data.error || "Failed to approve builder code");
         setStep("idle");
         toast({
-          title: "Signature Rejected",
-          description: "You need to sign the message to approve the builder code.",
+          title: "Approval failed",
+          description: data.error || "Failed to approve builder code",
           variant: "destructive",
         });
-      } else {
-        setError(err.message || "Failed to complete onboarding");
-        setStep("error");
-        toast({
-          title: "Error",
-          description: err.message || "Failed to complete onboarding",
-          variant: "destructive",
-        });
+        return;
       }
+
+      await refreshApprovalStatus();
+
+      if (provider && chainId !== null && chainId !== ARBITRUM_CHAIN_ID) {
+        try {
+          await switchToArbitrum();
+        } catch {
+          throw new Error(
+            "Switch to Arbitrum One (chain 42161) in your wallet for Hyperliquid setup, then try again.",
+          );
+        }
+        const net = await provider.getNetwork();
+        if (Number(net.chainId) !== ARBITRUM_CHAIN_ID) {
+          throw new Error(
+            "Wrong network: Hyperliquid setup needs Arbitrum One (42161). Switch in your wallet and try again.",
+          );
+        }
+      }
+
+      setStep("hyperliquid");
+      phase = "hyperliquid";
+      const hl = await ensureHyperliquidTradingSession(signer);
+      if (!hl.success) {
+        setError(
+          hl.error ||
+            "Hyperliquid setup did not finish. Approve the wallet prompts, then continue from the trading page banner if needed.",
+        );
+        setStep("idle");
+        toast({
+          title: "Hyperliquid setup incomplete",
+          description: hl.error || "Approve the Hyperliquid prompts in your wallet and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await refreshApprovalStatus();
+      setIsApproved(true);
+      setStep("complete");
+
+      toast({
+        title: "Account ready",
+        description: "You're set up. Redirecting to trading…",
+      });
+
+      if (onComplete) {
+        onComplete();
+      } else {
+        setTimeout(() => navigate("/trading"), 1500);
+      }
+    } catch (err: unknown) {
+      console.error("Onboarding sign flow:", err);
+      if (phase === "api") {
+        const apiMsg = parseApiRequestError(err);
+        const msg =
+          apiMsg ?? (err instanceof Error ? err.message : "Could not verify your signature. Please try again.");
+        setError(msg);
+        setStep("idle");
+        toast({ title: "Verification failed", description: msg, variant: "destructive" });
+        return;
+      }
+      if (phase === "hyperliquid") {
+        const msg = err instanceof Error ? err.message : "Hyperliquid setup failed.";
+        setError(msg);
+        setStep("idle");
+        toast({ title: "Error", description: msg, variant: "destructive" });
+        return;
+      }
+      const msg = err instanceof Error ? err.message : "Failed to complete onboarding";
+      setError(msg);
+      setStep("error");
+      toast({
+        title: "Error",
+        description: msg,
+        variant: "destructive",
+      });
     }
   };
 

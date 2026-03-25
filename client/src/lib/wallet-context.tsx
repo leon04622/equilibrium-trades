@@ -41,7 +41,7 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
-const ARBITRUM_CHAIN_ID = 42161;
+export const ARBITRUM_CHAIN_ID = 42161;
 
 declare global {
   interface Window {

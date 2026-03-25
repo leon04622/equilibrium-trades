@@ -7,6 +7,9 @@ import {
   HL_REFERRAL_CODE as PLATFORM_REFERRAL_CODE,
   isBuilderFeeConfigured,
 } from "@/lib/hyperliquid-platform-config";
+import { isUserRejectedWalletError } from "@/lib/wallet-errors";
+
+type HlWalletAuthStep = "ok" | "user_cancelled" | "failed";
 
 const INFO_API_URL = "https://api.hyperliquid.xyz/info";
 const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
@@ -157,8 +160,19 @@ export async function ensureHyperliquidTradingSession(
     if (!stored) {
       const agent = generateAgentKey();
       const authorized = await authorizeAgent(signer, agent.address);
-      if (!authorized) {
-        return { success: false, error: "Hyperliquid agent authorization was rejected or failed." };
+      if (authorized === "user_cancelled") {
+        return {
+          success: false,
+          error:
+            "You cancelled the Hyperliquid trading key step in your wallet. Your Equilibrium sign-in is already saved — tap Approve & Continue to finish setup.",
+        };
+      }
+      if (authorized !== "ok") {
+        return {
+          success: false,
+          error:
+            "Hyperliquid could not register your trading key. Check your connection and try again.",
+        };
       }
       storeAgent(userAddress, {
         ...agent,
@@ -173,14 +187,20 @@ export async function ensureHyperliquidTradingSession(
     if (isBuilderFeeConfigured()) {
       const feeKey = builderFeeApprovedKey(userAddress);
       if (!localStorage.getItem(feeKey)) {
-        const feeApproved = await approveBuilderFee(signer);
-        if (feeApproved) {
+        const feeResult = await approveBuilderFee(signer);
+        if (feeResult === "ok") {
           localStorage.setItem(feeKey, "1");
+        } else if (feeResult === "user_cancelled") {
+          return {
+            success: false,
+            error:
+              "You cancelled the Hyperliquid builder fee step in your wallet. Approve it once so routed orders can include the platform fee, then try again.",
+          };
         } else {
           return {
             success: false,
             error:
-              "Hyperliquid builder fee approval was rejected or failed. Approve it so routed orders can include the platform fee.",
+              "Hyperliquid builder fee approval failed. Check your connection and try again.",
           };
         }
       }
@@ -205,7 +225,7 @@ function generateAgentKey(): { privateKey: string; address: string } {
 async function authorizeAgent(
   signer: JsonRpcSigner,
   agentAddress: string
-): Promise<boolean> {
+): Promise<HlWalletAuthStep> {
   // Ensure time is synced before authorization
   await syncServerTime();
   const nonce = getSyncedTimestamp();
@@ -279,24 +299,24 @@ async function authorizeAgent(
     console.log("Agent authorization response:", result);
     
     if (result.status === "ok") {
-      return true;
-    } else {
-      console.error("Agent authorization failed:", result);
-      return false;
+      return "ok";
     }
+    console.error("Agent authorization failed:", result);
+    return "failed";
   } catch (error) {
     console.error("Agent authorization error:", error);
-    return false;
+    if (isUserRejectedWalletError(error)) return "user_cancelled";
+    return "failed";
   }
 }
 
 // Submit approveBuilderFee action to Hyperliquid so the platform earns a fee on the user's trades
-async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
+async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthStep> {
   if (!isBuilderFeeConfigured()) {
     console.warn(
       "VITE_BUILDER_ADDRESS not set or invalid — skipping builder fee approval (set in .env.production and rebuild)"
     );
-    return false;
+    return "failed";
   }
 
   await syncServerTime();
@@ -352,10 +372,11 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
 
     const result = await response.json();
     console.log("approveBuilderFee response:", result);
-    return result.status === "ok";
+    return result.status === "ok" ? "ok" : "failed";
   } catch (error) {
     console.error("approveBuilderFee error:", error);
-    return false;
+    if (isUserRejectedWalletError(error)) return "user_cancelled";
+    return "failed";
   }
 }
 

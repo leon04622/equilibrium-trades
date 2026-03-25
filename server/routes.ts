@@ -532,32 +532,68 @@ export async function registerRoutes(
 
       const { walletAddress, signature, message } = validated.data;
 
-      // Verify the signature using ethers
       const { ethers } = await import("ethers");
-      
+
+      let normalizedWallet: string;
       try {
-        // Recover the address from the signature
-        const recoveredAddress = ethers.verifyMessage(message, signature);
-        
-        // Compare addresses (case-insensitive)
-        if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-          return res.status(400).json({ error: "Invalid signature - address mismatch" });
+        normalizedWallet = ethers.getAddress(walletAddress).toLowerCase();
+      } catch {
+        return res.status(400).json({ error: "Invalid wallet address" });
+      }
+
+      if (typeof message !== "string" || !message.trim()) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      const text = message.replace(/\r\n/g, "\n");
+      const lines = text.split("\n");
+      const checksummed = ethers.getAddress(walletAddress);
+      if (lines[0] !== "Sign in to Equilibrium Trading" || lines[1] !== `Wallet: ${checksummed}`) {
+        return res.status(400).json({ error: "Sign-in message does not match expected format" });
+      }
+      const tsMatch = /^Timestamp: (\d+)$/.exec(lines[2] ?? "");
+      if (!tsMatch) {
+        return res.status(400).json({ error: "Invalid or missing timestamp in sign-in message" });
+      }
+      const ts = parseInt(tsMatch[1], 10);
+      const skewMs = 24 * 60 * 60 * 1000;
+      if (Number.isNaN(ts) || Math.abs(Date.now() - ts) > skewMs) {
+        return res.status(400).json({
+          error: "Sign-in message expired or invalid timestamp — please try again",
+        });
+      }
+      if (!(lines[3] ?? "").includes("EQUILIBRIUM_BUILDER")) {
+        return res.status(400).json({ error: "Sign-in message is missing builder authorization line" });
+      }
+
+      try {
+        const recoveredAddress = ethers.verifyMessage(text, signature);
+        const recoveredLower = ethers.getAddress(recoveredAddress).toLowerCase();
+        if (recoveredLower !== normalizedWallet) {
+          console.warn("Builder approval: recovered signer !== claimed wallet", {
+            recovered: recoveredLower,
+            claimed: normalizedWallet,
+          });
+          return res.status(400).json({
+            error: "Wallet mismatch — the signature does not match the connected address.",
+          });
         }
       } catch (sigError) {
         console.error("Signature verification error:", sigError);
-        return res.status(400).json({ error: "Invalid signature format" });
+        return res.status(400).json({
+          error: "Invalid signature — try again or disconnect and reconnect your wallet.",
+        });
       }
 
       // Check if user exists, create if not
-      let user = await storage.getWalletUser(walletAddress);
+      let user = await storage.getWalletUser(normalizedWallet);
       if (!user) {
-        user = await storage.createWalletUser({ 
-          walletAddress, 
-          builderCodeApproved: true 
+        user = await storage.createWalletUser({
+          walletAddress: normalizedWallet,
+          builderCodeApproved: true,
         });
       } else {
-        // Update existing user
-        user = await storage.updateWalletUserApproval(walletAddress, true);
+        user = await storage.updateWalletUserApproval(normalizedWallet, true);
       }
 
       res.json({ 
