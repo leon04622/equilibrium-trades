@@ -1,6 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { BrowserProvider, JsonRpcSigner } from "ethers";
-import { trySetReferrer } from "@/lib/hyperliquid-client";
+import {
+  trySetReferrer,
+  ensureHyperliquidTradingSession,
+  isHyperliquidTradingSessionReady,
+  clearHyperliquidTradingSession,
+} from "@/lib/hyperliquid-client";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
 
@@ -20,6 +25,10 @@ interface WalletContextType {
   provider: BrowserProvider | null;
   builderCodeApproved: boolean;
   isCheckingApproval: boolean;
+  /** Hyperliquid delegated agent + builder fee approved locally; orders use agent signing only. */
+  hyperliquidSessionReady: boolean;
+  isPreparingHyperliquidSession: boolean;
+  prepareHyperliquidSession: () => Promise<{ success: boolean; error?: string }>;
   detectedWallets: DetectedWallet[];
   isMobile: boolean;
   connectError: string | null;
@@ -211,6 +220,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [builderCodeApproved, setBuilderCodeApproved] = useState(false);
   const [isCheckingApproval, setIsCheckingApproval] = useState(false);
+  const [hyperliquidSessionReady, setHyperliquidSessionReady] = useState(false);
+  const [isPreparingHyperliquidSession, setIsPreparingHyperliquidSession] = useState(false);
   const [detectedWallets, setDetectedWallets] = useState<DetectedWallet[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -288,10 +299,62 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [address, refreshApprovalStatus]);
 
-  // After platform builder approval only — avoids wallet EIP-712 prompts before the EIP-191 setup modal
+  // Refresh from localStorage when the wallet address changes (silent re-auth after page reload).
+  useEffect(() => {
+    if (!address) {
+      setHyperliquidSessionReady(false);
+      return;
+    }
+    setHyperliquidSessionReady(isHyperliquidTradingSessionReady(address));
+  }, [address]);
+
+  const prepareHyperliquidSession = useCallback(async () => {
+    if (!signer || !address) {
+      return { success: false, error: "Wallet not connected" };
+    }
+    setIsPreparingHyperliquidSession(true);
+    try {
+      const result = await ensureHyperliquidTradingSession(signer);
+      if (result.success) {
+        setHyperliquidSessionReady(true);
+        await trySetReferrer(signer);
+      } else {
+        setHyperliquidSessionReady(isHyperliquidTradingSessionReady(address));
+      }
+      return result;
+    } finally {
+      setIsPreparingHyperliquidSession(false);
+    }
+  }, [signer, address]);
+
+  // After Equilibrium builder approval: one-time Hyperliquid agent + builder fee (EIP-712), then referral.
   useEffect(() => {
     if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;
-    trySetReferrer(signer).catch(() => {});
+
+    if (isHyperliquidTradingSessionReady(address)) {
+      setHyperliquidSessionReady(true);
+      trySetReferrer(signer).catch(() => {});
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setIsPreparingHyperliquidSession(true);
+      try {
+        const result = await ensureHyperliquidTradingSession(signer);
+        if (cancelled) return;
+        if (result.success) {
+          setHyperliquidSessionReady(true);
+          await trySetReferrer(signer);
+        }
+      } finally {
+        if (!cancelled) setIsPreparingHyperliquidSession(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [signer, address, builderCodeApproved, isCheckingApproval]);
 
   const handleAccountsChanged = useCallback(async (accounts: string[]) => {
@@ -515,15 +578,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [isMobile]);
 
   const disconnect = useCallback(() => {
+    const prev = address;
     localStorage.setItem(WALLET_DISCONNECTED_KEY, 'true');
     activeInjectedRef.current = null;
+    if (prev) {
+      clearHyperliquidTradingSession(prev);
+    }
     setAddress(null);
     setSigner(null);
     setProvider(null);
     setChainId(null);
     setBuilderCodeApproved(false);
+    setHyperliquidSessionReady(false);
     setConnectError(null);
-  }, []);
+  }, [address]);
 
   const switchToArbitrum = useCallback(async () => {
     const raw = activeInjectedRef.current ?? window.ethereum;
@@ -562,6 +630,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       provider,
       builderCodeApproved,
       isCheckingApproval,
+      hyperliquidSessionReady,
+      isPreparingHyperliquidSession,
+      prepareHyperliquidSession,
       detectedWallets,
       isMobile,
       connectError,

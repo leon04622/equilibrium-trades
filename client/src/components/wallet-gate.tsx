@@ -27,7 +27,8 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
   const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
 
-  if (isWalletGateDisabled() || isConnected || PUBLIC_PATHS.includes(location)) return <>{children}</>;
+  const path = typeof location === "string" ? location : "";
+  if (isWalletGateDisabled() || isConnected || PUBLIC_PATHS.includes(path)) return <>{children}</>;
 
   const handleEmailCapture = async (e: React.FormEvent) => {
     e.preventDefault();

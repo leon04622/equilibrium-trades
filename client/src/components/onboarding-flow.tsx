@@ -9,8 +9,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
 import { apiRequest } from "@/lib/queryClient";
 import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
+import { ensureHyperliquidTradingSession } from "@/lib/hyperliquid-client";
 
-type OnboardingStep = "idle" | "connecting" | "signing" | "registering" | "complete" | "error";
+type OnboardingStep =
+  | "idle"
+  | "connecting"
+  | "signing"
+  | "registering"
+  | "hyperliquid"
+  | "complete"
+  | "error";
 
 interface OnboardingFlowProps {
   onComplete?: () => void;
@@ -100,12 +108,17 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
       const data = await response.json();
       
       if (data.success) {
+        setStep("hyperliquid");
+        const hl = await ensureHyperliquidTradingSession(signer);
+        if (!hl.success) {
+          throw new Error(hl.error || "Hyperliquid trading session setup failed.");
+        }
         setIsApproved(true);
         setStep("complete");
-        
+
         toast({
-          title: "Account Created!",
-          description: "Your account is ready. Redirecting to trading...",
+          title: "Account ready",
+          description: "You're set up. Redirecting to trading…",
         });
 
         if (onComplete) {
@@ -141,7 +154,8 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
     switch (step) {
       case "connecting": return 33;
       case "signing": return 66;
-      case "registering": return 90;
+      case "registering": return 82;
+      case "hyperliquid": return 94;
       case "complete": return 100;
       default: return 0;
     }
@@ -152,6 +166,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
       case "connecting": return "Connecting wallet...";
       case "signing": return "Awaiting signature approval...";
       case "registering": return "Creating your account...";
+      case "hyperliquid": return "Hyperliquid session (one-time wallet prompts)...";
       case "complete": return "Account ready!";
       default: return "";
     }

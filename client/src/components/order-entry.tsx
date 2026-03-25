@@ -7,7 +7,6 @@ import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import {
   placeOrder as placeHyperliquidOrder,
-  trySetReferrer,
   setLeverage,
   getCoinMaxLeverage,
   isSpotCoin,
@@ -38,7 +37,16 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const isSpot = isSpotCoin(coin);
 
   const { balance, refreshAccount, placeTPSL } = useTrading();
-  const { isConnected, signer, connect, builderCodeApproved, isCheckingApproval } = useWallet();
+  const {
+    isConnected,
+    signer,
+    connect,
+    builderCodeApproved,
+    isCheckingApproval,
+    hyperliquidSessionReady,
+    isPreparingHyperliquidSession,
+    prepareHyperliquidSession,
+  } = useWallet();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -93,6 +101,26 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       return;
     }
 
+    if (isPreparingHyperliquidSession) {
+      toast({
+        title: "Finishing setup",
+        description: "Complete any Hyperliquid prompts in your wallet, then try again.",
+      });
+      return;
+    }
+
+    if (!hyperliquidSessionReady) {
+      const prep = await prepareHyperliquidSession();
+      if (!prep.success) {
+        toast({
+          title: "Hyperliquid setup required",
+          description: prep.error || "Approve the trading agent and builder fee in your wallet to place orders without repeat signatures.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const qty = getSizeNum();
     if (qty <= 0) {
       toast({ title: "Invalid size", description: "Enter a position size greater than 0.", variant: "destructive" });
@@ -110,9 +138,6 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
     const isSpot = isSpotCoin(coin);
     setIsSubmitting(true);
     try {
-      // Register referral code (best-effort, won't block order)
-      await trySetReferrer(signer);
-
       // Set leverage before placing order (perps only — spot has no leverage)
       if (!isSpot) {
         await setLeverage(signer, coin, leverage, true);

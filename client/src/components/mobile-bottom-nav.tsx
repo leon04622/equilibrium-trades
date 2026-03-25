@@ -12,13 +12,14 @@ const navItems = [
 
 export function MobileBottomNav() {
   const [location] = useLocation();
+  const path = typeof location === "string" ? location : "";
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="flex items-center justify-around h-14">
         {navItems.map((item) => {
-          const isActive = location === item.href || 
-            (item.href === "/trading" && location.startsWith("/trading"));
+          const isActive = path === item.href || 
+            (item.href === "/trading" && path.startsWith("/trading"));
           
           return (
             <Link

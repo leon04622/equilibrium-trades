@@ -87,16 +87,23 @@ export default function Trading({ visible = true }: TradingProps) {
   const { updatePrices } = useTrading();
   const { openPaywall } = usePaywall();
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
-  const { builderCodeApproved, isCheckingApproval: builderCheckLoading } = useWallet();
+  const {
+    builderCodeApproved,
+    isCheckingApproval: builderCheckLoading,
+    hyperliquidSessionReady,
+    isPreparingHyperliquidSession,
+    prepareHyperliquidSession,
+  } = useWallet();
   const [location] = useLocation();
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
   // update the selected coin. Wouter includes query string in location, so
   // we check startsWith and parse coin from the location string directly.
   useEffect(() => {
-    if (!location.startsWith("/trading")) return;
-    const qIndex = location.indexOf("?");
-    const search = qIndex !== -1 ? location.slice(qIndex) : window.location.search;
+    const path = typeof location === "string" ? location : "";
+    if (!path.startsWith("/trading")) return;
+    const qIndex = path.indexOf("?");
+    const search = qIndex !== -1 ? path.slice(qIndex) : window.location.search;
     const params = new URLSearchParams(search);
     const coinParam = params.get("coin");
     if (coinParam) {
@@ -262,7 +269,10 @@ export default function Trading({ visible = true }: TradingProps) {
       <div className={cn(
         "relative flex flex-wrap items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50",
         isFullscreen && "hidden md:flex",
-        isConnected && !builderCheckLoading && !builderCodeApproved && "pt-10 md:pt-10"
+        isConnected &&
+          !builderCheckLoading &&
+          (!builderCodeApproved || !hyperliquidSessionReady) &&
+          "pt-10 md:pt-10"
       )}>
         {isConnected && !builderCheckLoading && !builderCodeApproved && (
           <div className="absolute left-0 right-0 top-0 z-[60] flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/40 px-3 py-2 text-[11px] md:text-xs text-amber-200">
@@ -270,6 +280,27 @@ export default function Trading({ visible = true }: TradingProps) {
             <span className="hidden sm:inline opacity-90">— Approve the dialog to trade. You stay on Equilibrium.</span>
           </div>
         )}
+        {isConnected &&
+          !builderCheckLoading &&
+          builderCodeApproved &&
+          !hyperliquidSessionReady && (
+            <div className="absolute left-0 right-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-sky-500/15 border-b border-sky-500/35 px-3 py-2 text-[11px] md:text-xs text-sky-100">
+              <span className="font-medium">Finish Hyperliquid session</span>
+              <span className="hidden sm:inline opacity-90">
+                — One-time agent + fee approval; then orders and TP/SL need no wallet signatures.
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-7 text-[10px] md:text-xs shrink-0"
+                disabled={isPreparingHyperliquidSession}
+                onClick={() => prepareHyperliquidSession()}
+              >
+                {isPreparingHyperliquidSession ? "Waiting for wallet…" : "Continue in wallet"}
+              </Button>
+            </div>
+          )}
         <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
         
         <Separator orientation="vertical" className="h-6 hidden sm:block" />

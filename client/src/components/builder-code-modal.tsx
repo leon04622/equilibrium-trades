@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
+import { ensureHyperliquidTradingSession } from "@/lib/hyperliquid-client";
 
-type Step = "idle" | "signing" | "registering" | "complete" | "error";
+type Step = "idle" | "signing" | "registering" | "hyperliquid" | "complete" | "error";
 
 export function BuilderCodeModal() {
   const { address, isConnected, signer, builderCodeApproved, isCheckingApproval, refreshApprovalStatus } = useWallet();
@@ -24,11 +25,15 @@ export function BuilderCodeModal() {
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
 
+  // Stay open through Hyperliquid agent + builder-fee signatures after Equilibrium API approval.
   const isOpen =
     isConnected &&
     !isCheckingApproval &&
-    !builderCodeApproved &&
-    step !== "complete";
+    step !== "complete" &&
+    (!builderCodeApproved ||
+      step === "signing" ||
+      step === "registering" ||
+      step === "hyperliquid");
 
   useEffect(() => {
     if (builderCodeApproved) {
@@ -55,11 +60,16 @@ export function BuilderCodeModal() {
       const data = await res.json();
 
       if (data.success) {
-        setStep("complete");
+        setStep("hyperliquid");
+        const hl = await ensureHyperliquidTradingSession(signer);
+        if (!hl.success) {
+          throw new Error(hl.error || "Hyperliquid trading session setup failed.");
+        }
         await refreshApprovalStatus();
+        setStep("complete");
         toast({
-          title: "Platform access granted",
-          description: "Your account is set up and ready to trade.",
+          title: "You're ready to trade",
+          description: "Equilibrium is linked and Hyperliquid will no longer ask for a signature on each order.",
         });
       } else {
         throw new Error(data.error || "Approval failed");
@@ -77,7 +87,7 @@ export function BuilderCodeModal() {
 
   if (!isOpen) return null;
 
-  const isLoading = step === "signing" || step === "registering";
+  const isLoading = step === "signing" || step === "registering" || step === "hyperliquid";
 
   return (
     <Dialog open={isOpen} modal>
@@ -100,7 +110,7 @@ export function BuilderCodeModal() {
             One-Time Platform Setup
           </h2>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-xs mx-auto">
-            Sign a one-time message to authorise Equilibrium for trading. This is free and takes seconds.
+            One-time setup: approve Equilibrium, then authorize Hyperliquid&apos;s trading key. After that, orders and TP/SL use background signing — no repeat wallet popups.
           </p>
         </div>
 
@@ -152,6 +162,30 @@ export function BuilderCodeModal() {
               </p>
             </div>
           </div>
+
+          <div className={cn(
+            "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+            step === "hyperliquid" ? "bg-primary/10 border-primary/30" : "bg-muted/30 border-border/50"
+          )}>
+            <div className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+              step === "hyperliquid" ? "bg-primary/20" : "bg-muted"
+            )}>
+              {step === "hyperliquid" ? (
+                <Loader2 className="h-4 w-4 text-primary animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">Hyperliquid trading session</p>
+              <p className="text-xs text-muted-foreground">
+                {step === "hyperliquid"
+                  ? "Approve the agent and builder fee in your wallet (usually two prompts). Only once."
+                  : "Enables frictionless orders, TP/SL, and cancels"}
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Error */}
@@ -185,7 +219,11 @@ export function BuilderCodeModal() {
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                {step === "signing" ? "Waiting for signature…" : "Setting up account…"}
+                {step === "signing"
+                  ? "Waiting for signature…"
+                  : step === "hyperliquid"
+                  ? "Hyperliquid setup…"
+                  : "Setting up account…"}
               </>
             ) : (
               <>

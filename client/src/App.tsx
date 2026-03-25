@@ -108,7 +108,8 @@ function App() {
 function TradingLayout() {
   const [location] = useLocation();
   // Match /trading and /trading?coin=XYZ (wouter includes query string in location)
-  const isTrading = location === "/trading" || location.startsWith("/trading?");
+  const path = typeof location === "string" ? location : "";
+  const isTrading = path === "/trading" || path.startsWith("/trading?");
 
   return (
     <>

@@ -13,6 +13,9 @@ const EXCHANGE_API_URL = "https://api.hyperliquid.xyz/exchange";
 const AGENT_STORAGE_KEY = "hyperliquid_agent";
 const BUILDER_FEE_STORAGE_KEY = "hyperliquid_builder_fee_approved";
 
+/** In-memory only — cleared when HL trading session storage is cleared for an address. */
+const referralSetForSession = new Set<string>();
+
 // Get server-synced timestamp to avoid browser clock issues
 // The Replit preview can have significant clock drift compared to Hyperliquid servers
 let serverTimeOffset = 0;
@@ -106,6 +109,88 @@ function getStoredAgent(userAddress: string): StoredAgent | null {
 
 function storeAgent(userAddress: string, agent: StoredAgent): void {
   localStorage.setItem(`${AGENT_STORAGE_KEY}_${userAddress.toLowerCase()}`, JSON.stringify(agent));
+}
+
+function builderFeeApprovedKey(userAddress: string): string {
+  return `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
+}
+
+/** Clear delegated Hyperliquid agent + local builder-fee flag (call on wallet disconnect). */
+export function clearHyperliquidTradingSession(walletAddress: string): void {
+  try {
+    const addr = walletAddress.toLowerCase();
+    localStorage.removeItem(`${AGENT_STORAGE_KEY}_${addr}`);
+    localStorage.removeItem(builderFeeApprovedKey(walletAddress));
+  } catch {
+    /* ignore */
+  }
+  referralSetForSession.delete(walletAddress.toLowerCase());
+}
+
+/**
+ * True when a stored HL API-style agent exists and (if builder fee is configured) the user has
+ * approved max fee on Hyperliquid for this app. Used to skip redundant wallet prompts.
+ */
+export function isHyperliquidTradingSessionReady(walletAddress: string): boolean {
+  const agent = getStoredAgent(walletAddress);
+  if (!agent) return false;
+  if (!isBuilderFeeConfigured()) return true;
+  try {
+    return localStorage.getItem(builderFeeApprovedKey(walletAddress)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One-time Hyperliquid setup: authorize the local agent key (EIP-712) and approve builder fee (EIP-712).
+ * All later orders / TP-SL / cancel / leverage use {@link signL1ActionWithAgent} only — no wallet popups.
+ */
+export async function ensureHyperliquidTradingSession(
+  signer: JsonRpcSigner
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await syncServerTime();
+    const userAddress = await signer.getAddress();
+
+    let stored = getStoredAgent(userAddress);
+    if (!stored) {
+      const agent = generateAgentKey();
+      const authorized = await authorizeAgent(signer, agent.address);
+      if (!authorized) {
+        return { success: false, error: "Hyperliquid agent authorization was rejected or failed." };
+      }
+      storeAgent(userAddress, {
+        ...agent,
+        authorizedBy: userAddress,
+      });
+      stored = getStoredAgent(userAddress);
+      if (!stored) {
+        return { success: false, error: "Could not store trading session." };
+      }
+    }
+
+    if (isBuilderFeeConfigured()) {
+      const feeKey = builderFeeApprovedKey(userAddress);
+      if (!localStorage.getItem(feeKey)) {
+        const feeApproved = await approveBuilderFee(signer);
+        if (feeApproved) {
+          localStorage.setItem(feeKey, "1");
+        } else {
+          return {
+            success: false,
+            error:
+              "Hyperliquid builder fee approval was rejected or failed. Approve it so routed orders can include the platform fee.",
+          };
+        }
+      }
+    }
+
+    return { success: true };
+  } catch (e: any) {
+    console.error("ensureHyperliquidTradingSession:", e);
+    return { success: false, error: e?.message || "Hyperliquid session setup failed." };
+  }
 }
 
 function generateAgentKey(): { privateKey: string; address: string } {
@@ -276,53 +361,22 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<boolean> {
 
 export async function getOrCreateAgent(signer: JsonRpcSigner): Promise<{ privateKey: string; address: string } | null> {
   const userAddress = await signer.getAddress();
-  
-  // Check for existing agent
+
   const stored = getStoredAgent(userAddress);
   if (stored) {
     console.log("Using existing agent:", stored.address);
-
-    // If builder address is configured and fee hasn't been approved yet, do it now silently
-    if (isBuilderFeeConfigured()) {
-      const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
-      if (!localStorage.getItem(feeKey)) {
-        approveBuilderFee(signer).then((ok) => {
-          if (ok) localStorage.setItem(feeKey, "1");
-        }).catch(console.error);
-      }
-    }
-
     return { privateKey: stored.privateKey, address: stored.address };
   }
-  
-  // Generate new agent
-  console.log("Generating new agent key...");
-  const agent = generateAgentKey();
-  console.log("New agent address:", agent.address);
-  
-  // Authorize the agent
-  const authorized = await authorizeAgent(signer, agent.address);
-  if (!authorized) {
+
+  // Lazy creation (e.g. deep link) — still one-time wallet prompts, bundled here
+  const session = await ensureHyperliquidTradingSession(signer);
+  if (!session.success) {
+    console.error("getOrCreateAgent:", session.error);
     return null;
   }
 
-  // Approve builder fee so the platform earns on this user's trades
-  if (isBuilderFeeConfigured()) {
-    const feeKey = `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
-    const feeApproved = await approveBuilderFee(signer);
-    if (feeApproved) {
-      localStorage.setItem(feeKey, "1");
-      console.log("Builder fee approved for", userAddress);
-    }
-  }
-  
-  // Store the agent
-  storeAgent(userAddress, {
-    ...agent,
-    authorizedBy: userAddress,
-  });
-  
-  return agent;
+  const created = getStoredAgent(userAddress);
+  return created ? { privateKey: created.privateKey, address: created.address } : null;
 }
 
 export interface OrderRequest {
@@ -643,14 +697,12 @@ async function signL1ActionWithAgent(
 
 // Attempt to register the platform referral code for a new user.
 // Silently no-ops if already done this session, or if no referral code is set.
-const referralSetForSession = new Set<string>();
-
 export async function trySetReferrer(signer: JsonRpcSigner): Promise<void> {
   if (!PLATFORM_REFERRAL_CODE) return;
   try {
     const address = (await signer.getAddress()).toLowerCase();
     if (referralSetForSession.has(address)) return;
-    const agent = await getOrCreateAgent(signer);
+    const agent = getStoredAgent(address);
     if (!agent) return;
     const nonce = getUniqueNonce();
     const action = { type: "setReferrer", code: PLATFORM_REFERRAL_CODE };
@@ -746,9 +798,7 @@ export async function placeOrder(
       action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
     }
 
-    console.log("Requesting signature for action:", action);
     const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
-    console.log("Signature received:", signature);
 
     const payload = {
       action,
