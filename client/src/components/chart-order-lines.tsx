@@ -197,6 +197,8 @@ export function ChartOrderLines({
   positionRef.current = position;
   const coordinateToPriceRef = useRef(coordinateToPrice);
   coordinateToPriceRef.current = coordinateToPrice;
+  const activePointerElementRef = useRef<HTMLElement | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
   const visibleRangeRef = useRef(visiblePriceRange);
   visibleRangeRef.current = visiblePriceRange;
   const currentPriceRef = useRef(currentPrice);
@@ -286,6 +288,7 @@ export function ChartOrderLines({
     };
 
     const onMove = (e: MouseEvent | TouchEvent | PointerEvent) => {
+      if (!draggingRef.current) return;
       if (!coordinateToPriceRef.current) return;
       if ("preventDefault" in e && e.cancelable) e.preventDefault();
       const y = readY(e);
@@ -299,6 +302,17 @@ export function ChartOrderLines({
       const refPx = currentPriceRef.current;
       const coordFn = coordinateToPriceRef.current;
       const vr = visibleRangeRef.current;
+
+      // Release pointer capture, if set
+      if (activePointerElementRef.current && activePointerIdRef.current !== null) {
+        try {
+          activePointerElementRef.current.releasePointerCapture(activePointerIdRef.current);
+        } catch {
+          /* ignore */
+        }
+        activePointerElementRef.current = null;
+        activePointerIdRef.current = null;
+      }
 
       let raw = dragPriceRef.current;
       if (raw === null && coordFn && y !== null) {
@@ -443,6 +457,18 @@ export function ChartOrderLines({
       if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
       e.preventDefault();
       e.stopPropagation();
+
+      // Capture pointer to keep drag alive even if pointer momentarily leaves the drag region.
+      if (e.currentTarget.setPointerCapture) {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          activePointerElementRef.current = e.currentTarget as HTMLElement;
+          activePointerIdRef.current = e.pointerId;
+        } catch {
+          // Ignore pointer capture failures in unsupported browsers.
+        }
+      }
+
       dragStartPriceRef.current = line.price;
       dragFromGhostRef.current = !!line.isGhost;
       dragPriceRef.current = line.price;
