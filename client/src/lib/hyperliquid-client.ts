@@ -1049,6 +1049,101 @@ export interface TriggerOrderRequest {
   reduceOnly?: boolean;
 }
 
+/**
+ * Experimental: native trailing stop market (callback as fraction of mark, e.g. 0.02 = 2%).
+ * If the exchange rejects the payload shape, callers should fall back to a fixed trigger SL
+ * plus client-side ratchet + modify.
+ */
+export async function placeTrailingStopMarketOrder(
+  signer: JsonRpcSigner,
+  order: {
+    coin: string;
+    isBuy: boolean;
+    size: number;
+    /** Distance / mark, e.g. 0.015 = 1.5% */
+    callbackRate: number;
+    /** Initial stop anchor from the user drag (HL may require a trigger px). */
+    anchorTriggerPx: number;
+  },
+): Promise<OrderResponse> {
+  try {
+    const agent = await getOrCreateAgent(signer);
+    if (!agent) {
+      return { success: false, error: "Failed to authorize trading agent" };
+    }
+
+    const assetIndex = await getAssetIndex(order.coin);
+    if (assetIndex === null) {
+      return { success: false, error: `Unknown asset: ${order.coin}` };
+    }
+
+    const mid = (await getMidPrice(order.coin)) ?? order.anchorTriggerPx;
+    const SLIPPAGE = 0.05;
+    const limitPrice = order.isBuy ? mid * (1 + SLIPPAGE) : mid * (1 - SLIPPAGE);
+
+    const nonce = getUniqueNonce();
+
+    const orderWire: Record<string, unknown> = {
+      a: assetIndex,
+      b: order.isBuy,
+      p: floatToWire(limitPrice),
+      s: floatToWire(order.size),
+      r: true,
+      t: {
+        trailingStopMarket: {
+          isMarket: true,
+          callbackRate: floatToWire(order.callbackRate),
+          triggerPx: floatToWire(order.anchorTriggerPx),
+        },
+      },
+    };
+
+    const signerAddress = await signer.getAddress();
+    const action: Record<string, unknown> = {
+      type: "order",
+      orders: [orderWire],
+      grouping: "na",
+    };
+    if (shouldAttachBuilderToOrders(signerAddress)) {
+      action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
+    }
+
+    const signature = await signL1ActionWithAgent(agent.privateKey, action, nonce, null);
+    const payload = { action, nonce, signature, vaultAddress: null };
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    console.log("[placeTrailingStopMarketOrder] response:", JSON.stringify(result));
+
+    if (result.status === "ok") {
+      const statuses = result.response?.data?.statuses || [];
+      const resting = statuses.find((s: any) => s.resting);
+      const error = statuses.find((s: any) => s.error);
+      if (error) {
+        return { success: false, error: error.error };
+      }
+      return {
+        success: true,
+        orderId: resting?.resting?.oid?.toString() || "unknown",
+        status: "open",
+      };
+    }
+
+    return {
+      success: false,
+      error: result.response?.data || result.error || JSON.stringify(result),
+    };
+  } catch (error: any) {
+    console.error("Place trailing stop error:", error);
+    return { success: false, error: error.message || "Failed to place trailing stop" };
+  }
+}
+
 export async function placeTriggerOrder(
   signer: JsonRpcSigner,
   order: TriggerOrderRequest

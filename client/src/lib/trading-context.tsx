@@ -7,6 +7,7 @@ import {
   closePosition as hlClosePosition,
   cancelOrder as hlCancelOrder,
   placeTriggerOrder,
+  placeTrailingStopMarketOrder,
   type AccountState,
 } from "./hyperliquid-client";
 import {
@@ -51,6 +52,14 @@ export interface Indicator {
   color: string;
 }
 
+export interface PlaceTpslOptions {
+  /**
+   * When set with `slPrice`, attempts Hyperliquid `trailingStopMarket` first (callback vs mark),
+   * then falls back to a fixed reduce-only stop trigger at `slPrice`.
+   */
+  slTrailingCallbackRate?: number;
+}
+
 export interface HLOpenOrder {
   coin: string;
   oid: number;
@@ -91,7 +100,15 @@ interface TradingContextType {
   disconnect: () => void;
   closePosition: (positionId: string) => Promise<{ success: boolean; error?: string }>;
   cancelHLOrder: (coin: string, oid: number) => Promise<{ success: boolean; error?: string }>;
-  placeTPSL: (coin: string, size: number, isLong: boolean, tpPrice?: number, slPrice?: number, entryPriceOverride?: number) => Promise<{ success: boolean; error?: string }>;
+  placeTPSL: (
+    coin: string,
+    size: number,
+    isLong: boolean,
+    tpPrice?: number,
+    slPrice?: number,
+    entryPriceOverride?: number,
+    options?: PlaceTpslOptions,
+  ) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
   refreshAccount: () => Promise<void>;
@@ -568,7 +585,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isLong: boolean, 
     tpPrice?: number, 
     slPrice?: number,
-    entryPriceOverride?: number
+    entryPriceOverride?: number,
+    options?: PlaceTpslOptions,
   ): Promise<{ success: boolean; error?: string }> => {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
@@ -599,6 +617,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         if (slPrice && slPrice > 0) {
           const slRef = markPrice > 0 ? markPrice : refPrice;
           const slFmt = slRef.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          // Only guard instant trigger vs mark — SL may sit above entry (profit-lock / trailing).
           if (isLong && slPrice >= slRef) {
             return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below the current price ($${slFmt}) — it would trigger immediately.` };
           }
@@ -651,14 +670,36 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
       
       if (slPrice && slPrice > 0) {
-        const slResult = await placeTriggerOrder(signer, {
-          coin,
-          isBuy: !isLong,
-          size,
-          triggerPrice: slPrice,
-          isStopLoss: true,
-          reduceOnly: true,
-        });
+        const cb = options?.slTrailingCallbackRate;
+        let slResult: { success: boolean; error?: string } | Awaited<ReturnType<typeof placeTriggerOrder>>;
+        if (cb != null && cb > 0) {
+          slResult = await placeTrailingStopMarketOrder(signer, {
+            coin,
+            isBuy: !isLong,
+            size,
+            callbackRate: cb,
+            anchorTriggerPx: slPrice,
+          });
+          if (!slResult.success) {
+            slResult = await placeTriggerOrder(signer, {
+              coin,
+              isBuy: !isLong,
+              size,
+              triggerPrice: slPrice,
+              isStopLoss: true,
+              reduceOnly: true,
+            });
+          }
+        } else {
+          slResult = await placeTriggerOrder(signer, {
+            coin,
+            isBuy: !isLong,
+            size,
+            triggerPrice: slPrice,
+            isStopLoss: true,
+            reduceOnly: true,
+          });
+        }
         results.push(slResult);
       }
       

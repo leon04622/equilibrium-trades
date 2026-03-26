@@ -25,6 +25,17 @@ import {
   type TpslModifyOrderSpec,
 } from "@/lib/hyperliquid-client";
 import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
+import {
+  advanceTrailingRatchet,
+  clampTpslDragPrice,
+  computeTrailingCallbackRateDecimal,
+  createTrailingSession,
+  distanceToTriggerPercent,
+  slLineColor,
+  snapOrderPrice,
+  tickSize,
+  type TrailingStopSession,
+} from "@/lib/trailing-stop-orchestrator";
 
 const HL_TP = "#0ecb81";
 const HL_SL = "#f6465d";
@@ -63,75 +74,6 @@ function fmtPnl(pnl: number): string {
   const sign = pnl >= 0 ? "+" : "-";
   if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(2)}K`;
   return `${sign}$${abs.toFixed(2)}`;
-}
-
-function snapOrderPrice(price: number, refPrice: number): number {
-  if (!Number.isFinite(price) || price <= 0) return price;
-  const r = refPrice > 0 ? refPrice : price;
-  const tick =
-    r >= 50_000 ? 1 :
-    r >= 10_000 ? 0.5 :
-    r >= 1_000 ? 0.1 :
-    r >= 100 ? 0.01 :
-    r >= 10 ? 0.001 :
-    r >= 1 ? 0.0001 :
-    r >= 0.1 ? 0.00001 :
-    0.0000001;
-  const rounded = Math.round(price / tick) * tick;
-  const dec = Math.min(8, Math.max(0, Math.ceil(-Math.log10(tick))));
-  return parseFloat(rounded.toFixed(dec));
-}
-
-function tickSize(refPrice: number): number {
-  const r = refPrice > 0 ? refPrice : 1;
-  if (r >= 50_000) return 1;
-  if (r >= 10_000) return 0.5;
-  if (r >= 1_000) return 0.1;
-  if (r >= 100) return 0.01;
-  if (r >= 10) return 0.001;
-  if (r >= 1) return 0.0001;
-  if (r >= 0.1) return 0.00001;
-  return 0.0000001;
-}
-
-function clampTpslDragPrice(
-  kind: TpslSide,
-  price: number,
-  isLong: boolean,
-  entry: number,
-  mark: number,
-  refPrice: number,
-): number {
-  let p = snapOrderPrice(price, refPrice);
-  const tick = tickSize(refPrice || entry || mark);
-  const mk = mark > 0 ? mark : refPrice;
-
-  if (kind === "tp" && entry > 0) {
-    if (isLong) {
-      const minTp = snapOrderPrice(entry + tick, refPrice);
-      p = Math.max(p, minTp);
-    } else {
-      const maxTp = snapOrderPrice(entry - tick, refPrice);
-      p = Math.min(p, maxTp);
-    }
-  } else if (kind === "sl" && mk > 0) {
-    if (isLong) {
-      const maxSlMark = snapOrderPrice(mk - tick, refPrice);
-      const maxSlEntry =
-        entry > 0 ? snapOrderPrice(entry - tick, refPrice) : Number.POSITIVE_INFINITY;
-      const cap = Math.min(maxSlMark, maxSlEntry);
-      p = Math.min(p, cap);
-      if (p >= mk) p = cap;
-    } else {
-      const minSlMark = snapOrderPrice(mk + tick, refPrice);
-      const minSlEntry =
-        entry > 0 ? snapOrderPrice(entry + tick, refPrice) : Number.NEGATIVE_INFINITY;
-      const floor = Math.max(minSlMark, minSlEntry);
-      p = Math.max(p, floor);
-      if (p <= mk) p = floor;
-    }
-  }
-  return p;
 }
 
 export interface ApexSovereignProps {
@@ -206,6 +148,10 @@ export function ApexSovereign({
   const slBundleRef = useRef<SVGGElement | null>(null);
   const tpPriceTextRef = useRef<SVGTextElement | null>(null);
   const slPriceTextRef = useRef<SVGTextElement | null>(null);
+  const slAccentLineRef = useRef<SVGLineElement | null>(null);
+  const trailSyncRef = useRef({ lastMs: 0, lastSentPx: 0 });
+
+  const [trailSession, setTrailSession] = useState<TrailingStopSession | null>(null);
 
   const position = useMemo(() => positions.find((p) => p.coin === coin), [positions, coin]);
   const { tpOrder, slOrder, tpPrice, slPrice } = useMemo(
@@ -220,6 +166,8 @@ export function ApexSovereign({
 
   const effTp = pendingOverride.tp ?? tpPrice;
   const effSl = pendingOverride.sl ?? slPrice;
+  const mergedEffSl =
+    trailSession && trailSession.coin === coin ? trailSession.ratchetSl : effSl;
   const markPx = position ? position.markPrice || currentPrice || position.entryPrice : currentPrice;
   const { ghostTp, ghostSl } = position
     ? ghostTpslPrices(
@@ -227,7 +175,7 @@ export function ApexSovereign({
         markPx,
         position.side === "long",
         effTp != null && effTp > 0,
-        effSl != null && effSl > 0,
+        mergedEffSl != null && mergedEffSl > 0,
       )
     : { ghostTp: null as number | null, ghostSl: null as number | null };
 
@@ -292,10 +240,12 @@ export function ApexSovereign({
 
   const effTpRef = useRef(effTp);
   const effSlRef = useRef(effSl);
+  const mergedEffSlRef = useRef(mergedEffSl);
   const ghostTpRef = useRef(ghostTp);
   const ghostSlRef = useRef(ghostSl);
   effTpRef.current = effTp;
   effSlRef.current = effSl;
+  mergedEffSlRef.current = mergedEffSl;
   ghostTpRef.current = ghostTp;
   ghostSlRef.current = ghostSl;
 
@@ -380,11 +330,13 @@ export function ApexSovereign({
       priceForLabel: number,
       _solid: boolean,
       ghost: boolean,
+      accentColor?: string,
     ) => {
       const w = box.w;
       if (w <= 0) return;
       const x2 = Math.max(0, w - HL_GUTTER);
-      const color = kind === "tp" ? HL_TP : HL_SL;
+      const baseColor = kind === "tp" ? HL_TP : HL_SL;
+      const color = accentColor ?? baseColor;
       const nativePl = kind === "tp" ? nativeTpRef.current : nativeSlRef.current;
       const ghostColor = kind === "tp" ? "rgba(14, 203, 129, 0.45)" : "rgba(246, 70, 93, 0.45)";
 
@@ -409,12 +361,25 @@ export function ApexSovereign({
         discEl.setAttribute("display", "");
         discEl.setAttribute("cx", String(x2 - 3));
         discEl.setAttribute("cy", "0");
-        discEl.setAttribute("fill", color);
+        discEl.setAttribute("fill", ghost ? ghostColor : color);
         discEl.removeAttribute("opacity");
       }
       const priceNode = kind === "tp" ? tpPriceTextRef.current : slPriceTextRef.current;
       if (priceNode) {
-        priceNode.textContent = `$${fmt(priceForLabel)}`;
+        if (kind === "sl" && !ghost && positionRef.current) {
+          const pos = positionRef.current;
+          const mk = pos.markPrice || currentPriceRef.current || pos.entryPrice;
+          const pct = distanceToTriggerPercent(pos.side === "long", mk, priceForLabel);
+          priceNode.textContent =
+            pct != null
+              ? `$${fmt(priceForLabel)} · Δ${pct.toFixed(2)}%`
+              : `$${fmt(priceForLabel)}`;
+        } else {
+          priceNode.textContent = `$${fmt(priceForLabel)}`;
+        }
+      }
+      if (kind === "sl" && slAccentLineRef.current && !ghost) {
+        slAccentLineRef.current.setAttribute("stroke", color);
       }
     },
     [box.w],
@@ -572,7 +537,7 @@ export function ApexSovereign({
 
     const refPx = currentPrice || position.entryPrice;
     const showTpReal = effTp != null && effTp > 0;
-    const showSlReal = effSl != null && effSl > 0;
+    const showSlReal = mergedEffSl != null && mergedEffSl > 0;
 
     if (l1PendingKindsRef.current.has("tp")) {
       /* L1 signing in flight — do not overwrite dashed / opacity from layout tick */
@@ -591,8 +556,9 @@ export function ApexSovereign({
     if (l1PendingKindsRef.current.has("sl")) {
       /* L1 signing in flight */
     } else if (showSlReal) {
-      const y = priceToCoordinate(effSl!);
-      if (y !== null) applyLineVisual("sl", y, effSl!, true, false);
+      const y = priceToCoordinate(mergedEffSl!);
+      const slC = slLineColor(position.side === "long", position.entryPrice, mergedEffSl!);
+      if (y !== null) applyLineVisual("sl", y, mergedEffSl!, true, false, slC);
       else hideKind("sl");
     } else if (ghostSl != null && ghostSl > 0) {
       const y = priceToCoordinate(ghostSl);
@@ -604,7 +570,7 @@ export function ApexSovereign({
   }, [
     position,
     effTp,
-    effSl,
+    mergedEffSl,
     ghostTp,
     ghostSl,
     chartLayoutTick,
@@ -659,6 +625,82 @@ export function ApexSovereign({
     }
   }, [position, box.w, currentPrice, chartLayoutTick, chartVersion]);
 
+  useEffect(() => {
+    setTrailSession(null);
+    trailSyncRef.current = { lastMs: 0, lastSentPx: 0 };
+  }, [coin]);
+
+  useEffect(() => {
+    if (!position) {
+      setTrailSession(null);
+      trailSyncRef.current = { lastMs: 0, lastSentPx: 0 };
+    }
+  }, [position]);
+
+  /** Ratchet SL vs live mark (profit side only moves); throttled L1 modify keeps HL trigger aligned. */
+  useEffect(() => {
+    if (dragKindRef.current) return;
+    setTrailSession((prev) => {
+      if (!prev || prev.coin !== coin) return prev;
+      const pos = positionRef.current;
+      if (!pos) return prev;
+      const mark = pos.markPrice || currentPriceRef.current || pos.entryPrice;
+      const refPx = currentPriceRef.current || mark;
+      const next = advanceTrailingRatchet(prev, mark, refPx);
+      return next.ratchetSl === prev.ratchetSl ? prev : next;
+    });
+  }, [currentPrice, position?.markPrice, position?.entryPrice, coin]);
+
+  useEffect(() => {
+    if (dragKindRef.current) return;
+    if (!trailSession || trailSession.coin !== coin || !position) return;
+    const y = priceToCoordinate(trailSession.ratchetSl);
+    const slC = slLineColor(position.side === "long", position.entryPrice, trailSession.ratchetSl);
+    if (y !== null) applyLineVisual("sl", y, trailSession.ratchetSl, true, false, slC);
+
+    const oid = slOrder?.oid;
+    const addr = walletAddress;
+    if (!oid || !addr || !hyperliquidSessionReady || !slOrder) return;
+
+    const refPx = currentPrice || position.markPrice || position.entryPrice;
+    const t = tickSize(refPx);
+    if (Math.abs(trailSession.ratchetSl - trailSyncRef.current.lastSentPx) < t * 0.85) return;
+    const now = Date.now();
+    if (now - trailSyncRef.current.lastMs < 1700) return;
+    trailSyncRef.current.lastMs = now;
+    trailSyncRef.current.lastSentPx = trailSession.ratchetSl;
+
+    const spec: TpslModifyOrderSpec = {
+      coin,
+      orderId: oid,
+      newPrice: trailSession.ratchetSl,
+      isBuy: position.side !== "long",
+      size: parseFloat(String(slOrder.sz)) > 0 ? parseFloat(String(slOrder.sz)) : position.size,
+      tpsl: "sl",
+    };
+    void (async () => {
+      const res = await syncOrderToExchange(addr, spec);
+      if (res.ok) {
+        try {
+          await refreshAccount();
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+  }, [
+    trailSession,
+    coin,
+    position,
+    slOrder,
+    walletAddress,
+    hyperliquidSessionReady,
+    priceToCoordinate,
+    applyLineVisual,
+    currentPrice,
+    refreshAccount,
+  ]);
+
   const flushDragFrame = useCallback(() => {
     rafRef.current = null;
     const clientY = pendingClientYRef.current;
@@ -680,7 +722,9 @@ export function ApexSovereign({
 
     const yFromPrice = priceToCoordinateRef.current(clamped);
     const y = yFromPrice !== null ? yFromPrice : localY;
-    applyLineVisual(kind, y, clamped, true, false);
+    const accent =
+      kind === "sl" ? slLineColor(pos.side === "long", pos.entryPrice, clamped) : undefined;
+    applyLineVisual(kind, y, clamped, true, false, accent);
   }, [applyLineVisual, box.h, chartPaneRef]);
 
   const scheduleDragFrame = useCallback(() => {
@@ -752,6 +796,8 @@ export function ApexSovereign({
     }
     modifyBatchBufferRef.current = [];
     l1PendingKindsRef.current.clear();
+    setTrailSession(null);
+    trailSyncRef.current = { lastMs: 0, lastSentPx: 0 };
   }, [chartVersion, onDraggingChange]);
 
   const beginDrag = useCallback(
@@ -888,14 +934,43 @@ export function ApexSovereign({
           const isLong = pos.side === "long";
           const tp = finalKind === "tp" ? finalPrice : (tpPriceRef.current ?? undefined);
           const sl = finalKind === "sl" ? finalPrice : (slPriceRef.current ?? undefined);
-          const result = await placeTPSL(coinRef.current, pos.size, isLong, tp, sl, pos.entryPrice);
+          const markAtDrop = pos.markPrice || refPx;
+          const cbRate =
+            finalKind === "sl"
+              ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, finalPrice)
+              : null;
+          const result = await placeTPSL(
+            coinRef.current,
+            pos.size,
+            isLong,
+            tp,
+            sl,
+            pos.entryPrice,
+            cbRate != null ? { slTrailingCallbackRate: cbRate } : undefined,
+          );
           if (result.success) {
+            if (finalKind === "sl" && cbRate != null) {
+              const sess = createTrailingSession(
+                coinRef.current,
+                isLong,
+                markAtDrop,
+                finalPrice,
+                refPx,
+              );
+              if (sess) {
+                setTrailSession(sess);
+                trailSyncRef.current = { lastMs: 0, lastSentPx: finalPrice };
+              }
+            } else if (finalKind === "sl") {
+              setTrailSession(null);
+            }
             toast({
               title: finalKind === "tp" ? "Take Profit set" : "Stop Loss set",
               description: `${finalKind === "tp" ? "TP" : "SL"}: $${fmt(finalPrice)}`,
             });
           } else {
             onPendingClear(finalKind);
+            if (finalKind === "sl") setTrailSession(null);
             toast({ title: "Update failed", description: result.error, variant: "destructive" });
           }
         } catch (err) {
@@ -931,6 +1006,10 @@ export function ApexSovereign({
       const order = side === "tp" ? tpOrder : slOrder;
       if (!order?.oid) return;
       const result = await cancelHLOrder(coin, order.oid);
+      if (result.success && side === "sl") {
+        setTrailSession(null);
+        trailSyncRef.current = { lastMs: 0, lastSentPx: 0 };
+      }
       toast(
         result.success
           ? { title: side === "tp" ? "Take Profit cancelled" : "Stop Loss cancelled" }
@@ -1078,9 +1157,14 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
-            const price = effSl && effSl > 0 ? effSl : ghostSl && ghostSl > 0 ? ghostSl : null;
+            const price =
+              mergedEffSl && mergedEffSl > 0
+                ? mergedEffSl
+                : ghostSl && ghostSl > 0
+                  ? ghostSl
+                  : null;
             if (price == null) return;
-            beginDrag(e, "sl", { ghost: !(effSl && effSl > 0), startPrice: price });
+            beginDrag(e, "sl", { ghost: !(mergedEffSl && mergedEffSl > 0), startPrice: price });
           }}
         />
         <circle ref={slDiscRef} r={3} display="none" style={{ pointerEvents: "none" }} />
@@ -1096,6 +1180,7 @@ export function ApexSovereign({
           style={{ pointerEvents: "none" }}
         />
         <line
+          ref={slAccentLineRef}
           x1={w - HL_GUTTER}
           y1={-11}
           x2={w - HL_GUTTER}
@@ -1112,9 +1197,14 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
-            const price = effSl && effSl > 0 ? effSl : ghostSl && ghostSl > 0 ? ghostSl : null;
+            const price =
+              mergedEffSl && mergedEffSl > 0
+                ? mergedEffSl
+                : ghostSl && ghostSl > 0
+                  ? ghostSl
+                  : null;
             if (price == null) return;
-            beginDrag(e, "sl", { ghost: !(effSl && effSl > 0), startPrice: price });
+            beginDrag(e, "sl", { ghost: !(mergedEffSl && mergedEffSl > 0), startPrice: price });
           }}
         />
         <text
@@ -1139,7 +1229,7 @@ export function ApexSovereign({
         />
         <foreignObject x={w - 20} y={-10} width={18} height={20} style={{ pointerEvents: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-            {effSl && effSl > 0 && slOrder?.oid ? (
+            {mergedEffSl && mergedEffSl > 0 && slOrder?.oid ? (
               <button
                 type="button"
                 data-sovereign-chip

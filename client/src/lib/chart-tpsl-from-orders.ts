@@ -2,25 +2,26 @@ import type { HLOpenOrder, Position } from "@/lib/trading-context";
 
 export type TpslOrderKind = "tp" | "sl" | "other";
 
-/** Classify HL trigger order as TP or SL (same rules as chart UI). */
+/**
+ * Classify HL trigger order as TP or SL.
+ * Uses **mark vs trigger** (Hyperliquid-style), not entry — so a profit-lock SL above entry (long)
+ * is still a stop, not a take-profit.
+ */
 export function orderKindForTpsl(
   order: HLOpenOrder,
   position: Position,
-  _markPx: number,
+  markPx: number,
 ): TpslOrderKind {
   const ot = (order.orderType || "").toLowerCase();
   if (ot === "take_profit" || ot.includes("take")) return "tp";
   if (ot === "stop_loss" || (ot.includes("stop") && !ot.includes("take"))) return "sl";
   const trigPx = parseFloat(order.triggerPx || order.limitPx || "0");
   if (!trigPx || Number.isNaN(trigPx)) return "other";
-  const entry = position.entryPrice;
-  return position.side === "long"
-    ? trigPx > entry
-      ? "tp"
-      : "sl"
-    : trigPx < entry
-      ? "tp"
-      : "sl";
+  const mark = markPx > 0 ? markPx : position.entryPrice;
+  if (position.side === "long") {
+    return trigPx > mark ? "tp" : "sl";
+  }
+  return trigPx < mark ? "tp" : "sl";
 }
 
 export function ghostTpslPrices(

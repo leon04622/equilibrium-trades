@@ -14,4 +14,4 @@
  *
  * Bump `CHART_TPSL_STABLE_VERSION` only when intentionally shipping a tested TP/SL change.
  */
-export const CHART_TPSL_STABLE_VERSION = 1 as const;
+export const CHART_TPSL_STABLE_VERSION = 2 as const;

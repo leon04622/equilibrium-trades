@@ -16,6 +16,12 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { X, Pencil, Check } from "lucide-react";
 import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
+import {
+  clampTpslDragPrice,
+  computeTrailingCallbackRateDecimal,
+  slLineColor,
+  snapOrderPrice,
+} from "@/lib/trailing-stop-orchestrator";
 
 interface ChartOrderLinesProps {
   coin: string;
@@ -96,81 +102,6 @@ function isolateSlDrag(): boolean {
   } catch {
     return false;
   }
-}
-
-function snapOrderPrice(price: number, refPrice: number): number {
-  if (!Number.isFinite(price) || price <= 0) return price;
-  const r = refPrice > 0 ? refPrice : price;
-  const tick =
-    r >= 50_000 ? 1 :
-    r >= 10_000 ? 0.5 :
-    r >= 1_000 ? 0.1 :
-    r >= 100 ? 0.01 :
-    r >= 10 ? 0.001 :
-    r >= 1 ? 0.0001 :
-    r >= 0.1 ? 0.00001 :
-    0.0000001;
-  const rounded = Math.round(price / tick) * tick;
-  const dec = Math.min(8, Math.max(0, Math.ceil(-Math.log10(tick))));
-  return parseFloat(rounded.toFixed(dec));
-}
-
-function tickSize(refPrice: number): number {
-  const r = refPrice > 0 ? refPrice : 1;
-  if (r >= 50_000) return 1;
-  if (r >= 10_000) return 0.5;
-  if (r >= 1_000) return 0.1;
-  if (r >= 100) return 0.01;
-  if (r >= 10) return 0.001;
-  if (r >= 1) return 0.0001;
-  if (r >= 0.1) return 0.00001;
-  return 0.0000001;
-}
-
-function clampTpslDragPrice(
-  kind: "tp" | "sl",
-  price: number,
-  isLong: boolean,
-  entry: number,
-  mark: number,
-  refPrice: number,
-): number {
-  let p = snapOrderPrice(price, refPrice);
-  const tick = tickSize(refPrice || entry || mark);
-  const mk = mark > 0 ? mark : refPrice;
-
-  if (kind === "tp" && entry > 0) {
-    if (isLong) {
-      const minTp = snapOrderPrice(entry + tick, refPrice);
-      p = Math.max(p, minTp);
-    } else {
-      const maxTp = snapOrderPrice(entry - tick, refPrice);
-      p = Math.min(p, maxTp);
-    }
-  } else if (kind === "sl" && mk > 0) {
-    if (isLong) {
-      // Below mark (no instant trigger) and below entry (long risk side).
-      const maxSlMark = snapOrderPrice(mk - tick, refPrice);
-      const maxSlEntry =
-        entry > 0 ? snapOrderPrice(entry - tick, refPrice) : Number.POSITIVE_INFINITY;
-      const cap = Math.min(maxSlMark, maxSlEntry);
-      p = Math.min(p, cap);
-      if (p >= mk) p = cap;
-    } else {
-      // Above mark and above entry (short risk side).
-      const minSlMark = snapOrderPrice(mk + tick, refPrice);
-      const minSlEntry =
-        entry > 0 ? snapOrderPrice(entry + tick, refPrice) : Number.NEGATIVE_INFINITY;
-      const floor = Math.max(minSlMark, minSlEntry);
-      p = Math.max(p, floor);
-      if (p <= mk) p = floor;
-    }
-  }
-
-  // Do not clamp TP/SL to the chart's visible price range: SL often sits at the edge or
-  // just outside what autoscale shows, which pinned the line and made SL drag appear broken.
-
-  return p;
 }
 
 type LineLayout =
@@ -421,6 +352,11 @@ export function ChartOrderLines({
       const isLong = pos.side === "long";
       const tp = finalDragging === "tp" ? finalPrice : (tpPriceRef.current ?? undefined);
       const sl = finalDragging === "sl" ? finalPrice : (slPriceRef.current ?? undefined);
+      const markAtDrop = pos.markPrice || refPx;
+      const slCb =
+        finalDragging === "sl"
+          ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, finalPrice)
+          : null;
 
       if (isolateSlDrag() && finalDragging === "sl") {
         toast({
@@ -430,7 +366,15 @@ export function ChartOrderLines({
         return;
       }
 
-      const result = await placeTPSL(coinRef.current, pos.size, isLong, tp, sl, pos.entryPrice);
+      const result = await placeTPSL(
+        coinRef.current,
+        pos.size,
+        isLong,
+        tp,
+        sl,
+        pos.entryPrice,
+        slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
+      );
       if (result.success) {
         toast({
           title: finalDragging === "tp" ? "Take Profit set" : "Stop Loss set",
@@ -511,7 +455,20 @@ export function ChartOrderLines({
       const isLong = position.side === "long";
       const tp = editMode === "tp" ? newPrice : (tpPrice ?? undefined);
       const sl = editMode === "sl" ? newPrice : (slPrice ?? undefined);
-      const result = await placeTPSL(coin, position.size, isLong, tp, sl, position.entryPrice);
+      const markAtEdit = mark;
+      const slCb =
+        editMode === "sl"
+          ? computeTrailingCallbackRateDecimal(isLong, markAtEdit, newPrice)
+          : null;
+      const result = await placeTPSL(
+        coin,
+        position.size,
+        isLong,
+        tp,
+        sl,
+        position.entryPrice,
+        slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
+      );
       if (result.success) {
         toast({ title: `${editMode === "tp" ? "Take Profit" : "Stop Loss"} updated` });
         setEditMode(null);
@@ -751,7 +708,10 @@ export function ChartOrderLines({
           const layout = layoutForPrice(dragPrice!, priceToCoordinate, effMin, effMax);
           if (layout.mode === "pct" && (layout.pct < -8 || layout.pct > 108)) return null;
           if (layout.mode === "px" && (layout.y < -20 || layout.y > containerHeight + 20)) return null;
-          const previewColor = dragging === "tp" ? HL_TP : HL_SL;
+          const previewColor =
+            dragging === "tp"
+              ? HL_TP
+              : slLineColor(isLong, entry, dragPrice!);
           const s = centerStyleFromLayout(layout);
           return (
             <div className="absolute inset-x-0 pointer-events-none" style={{ ...s, zIndex: 50 }}>
