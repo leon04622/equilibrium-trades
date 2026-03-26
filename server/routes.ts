@@ -520,11 +520,29 @@ export async function registerRoutes(
     }
   });
 
-  // Tutorial Videos API
+  // Tutorial Videos API — explicit JSON shape so clients always receive camelCase fields.
   app.get("/api/videos", async (req: Request, res: Response) => {
     try {
       const videos = await storage.getAllVideos();
-      res.json(videos);
+      res.json(
+        videos.map((v) => ({
+          id: v.id,
+          title: v.title,
+          description: v.description,
+          duration: v.duration ?? "",
+          category: v.category,
+          youtubeId: v.youtubeId ?? null,
+          videoPath: v.videoPath ?? null,
+          thumbnailPath: v.thumbnailPath ?? null,
+          academySection: v.academySection ?? null,
+          createdAt:
+            v.createdAt instanceof Date
+              ? v.createdAt.toISOString()
+              : v.createdAt != null
+                ? v.createdAt
+                : null,
+        })),
+      );
     } catch (error) {
       console.error("Error fetching videos:", error);
       res.status(500).json({ error: "Failed to fetch videos" });

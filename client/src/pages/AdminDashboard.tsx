@@ -50,6 +50,7 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
+import { parseVideosApiList } from "@/lib/video-vault";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -204,10 +205,10 @@ export default function AdminDashboard() {
     queryKey: ["admin-rest", "vault-videos", address],
     enabled: !!address && canManageVideos && tab === "videos",
     queryFn: async () => {
-      const { data, status } = await api.get<TutorialVideo[]>("/api/videos");
+      const { data, status } = await api.get<unknown>("/api/videos");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status !== 200) throw new Error("Failed to load videos");
-      return Array.isArray(data) ? data : [];
+      return parseVideosApiList(data);
     },
   });
 

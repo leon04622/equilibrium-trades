@@ -1,5 +1,63 @@
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 
+function str(raw: unknown): string {
+  if (raw == null) return "";
+  return String(raw);
+}
+
+function optStr(r: Record<string, unknown>, camel: string, snake: string): string | null {
+  const a = r[camel];
+  const b = r[snake];
+  const v = a !== undefined && a !== null && a !== "" ? a : b;
+  if (v == null || v === "") return null;
+  return String(v);
+}
+
+/**
+ * Coerce one `/api/videos` row from JSON. Handles camelCase or snake_case keys (proxies, older clients, hand-rolled APIs).
+ */
+export function coerceTutorialVideoFromApi(raw: unknown): TutorialVideo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const id = str(r.id).trim();
+  if (!id) return null;
+
+  const created = r.createdAt ?? r.created_at;
+  let createdAt: Date;
+  if (created instanceof Date) createdAt = created;
+  else if (created != null && created !== "") {
+    const d = new Date(String(created));
+    createdAt = Number.isNaN(d.getTime()) ? new Date() : d;
+  } else {
+    createdAt = new Date();
+  }
+
+  return {
+    id,
+    title: str(r.title),
+    description: str(r.description),
+    duration: str(r.duration),
+    category: str(r.category),
+    youtubeId: optStr(r, "youtubeId", "youtube_id"),
+    videoPath: optStr(r, "videoPath", "video_path"),
+    thumbnailPath: optStr(r, "thumbnailPath", "thumbnail_path"),
+    academySection: optStr(r, "academySection", "academy_section"),
+    createdAt,
+  } as TutorialVideo;
+}
+
+/** Parse GET /api/videos body: array, or `{ videos: [...] }`, or null-safe. */
+export function parseVideosApiList(raw: unknown): TutorialVideo[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw.map(coerceTutorialVideoFromApi).filter((v): v is TutorialVideo => v != null);
+  }
+  if (typeof raw === "object" && Array.isArray((raw as { videos?: unknown }).videos)) {
+    return parseVideosApiList((raw as { videos: unknown[] }).videos);
+  }
+  return [];
+}
+
 export const VAULT_SECTION_META: { id: AcademySection; label: string; description: string }[] = [
   {
     id: "beginner_patterns",

@@ -381,7 +381,8 @@ export class MemStorage implements IStorage {
     try {
       const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
       return videos;
-    } catch {
+    } catch (err) {
+      console.error("[videos] getAllVideos DB error (returning empty list):", err);
       return [];
     }
   }

@@ -15,7 +15,12 @@ import {
 import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
 import { TIER_PRO } from "@/lib/subscription-pricing";
-import { VAULT_SECTION_META, inferAcademySection, tutorialToPlayUrl } from "@/lib/video-vault";
+import {
+  VAULT_SECTION_META,
+  inferAcademySection,
+  parseVideosApiList,
+  tutorialToPlayUrl,
+} from "@/lib/video-vault";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 
 const ReactPlayer = lazy(() => import("react-player/lazy"));
@@ -32,25 +37,23 @@ export type VaultItem = {
 const ACADEMY_IDS = new Set<AcademySection>(["beginner_patterns", "sma_masterclass", "live_sessions"]);
 
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
-  return apiVideos
-    .map((v) => {
-      const rawSection = v.academySection as string | null | undefined;
-      const section: AcademySection =
-        rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
-          ? (rawSection as AcademySection)
-          : inferAcademySection(v);
-      return {
-        id: v.id,
-        title: v.title,
-        description: v.description,
-        thumbnailUrl:
-          (v.thumbnailPath && v.thumbnailPath.trim()) ||
-          "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
-        videoUrl: tutorialToPlayUrl(v),
-        academySection: section,
-      };
-    })
-    .filter((it) => it.videoUrl.trim().length > 0);
+  return apiVideos.map((v) => {
+    const rawSection = v.academySection as string | null | undefined;
+    const section: AcademySection =
+      rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
+        ? (rawSection as AcademySection)
+        : inferAcademySection(v);
+    return {
+      id: v.id,
+      title: v.title,
+      description: v.description,
+      thumbnailUrl:
+        (v.thumbnailPath && v.thumbnailPath.trim()) ||
+        "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
+      videoUrl: tutorialToPlayUrl(v),
+      academySection: section,
+    };
+  });
 }
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {
@@ -102,7 +105,14 @@ export default function VideoVault() {
         const t = await res.text();
         throw new Error(t || res.statusText || "Failed to load videos");
       }
-      return (await res.json()) as TutorialVideo[];
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        throw new Error(
+          "Video library did not return JSON. Use the app URL that serves the API (same host as the site), not a separate dev frontend.",
+        );
+      }
+      const raw: unknown = await res.json();
+      return parseVideosApiList(raw);
     },
     staleTime: 30_000,
     gcTime: 10 * 60_000,
@@ -258,7 +268,14 @@ export default function VideoVault() {
                 <DialogDescription>{active.description}</DialogDescription>
               </DialogHeader>
               {canPlayVideos ? (
-                <PlayerFrame url={active.videoUrl} title={active.title} />
+                active.videoUrl.trim() ? (
+                  <PlayerFrame url={active.videoUrl} title={active.title} />
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8 rounded-lg border border-dashed">
+                    No playable URL for this lesson. Re-save the video in Command Center with a YouTube link, Vimeo, or
+                    uploaded file.
+                  </p>
+                )
               ) : (
                 <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
                   <p className="text-sm text-muted-foreground">
