@@ -24,6 +24,8 @@ import { AppErrorBoundary } from "@/components/app-error-boundary";
 
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
+import Signals from "@/pages/signals";
+import Videos from "@/pages/videos";
 import AdminDashboard from "@/pages/AdminDashboard";
 
 function App() {
@@ -99,6 +101,8 @@ function TradingLayout() {
           <main className="min-h-0 pb-16 md:pb-0">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/signals" element={<Signals />} />
+              <Route path="/videos" element={<Videos />} />
               <Route path="/admin-equilibrium" element={<AdminDashboard />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

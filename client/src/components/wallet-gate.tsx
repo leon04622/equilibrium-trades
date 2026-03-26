@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, AlertCircle } from "lucide-react";
 
-const PUBLIC_PATHS = ["/pricing", "/admin-equilibrium"];
+/** /admin-equilibrium requires a connected wallet (master CRM). */
+const PUBLIC_PATHS = ["/pricing"];
 
 function isPublicTradingPath(pathname: string): boolean {
   return pathname === "/trading" || pathname === "/trade";
