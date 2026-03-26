@@ -66,6 +66,35 @@ const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
 const HANDLE_PX = 6;
 
+function refTickForTpsl(refPrice: number): number {
+  const r = refPrice > 0 ? refPrice : 1;
+  if (r >= 50_000) return 1;
+  if (r >= 10_000) return 0.5;
+  if (r >= 1_000) return 0.1;
+  if (r >= 100) return 0.01;
+  if (r >= 10) return 0.001;
+  if (r >= 1) return 0.0001;
+  if (r >= 0.1) return 0.00001;
+  return 0.0000001;
+}
+
+function ticksCloseTpsl(a: number, b: number, refPx: number): boolean {
+  const t = refTickForTpsl(refPx);
+  return Math.abs(a - b) <= Math.max(t * 2, 1e-12);
+}
+
+/** Prefer pending chart price while server openOrders is stale; drop pending once server agrees. */
+function effectiveTpslLinePrice(
+  server: number | null,
+  pending: number | undefined,
+  refPx: number,
+): number | null {
+  if (pending == null) return server;
+  if (server == null) return pending;
+  if (ticksCloseTpsl(server, pending, refPx)) return server;
+  return pending;
+}
+
 function calcSMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
   const out: { time: Time; value: number }[] = [];
   for (let i = period - 1; i < vals.length; i++) {
@@ -188,6 +217,8 @@ function PatternChartComponent({
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
   /** Bumps on throttled chart interaction so TP/SL overlay re-reads priceToCoordinate after Y-scale changes. */
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
+  /** After drag end, keep native TP/SL at dropped price until openOrders matches (prevents snap-back). */
+  const [tpslPendingLines, setTpslPendingLines] = useState<{ tp?: number; sl?: number }>({});
 
   // Y relative to pane 0. Volume uses bottom ~20% (scaleMargins top: 0.8 on volume scale).
   //
@@ -302,6 +333,10 @@ function PatternChartComponent({
     setActiveSignal(null);
   }, [coin, interval]);
 
+  useEffect(() => {
+    setTpslPendingLines({});
+  }, [coin]);
+
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
     queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`],
     refetchInterval: 10000,
@@ -321,6 +356,43 @@ function PatternChartComponent({
     tpslDraggingRef.current = dragging;
     setTpslDragging(dragging);
   }, []);
+
+  const onTpslPendingCommit = useCallback((kind: "tp" | "sl", price: number) => {
+    setTpslPendingLines((prev) => ({ ...prev, [kind]: price }));
+  }, []);
+
+  const onTpslPendingClear = useCallback((kind: "tp" | "sl") => {
+    setTpslPendingLines((prev) => {
+      if (prev[kind] == null) return prev;
+      const next = { ...prev };
+      delete next[kind];
+      return next;
+    });
+  }, []);
+
+  // Drop optimistic TP/SL once the book matches (or clear when position gone).
+  useEffect(() => {
+    if (tpslDragging) return;
+    const position = positions.find((p) => p.coin === coin);
+    if (!position) {
+      setTpslPendingLines((p) => (p.tp == null && p.sl == null ? p : {}));
+      return;
+    }
+    const markPx = position.markPrice || currentPrice || position.entryPrice;
+    const { tpPrice, slPrice } = selectTpSlOrders(coin, position, openOrders);
+    setTpslPendingLines((prev) => {
+      if (prev.tp == null && prev.sl == null) return prev;
+      const next = { ...prev };
+      if (prev.tp != null && tpPrice != null && ticksCloseTpsl(prev.tp, tpPrice, markPx)) {
+        delete next.tp;
+      }
+      if (prev.sl != null && slPrice != null && ticksCloseTpsl(prev.sl, slPrice, markPx)) {
+        delete next.sl;
+      }
+      if (next.tp === prev.tp && next.sl === prev.sl) return prev;
+      return next;
+    });
+  }, [positions, openOrders, coin, currentPrice, tpslDragging]);
 
   // ── Pointer drag-to-resize (mouse + touch) ──
   const startResizeDrag = useCallback((handleIdx: number) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -779,7 +851,8 @@ function PatternChartComponent({
     const series = candleSeriesRef.current;
     if (!series) return;
 
-    if (tpslDraggingRef.current) return;
+    // Block native line rebuild during drag AND while React state catches up (ref is source of truth from pointer).
+    if (tpslDraggingRef.current || tpslDragging) return;
 
     const removeKey = (key: "tp" | "sl" | "ghostTp" | "ghostSl") => {
       const line = tpslLineRefs.current[key];
@@ -809,17 +882,30 @@ function PatternChartComponent({
       slPrice != null,
     );
 
+    const effTp = effectiveTpslLinePrice(tpPrice, tpslPendingLines.tp, markPx);
+    const effSl = effectiveTpslLinePrice(slPrice, tpslPendingLines.sl, markPx);
+
     const HL_TP = "#0ecb81";
     const HL_SL = "#f6465d";
 
-    if (tpPrice != null) {
-      tpslLineRefs.current.tp = series.createPriceLine({
-        price: tpPrice,
-        color: HL_TP,
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: false,
-      });
+    if (effTp != null) {
+      if (tpPrice != null) {
+        tpslLineRefs.current.tp = series.createPriceLine({
+          price: effTp,
+          color: HL_TP,
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: false,
+        });
+      } else {
+        tpslLineRefs.current.ghostTp = series.createPriceLine({
+          price: effTp,
+          color: "rgba(14, 203, 129, 0.5)",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+      }
     } else if (ghostTp != null) {
       tpslLineRefs.current.ghostTp = series.createPriceLine({
         price: ghostTp,
@@ -830,14 +916,24 @@ function PatternChartComponent({
       });
     }
 
-    if (slPrice != null) {
-      tpslLineRefs.current.sl = series.createPriceLine({
-        price: slPrice,
-        color: HL_SL,
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: false,
-      });
+    if (effSl != null) {
+      if (slPrice != null) {
+        tpslLineRefs.current.sl = series.createPriceLine({
+          price: effSl,
+          color: HL_SL,
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: false,
+        });
+      } else {
+        tpslLineRefs.current.ghostSl = series.createPriceLine({
+          price: effSl,
+          color: "rgba(246, 70, 93, 0.5)",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+      }
     } else if (ghostSl != null) {
       tpslLineRefs.current.ghostSl = series.createPriceLine({
         price: ghostSl,
@@ -849,10 +945,11 @@ function PatternChartComponent({
     }
 
     return () => {
+      // Stale closure: never use `tpslDragging` here — ref is synchronous from pointer handler.
       if (tpslDraggingRef.current) return;
       (["tp", "sl", "ghostTp", "ghostSl"] as const).forEach(removeKey);
     };
-  }, [positions, openOrders, coin, currentPrice, chartVersion]);
+  }, [positions, openOrders, coin, currentPrice, chartVersion, tpslDragging, tpslPendingLines]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -877,6 +974,8 @@ function PatternChartComponent({
           nativeTpslLines
           onTpslDragVisual={onTpslDragVisual}
           onDraggingChange={onTpslDraggingChange}
+          onTpslPendingCommit={onTpslPendingCommit}
+          onTpslPendingClear={onTpslPendingClear}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}

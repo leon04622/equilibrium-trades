@@ -29,6 +29,13 @@ interface ChartOrderLinesProps {
   /** Live-update native IPriceLine while dragging. */
   onTpslDragVisual?: (kind: "tp" | "sl", price: number) => void;
   onDraggingChange?: (dragging: boolean) => void;
+  /**
+   * Called synchronously before drag state clears so native lines can stay at the committed price
+   * until `openOrders` catches up (avoids snap-back to stale server SL/TP).
+   */
+  onTpslPendingCommit?: (kind: "tp" | "sl", price: number) => void;
+  /** Clear optimistic line if placeTPSL fails. */
+  onTpslPendingClear?: (kind: "tp" | "sl") => void;
 }
 
 function fmt(p: number): string {
@@ -71,6 +78,15 @@ const SL_DRAG_BAND_EXTRA_HALF_PX = 24;
 function slDragDebugEnabled(): boolean {
   try {
     return import.meta.env.DEV && localStorage.getItem("debug_sl_drag") === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Dev: `localStorage.setItem("isolate_sl_drag","1")` — SL drag end skips placeTPSL (prove UI-only). */
+function isolateSlDrag(): boolean {
+  try {
+    return localStorage.getItem("isolate_sl_drag") === "1";
   } catch {
     return false;
   }
@@ -178,6 +194,8 @@ export function ChartOrderLines({
   nativeTpslLines = false,
   onTpslDragVisual,
   onDraggingChange,
+  onTpslPendingCommit,
+  onTpslPendingClear,
 }: ChartOrderLinesProps) {
   const { positions, openOrders, cancelHLOrder, placeTPSL } = useTrading();
   const { toast } = useToast();
@@ -315,7 +333,6 @@ export function ChartOrderLines({
       if ("preventDefault" in e && e.cancelable) e.preventDefault();
       const y = readY(e);
       if (y === null) return;
-      console.debug("[TP/SL] onMove", { kind: draggingRef.current, y });
       applyDragFromY(y);
     };
 
@@ -354,7 +371,35 @@ export function ChartOrderLines({
             )
           : null;
 
+      if (!finalDragging || finalPrice === null || finalPrice <= 0 || !pos) {
+        dragPriceRef.current = null;
+        setDragging(null);
+        setDragPrice(null);
+        console.debug("[TP/SL] onUp aborted", { finalDragging, finalPrice, pos });
+        return;
+      }
+
+      const fromGhost = dragFromGhostRef.current;
+      const startP = dragStartPriceRef.current;
+      if (!fromGhost && startP != null) {
+        const a = snapOrderPrice(startP, refPx);
+        const b = snapOrderPrice(finalPrice, refPx);
+        if (a === b) {
+          dragPriceRef.current = null;
+          dragFromGhostRef.current = false;
+          dragStartPriceRef.current = null;
+          setDragging(null);
+          setDragPrice(null);
+          return;
+        }
+      }
+
+      // Hold native line at dropped price before clearing drag — effect otherwise rebuilds from stale openOrders.
+      onTpslPendingCommit?.(finalDragging, finalPrice);
+
       dragPriceRef.current = null;
+      dragFromGhostRef.current = false;
+      dragStartPriceRef.current = null;
       setDragging(null);
       setDragPrice(null);
 
@@ -362,25 +407,19 @@ export function ChartOrderLines({
         console.debug("[chart SL drag] end", finalPrice ?? "(cancelled)");
       }
 
-      if (!finalDragging || finalPrice === null || finalPrice <= 0 || !pos) {
-        console.debug("[TP/SL] onUp aborted", { finalDragging, finalPrice, pos });
-        return;
-      }
-
       console.debug("[TP/SL] onUp", { kind: finalDragging, finalPrice, pos });
-      const fromGhost = dragFromGhostRef.current;
-      dragFromGhostRef.current = false;
-      const startP = dragStartPriceRef.current;
-      dragStartPriceRef.current = null;
-      if (!fromGhost && startP != null) {
-        const a = snapOrderPrice(startP, refPx);
-        const b = snapOrderPrice(finalPrice, refPx);
-        if (a === b) return;
-      }
 
       const isLong = pos.side === "long";
       const tp = finalDragging === "tp" ? finalPrice : (tpPriceRef.current ?? undefined);
       const sl = finalDragging === "sl" ? finalPrice : (slPriceRef.current ?? undefined);
+
+      if (isolateSlDrag() && finalDragging === "sl") {
+        toast({
+          title: "SL isolate mode",
+          description: "placeTPSL skipped (remove localStorage isolate_sl_drag to sync)",
+        });
+        return;
+      }
 
       const result = await placeTPSL(coinRef.current, pos.size, isLong, tp, sl, pos.entryPrice);
       if (result.success) {
@@ -389,6 +428,7 @@ export function ChartOrderLines({
           description: fmtUsdLabel(finalDragging === "tp" ? "TP" : "SL", finalPrice),
         });
       } else {
+        onTpslPendingClear?.(finalDragging);
         toast({ title: "Update failed", description: result.error, variant: "destructive" });
       }
     };
@@ -631,7 +671,7 @@ export function ChartOrderLines({
   if (ghostSl && ghostSl > 0) {
     lines.push({
       key: "ghost-sl",
-      price: ghostSl,
+      price: dragging === "sl" && dragPrice != null ? dragPrice : ghostSl,
       color: "text-[#f6465d]/90",
       lineColor: "rgba(246, 70, 93, 0.45)",
       dashed: true,
@@ -650,7 +690,7 @@ export function ChartOrderLines({
   if (slPrice && slPrice > 0) {
     lines.push({
       key: "sl",
-      price: slPrice,
+      price: dragging === "sl" && dragPrice != null ? dragPrice : slPrice,
       color: "text-[#f6465d]",
       lineColor: HL_SL,
       dashed: false,

@@ -287,14 +287,27 @@ async function signObjectURL({
       body: JSON.stringify(request),
     }
   );
+
   if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const fallbackMessage =
+      "Replit object storage sidecar not available. " +
+      "If you are not running on Replit, unset USE_REPLIT_OBJECT_STORAGE or set it to 0.";
     throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `Failed to sign object URL: ${response.status} ${response.statusText}. ${fallbackMessage} ${
+        text ? `Details: ${text}` : ""
+      }`
     );
   }
 
-  const { signed_url: signedURL } = await response.json();
+  const body = await response.json();
+  const signedURL = body?.signed_url;
+  if (!signedURL || typeof signedURL !== "string") {
+    throw new Error(
+      "Invalid sidecar response for signed URL. Ensure Replit object storage sidecar is running."
+    );
+  }
+
   return signedURL;
 }
 

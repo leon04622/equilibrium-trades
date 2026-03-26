@@ -100,9 +100,12 @@ export function useUpload(options: UseUploadOptions = {}) {
       };
 
       if (!response.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : "Failed to get upload URL",
-        );
+        const serverMsg = typeof data.error === "string" ? data.error : "Failed to get upload URL";
+        const isUnavailable = response.status === 503 || response.status === 504;
+        const fallback = isUnavailable
+          ? "Upload service unavailable (503/504). Check object storage mode and set USE_REPLIT_OBJECT_STORAGE=0 for local uploads."
+          : "";
+        throw new Error(`${serverMsg}${fallback ? ` ${fallback}` : ""}`);
       }
 
       if (!data.uploadURL || !data.objectPath) {

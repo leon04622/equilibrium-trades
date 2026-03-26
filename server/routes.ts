@@ -56,8 +56,17 @@ export async function registerRoutes(
   registerChatRoutes(app);
 
   // Replit GCS presigned URLs when enabled; otherwise local disk (same API shape as useUpload).
-  if (process.env.USE_REPLIT_OBJECT_STORAGE === "1") {
-    registerObjectStorageRoutes(app);
+  const useReplitObjectStorage = process.env.USE_REPLIT_OBJECT_STORAGE === "1";
+  if (useReplitObjectStorage) {
+    try {
+      registerObjectStorageRoutes(app);
+    } catch (error) {
+      console.warn(
+        "Failed to initialize Replit object storage routes, falling back to local uploads:",
+        error,
+      );
+      registerLocalUploadRoutes(app);
+    }
   } else {
     registerLocalUploadRoutes(app);
   }
