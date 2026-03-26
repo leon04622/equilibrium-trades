@@ -42,6 +42,7 @@ function initDatabase(): void {
   try {
     pool = createPool(url);
     db = drizzle(pool, { schema });
+    console.log("Database Connected");
     console.log("[db] PostgreSQL pool ready (node-postgres; compatible with Supabase, Neon pooled URI, standard Postgres).");
   } catch (err) {
     console.error("[db] Failed to initialize database pool:", err);

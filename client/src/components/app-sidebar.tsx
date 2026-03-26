@@ -274,14 +274,6 @@ export function AppSidebar() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={location === "/admin-equilibrium"}>
-                      <Link href="/admin-equilibrium">
-                        <Shield className="h-4 w-4" />
-                        <span>CRM · Sign-in</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

@@ -1043,6 +1043,13 @@ export async function registerRoutes(
 
   app.post("/api/support/send", handleSupportSendRequest);
 
+  /** Canonical support ingest: persists to `support_tickets` and notifies Telegram (same as /api/support/send). */
+  app.post("/api/support", async (req: Request, res: Response) => {
+    const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    req.body = { ...b };
+    return handleSupportSendRequest(req, res);
+  });
+
   /** Alias for clients that POST `walletAddress` + `messageContent` (JSON). Same persistence + Telegram as /api/support/send. */
   app.post("/api/support/message", async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
@@ -1216,7 +1223,19 @@ export async function registerRoutes(
     try {
       const { updateSubscriptionSchema } = await import("@shared/schema");
       const paramWallet = decodeURIComponent(req.params.walletAddress);
-      const validated = updateSubscriptionSchema.safeParse({ walletAddress: paramWallet, ...req.body });
+      const raw = { walletAddress: paramWallet, ...req.body } as Record<string, unknown>;
+      if (raw.isMentee === true) {
+        raw.subscriptionTier = "mentoring";
+        raw.subscriptionActive = true;
+        raw.manualProOverride = true;
+      } else if (raw.isSubscribed === true) {
+        raw.subscriptionTier = "pro";
+        raw.subscriptionActive = true;
+        raw.manualProOverride = true;
+      }
+      delete raw.isSubscribed;
+      delete raw.isMentee;
+      const validated = updateSubscriptionSchema.safeParse(raw);
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
       }

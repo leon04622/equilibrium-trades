@@ -195,7 +195,7 @@ export function LiveChat() {
         return res.json();
       }
       const walletForBody = (address?.toLowerCase() || guestId || conversationOwnerId).toLowerCase();
-      const res = await fetch("/api/support/message", {
+      const res = await fetch("/api/support", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -219,6 +219,9 @@ export function LiveChat() {
       setInputValue("");
       refetchMessages();
       if (isMasterAdmin) refetchConversations();
+      if (!isMasterAdmin) {
+        toast({ title: "Sent", description: "Your message was delivered to support." });
+      }
     },
     onError: (err: Error) => {
       toast({
