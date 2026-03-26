@@ -94,8 +94,8 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
           <SheetTitle>Connect Wallet</SheetTitle>
           <SheetDescription>
             {isMobile
-              ? "Open Equilibrium inside your wallet's browser to connect."
-              : "Select your wallet below. Any EVM-compatible wallet works."}
+              ? "Open Equilibrium inside your wallet app’s browser (MetaMask, Coinbase, Rabby, etc.) or use WalletConnect from a desktop browser to deep-link into your phone wallet."
+              : "Select your wallet below. Any EVM-compatible wallet works; on mobile, prefer your wallet’s in-app browser or WalletConnect for a smooth handoff."}
           </SheetDescription>
         </SheetHeader>
 

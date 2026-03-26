@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useWallet } from "@/lib/wallet-context";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -33,12 +34,14 @@ export function BuilderCodeModal() {
     refreshApprovalStatus,
     confirmBuilderCodeApproved,
   } = useWallet();
+  const { terminalReady } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const isOpen =
     isConnected &&
+    terminalReady &&
     !isCheckingApproval &&
     !builderCodeApproved &&
     step !== "complete";

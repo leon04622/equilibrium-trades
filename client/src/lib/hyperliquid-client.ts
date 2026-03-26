@@ -118,6 +118,12 @@ export function getHyperliquidAgentPrivateKey(userAddress: string): string | nul
   return a?.privateKey ?? null;
 }
 
+/** Public address of the locally stored HL API agent (for L1 extraAgents checks). */
+export function getHyperliquidLocalAgentAddress(userAddress: string): string | null {
+  const a = getStoredAgent(userAddress);
+  return a?.address ?? null;
+}
+
 function storeAgent(userAddress: string, agent: StoredAgent): void {
   localStorage.setItem(`${AGENT_STORAGE_KEY}_${userAddress.toLowerCase()}`, JSON.stringify(agent));
 }
@@ -139,6 +145,15 @@ export function hasHyperliquidBuilderFeeApproved(userAddress: string): boolean {
 /** Attach HL order `builder` only when configured and the user has approved max fee on-chain (HL requirement). */
 function shouldAttachBuilderToOrders(userAddress: string): boolean {
   return isBuilderFeeConfigured() && hasHyperliquidBuilderFeeApproved(userAddress);
+}
+
+/** Remove only the stored API agent (e.g. when L1 no longer lists it). Keeps builder-fee local flag. */
+export function clearHyperliquidAgentOnly(walletAddress: string): void {
+  try {
+    localStorage.removeItem(`${AGENT_STORAGE_KEY}_${walletAddress.toLowerCase()}`);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Clear delegated Hyperliquid agent + local builder-fee flag (call on wallet disconnect). */

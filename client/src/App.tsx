@@ -14,6 +14,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { WalletGate } from "@/components/wallet-gate";
+import { AuthGate } from "@/components/auth-gate";
 import { BuilderCodeModal } from "@/components/builder-code-modal";
 import { PaywallModal } from "@/components/paywall-modal";
 import { PaywallProvider } from "@/lib/paywall-context";
@@ -121,7 +122,9 @@ function TradingLayout() {
         className="flex-1 min-h-0 overflow-hidden"
         style={{ display: isTrading ? "flex" : "none", flexDirection: "column" }}
       >
-        <Trading visible={isTrading} />
+        <AuthGate>
+          <Trading visible={isTrading} />
+        </AuthGate>
       </div>
 
       {/* All other pages: scrollable */}
