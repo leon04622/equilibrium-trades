@@ -357,12 +357,24 @@ export const insertSupportMessageSchema = insertSupportTicketSchema;
 /** @deprecated use insertSupportTicketSchema */
 export type InsertSupportMessage = InsertSupportTicket;
 
-export const supportSendBodySchema = z.object({
-  message: z.string().min(1).max(8000),
-  walletAddress: z.string().min(1),
-  conversationId: z.string().min(1).optional(),
-  clientTimestamp: z.string().optional(),
-});
+/** User chat + `/api/support/message` may send `messageContent` instead of `message`; `wallet` aliases `walletAddress`. */
+export const supportSendBodySchema = z.preprocess(
+  (raw) => {
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const o = raw as Record<string, unknown>;
+      const msg = o.message ?? o.messageContent;
+      const wa = o.walletAddress ?? o.wallet;
+      return { ...o, message: msg, walletAddress: wa };
+    }
+    return raw;
+  },
+  z.object({
+    message: z.string().min(1).max(8000),
+    walletAddress: z.string().min(1),
+    conversationId: z.string().min(1).optional(),
+    clientTimestamp: z.string().optional(),
+  }),
+);
 export type SupportSendBody = z.infer<typeof supportSendBodySchema>;
 
 // Email leads capture

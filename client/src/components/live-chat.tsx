@@ -195,15 +195,16 @@ export function LiveChat() {
         return res.json();
       }
       const walletForBody = (address?.toLowerCase() || guestId || conversationOwnerId).toLowerCase();
-      const res = await fetch("/api/support/send", {
+      const res = await fetch("/api/support/message", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...buildHeaders(),
         },
         body: JSON.stringify({
-          message: msg,
           walletAddress: walletForBody,
+          messageContent: msg,
+          message: msg,
           conversationId: conversationOwnerId.toLowerCase(),
           clientTimestamp: new Date().toISOString(),
         }),

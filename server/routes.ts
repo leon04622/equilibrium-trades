@@ -722,7 +722,16 @@ export async function registerRoutes(
         return res.json({ tier: 'free', active: false, expiresAt: null });
       }
 
-      // DB-backed Pro/Elite (admin grant or manual override) when Stripe has no active subscription
+      // Admin "Grant Pro" bypass: honor tier even if subscriptionActive was cleared in legacy rows
+      if (user.manualProOverride && user.subscriptionTier !== "free") {
+        return res.json({
+          tier: user.subscriptionTier,
+          active: true,
+          expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
+        });
+      }
+
+      // DB-backed Pro/Mentoring (admin grant) when Stripe has no active subscription
       if (user.subscriptionActive && user.subscriptionTier !== 'free') {
         return res.json({
           tier: user.subscriptionTier,
@@ -926,7 +935,7 @@ export async function registerRoutes(
   });
 
   /** Preferred user support path: wallet + timestamp + body → support_tickets + Telegram. */
-  app.post("/api/support/send", async (req: Request, res: Response) => {
+  async function handleSupportSendRequest(req: Request, res: Response): Promise<void> {
     try {
       const { supportSendBodySchema, insertSupportMessageSchema } = await import("@shared/schema");
       const parsed = supportSendBodySchema.safeParse(req.body);
@@ -934,10 +943,11 @@ export async function registerRoutes(
         pushAdminLog({
           channel: "support",
           level: "warn",
-          message: "POST /api/support/send validation failed",
+          message: "POST support send validation failed",
           meta: { issues: parsed.error.flatten() },
         });
-        return res.status(400).json({ error: "Invalid body", details: parsed.error.errors });
+        res.status(400).json({ error: "Invalid body", details: parsed.error.errors });
+        return;
       }
 
       const bodyWallet = parsed.data.walletAddress.trim();
@@ -955,10 +965,12 @@ export async function registerRoutes(
             message: "support/send denied (conversation owner mismatch)",
             meta: { conversationId },
           });
-          return res.status(403).json({ error: "Access denied" });
+          res.status(403).json({ error: "Access denied" });
+          return;
         }
         if (headerWallet && headerWallet.toLowerCase() !== bodyWallet.toLowerCase()) {
-          return res.status(403).json({ error: "walletAddress must match connected wallet" });
+          res.status(403).json({ error: "walletAddress must match connected wallet" });
+          return;
         }
       }
 
@@ -993,7 +1005,8 @@ export async function registerRoutes(
           message: "support/send insert validation failed",
           meta: { details: validated.error.errors },
         });
-        return res.status(400).json({ error: "Invalid message payload", details: validated.error.errors });
+        res.status(400).json({ error: "Invalid message payload", details: validated.error.errors });
+        return;
       }
 
       pushAdminLog({
@@ -1026,6 +1039,15 @@ export async function registerRoutes(
       pushAdminLog({ channel: "support", level: "error", message: String(error) });
       res.status(500).json({ error: "Failed to send message" });
     }
+  }
+
+  app.post("/api/support/send", handleSupportSendRequest);
+
+  /** Alias for clients that POST `walletAddress` + `messageContent` (JSON). Same persistence + Telegram as /api/support/send. */
+  app.post("/api/support/message", async (req: Request, res: Response) => {
+    const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    req.body = { ...b };
+    return handleSupportSendRequest(req, res);
   });
 
   /** SSE: push new messages to the trading UI when admin replies (or self echo). */

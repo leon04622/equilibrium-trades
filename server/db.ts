@@ -9,7 +9,7 @@ const { Pool } = pg;
  * Supabase: Project Settings → Database → Connection string (URI), often port 5432 or pooler 6543.
  */
 export const DATABASE_URL_MISSING_MESSAGE =
-  "DATABASE_URL is not set. Add a PostgreSQL connection string to .env (e.g. Supabase URI). " +
+  "DATABASE_URL (or MONGODB_URI as a Postgres URI fallback) is not set. Add a PostgreSQL connection string to .env (e.g. Supabase URI). " +
   "The server will start using in-memory fallbacks; wallet/chat/video persistence and Stripe catalog queries need a database.";
 
 export type AppDatabase = NodePgDatabase<typeof schema>;
@@ -27,10 +27,16 @@ function createPool(connectionString: string): pg.Pool {
 }
 
 function initDatabase(): void {
-  const url = process.env.DATABASE_URL?.trim();
+  const url = (process.env.DATABASE_URL || process.env.MONGODB_URI || "").trim();
   if (!url) {
     console.warn(`[db] ${DATABASE_URL_MISSING_MESSAGE}`);
     return;
+  }
+
+  if (!process.env.DATABASE_URL?.trim() && process.env.MONGODB_URI?.trim()) {
+    console.warn(
+      "[db] Using MONGODB_URI as the Postgres connection string (this app uses PostgreSQL, not MongoDB). Prefer DATABASE_URL.",
+    );
   }
 
   try {
