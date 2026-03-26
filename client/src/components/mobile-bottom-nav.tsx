@@ -1,13 +1,14 @@
 import { Link, useLocation } from "react-router-dom";
-import { TrendingUp, Home, Shield, Activity, PlayCircle } from "lucide-react";
+import { BarChart3, TrendingUp, User, BookOpen, Home, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 
 const baseItems = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/trading", icon: TrendingUp, label: "Trade" },
-  { to: "/signals", icon: Activity, label: "Scan" },
-  { to: "/videos", icon: PlayCircle, label: "Vault" },
+  { to: "/patterns", icon: BookOpen, label: "Learn" },
+  { to: "/portfolio", icon: BarChart3, label: "Portfolio" },
+  { to: "/settings", icon: User, label: "Account" },
 ];
 
 export function MobileBottomNav() {

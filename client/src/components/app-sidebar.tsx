@@ -2,10 +2,17 @@ import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   LineChart,
+  BookOpen,
+  GraduationCap,
+  Settings,
+  Zap,
+  CreditCard,
   TrendingUp,
-  ShieldCheck,
-  Activity,
-  PlayCircle,
+  Flame,
+  Wallet,
+  Play,
+  CandlestickChart,
+  Shield,
   MessageCircle,
 } from "lucide-react";
 import {
@@ -19,7 +26,6 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarSeparator,
-  SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/lib/wallet-context";
@@ -27,23 +33,50 @@ import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useChat } from "@/lib/chat-context";
 import { useQuery } from "@tanstack/react-query";
 
-const platformNavItems = [
+const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Trading", url: "/trading", icon: LineChart },
   {
-    title: "AI Pattern Scanner",
-    url: "/signals",
-    icon: Activity,
-    badge: "Pro",
-    badgeVariant: "secondary" as const,
+    title: "Trading",
+    url: "/trading",
+    icon: LineChart,
+    badge: "Live",
+    badgeVariant: "default" as const,
   },
+  { title: "Pattern Library", url: "/patterns", icon: BookOpen },
+  { title: "Candlesticks", url: "/candles", icon: CandlestickChart },
+];
+
+const learnNavItems = [
   {
-    title: "Educational Vault",
+    title: "Videos",
     url: "/videos",
-    icon: PlayCircle,
+    icon: Play,
     badge: "Pro",
     badgeVariant: "outline" as const,
   },
+];
+
+const toolsNavItems = [
+  {
+    title: "AI Signals",
+    url: "/signals",
+    icon: Zap,
+    badge: "AI",
+    badgeVariant: "secondary" as const,
+  },
+  {
+    title: "Heatmap",
+    url: "/heatmap",
+    icon: Flame,
+    badge: "Pro",
+    badgeVariant: "outline" as const,
+  },
+];
+
+const accountNavItems = [
+  { title: "Portfolio", url: "/portfolio", icon: Wallet },
+  { title: "Subscription", url: "/pricing", icon: CreditCard },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 function pathMatches(pathname: string, url: string): boolean {
@@ -84,16 +117,16 @@ export function AppSidebar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20">
             <TrendingUp className="h-4 w-4 text-primary" />
           </div>
-          <span className="font-semibold text-sm text-foreground">Equilibrium</span>
+          <span className="font-semibold text-sm text-foreground">Trading Platform</span>
         </Link>
       </SidebarHeader>
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
+          <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {platformNavItems.map((item) => (
+              {mainNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -119,9 +152,81 @@ export function AppSidebar() {
         <SidebarSeparator />
 
         <SidebarGroup>
-          <SidebarGroupLabel>Support</SidebarGroupLabel>
+          <SidebarGroupLabel>Learn</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              {learnNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathMatches(pathname, item.url)}
+                    data-testid={`nav-${item.title.toLowerCase()}`}
+                  >
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                      {item.badge && (
+                        <Badge variant={item.badgeVariant} className="ml-auto text-[10px] px-1.5 py-0">
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarSeparator />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Tools</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {toolsNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathMatches(pathname, item.url)}
+                    data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+                  >
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                      {item.badge && (
+                        <Badge variant={item.badgeVariant} className="ml-auto text-[10px] px-1.5 py-0">
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarSeparator />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Account</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {accountNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathMatches(pathname, item.url)}
+                    data-testid={`nav-${item.title.toLowerCase()}`}
+                  >
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   type="button"
@@ -156,10 +261,10 @@ export function AppSidebar() {
                       data-testid="nav-admin"
                     >
                       <Link to="/admin-equilibrium">
-                        <ShieldCheck className="h-4 w-4" />
-                        <span>Command Center</span>
+                        <Shield className="h-4 w-4" />
+                        <span>Admin Panel</span>
                         <Badge variant="destructive" className="ml-auto text-[10px] px-1.5 py-0">
-                          Master
+                          Admin
                         </Badge>
                       </Link>
                     </SidebarMenuButton>
@@ -170,10 +275,6 @@ export function AppSidebar() {
           </>
         )}
       </SidebarContent>
-
-      <SidebarFooter className="p-2 text-[10px] text-muted-foreground text-center border-t">
-        Hyperliquid charting · Pattern scanner
-      </SidebarFooter>
     </Sidebar>
   );
 }
