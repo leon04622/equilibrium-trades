@@ -1,6 +1,6 @@
 # Equilibrium Trades
 
-Beginner-friendly trading platform: Hyperliquid integration, charts (lightweight-charts), patterns, subscriptions (Stripe), and wallet-gated flows. Self-host on Railway, Render, or a VPS — see **HOSTING.md**.
+Beginner-friendly trading platform: Hyperliquid integration, charts (lightweight-charts), patterns, subscriptions (Stripe), and wallet-gated flows. **Self-host on Railway, Render, or a VPS** — see **[HOSTING.md](./HOSTING.md)** (includes **migrating off Replit** and why Autoscale + missing `DATABASE_URL` breaks videos and persistence).
 
 ## Prerequisites
 

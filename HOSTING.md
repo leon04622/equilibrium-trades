@@ -98,9 +98,47 @@ Good if you want full control and a fixed **IPv4** for GoDaddy.
 
 ## Leaving Replit / self-hosting this repo
 
-The codebase no longer depends on Replit domains, Stripe connectors, or Replit-only Vite plugins. Deploy on **Railway**, **Render**, or a **VPS** (Option A or B above), set **`PUBLIC_APP_URL`**, **`DATABASE_URL`**, **`STRIPE_SECRET_KEY`**, **`STRIPE_PUBLISHABLE_KEY`**, then point **GoDaddy DNS** at that host’s instructions.
+The codebase does **not** require Replit domains, Replit Object Storage for the video vault, or Replit-only Vite plugins. Vault uploads go to **`uploads/videos` on the server disk** via `registerLocalUploadRoutes` (same origin as the API).
 
-**Video uploads** (`/api/uploads/*`) use **local disk** under `uploads/videos` (same-origin PUT/GET, no Replit Object Storage). On **Replit Autoscale**, files live on one instance’s disk only—use a **single VM / Reserved VM** or attach external storage if uploads must survive scaling. Self-hosted: ensure that directory exists and is writable (or on a mounted volume).
+### Why things often “don’t work” on Replit
+
+| Issue | Cause |
+|--------|--------|
+| **Videos or users disappear** | **Autoscale / multiple instances**: in-memory fallbacks are per process; without a stable **`DATABASE_URL`**, data is not shared and resets on restart. |
+| **Videos list empty but admin “worked”** | Admin hit **instance A**; `/videos` hit **instance B** with an empty in-memory store, or Postgres URL was wrong / table missing. |
+| **Uploaded files missing** | File is on **one** instance’s disk; the next request may land on another instance. Fix: **single instance** or external storage (not required if you only use YouTube/Vimeo URLs). |
+| **Stripe / redirects wrong** | **`PUBLIC_APP_URL`** not set to your real `https://www…` origin. |
+
+**Fix:** Run on **one** deployment with a real **PostgreSQL** `DATABASE_URL` (Railway Postgres, Neon, Supabase, etc.), set **`PUBLIC_APP_URL`**, then run **`npm run db:push`** once against that database.
+
+### Step-by-step: move off Replit to Railway or Render
+
+1. **Keep GitHub as source of truth** — Push `main` to a repo you control (you already have `equilibrium-trades` on GitHub).
+2. **Create Postgres outside Replit** — e.g. Railway **PostgreSQL** plugin, or free **[Neon](https://neon.tech)** / **[Supabase](https://supabase.com)**. Copy the connection string → **`DATABASE_URL`** on the new host.
+3. **New web service** — Railway or Render: connect the **same GitHub repo**, **Node 20**, **build** `npm run build`, **start** `npm start` (or use the repo **`Dockerfile`** on Railway).
+4. **Set environment variables** (minimum):
+   - **`DATABASE_URL`** — Postgres URI from step 2  
+   - **`PUBLIC_APP_URL`** — `https://www.yourdomain.com` (no trailing slash), or the host’s temporary URL until DNS is ready  
+   - **`STRIPE_PUBLISHABLE_KEY`** / **`STRIPE_SECRET_KEY`** — copy from Replit Secrets if you use billing  
+   - Copy any **`ADMIN_*`**, **`ADMIN_WALLET_ADDRESSES`**, **`ADMIN_EQUILIBRIUM_MASTER_WALLET`**, OpenAI keys, etc. from Replit into the new host’s env UI  
+5. **Schema on the new database** — From your laptop (with network access to the DB):
+
+   ```bash
+   DATABASE_URL="postgresql://..." npm run db:push
+   ```
+
+6. **Stripe** — In [Stripe Dashboard → Webhooks](https://dashboard.stripe.com/webhooks), add **`https://www.yourdomain.com/api/stripe/webhook`** (or your Render/Railway URL until the domain is live). Disable or delete the old Replit webhook if it pointed at Replit.
+7. **DNS** — In GoDaddy, point **www** (and apex if needed) at **Railway / Render** (CNAME or A records **they** show you). See **Option A §4** above.
+8. **Data migration (optional)** — If you still have a working Replit Postgres URL, you can **`pg_dump`** the old DB and **`pg_restore`** into the new one (or migrate only tables you care about). If not, you start fresh: re-invite admins, re-add vault videos in Command Center.
+9. **Turn off the Replit deployment** when the new site is verified, so traffic and webhooks are not split between two URLs.
+10. **Optional git cleanup** — Remove unused Replit remotes so you don’t push to the wrong place:
+
+    ```bash
+    git remote -v
+    # git remote remove subrepl-...
+    ```
+
+**Video uploads** (`/api/uploads/*`) use **local disk** under `uploads/videos`. On platforms with **multiple containers**, use **one instance** or a **volume** mounted at `/app/uploads` (Docker) so files persist. If you only publish **YouTube/Vimeo links**, you can skip file uploads entirely.
 
 ---
 
