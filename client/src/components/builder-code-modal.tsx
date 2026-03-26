@@ -114,7 +114,7 @@ export function BuilderCodeModal() {
       toast({
         title: "You're signed in",
         description:
-          "Hyperliquid setup (trading key + optional builder fee) runs when you trade — use the banner on the chart if prompted.",
+          "Hyperliquid secure trading setup runs when you trade — use the banner on the chart if prompted.",
       });
     } catch (err: unknown) {
       console.error("Builder sign-in:", err);
@@ -223,7 +223,7 @@ export function BuilderCodeModal() {
           <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/40 border border-border/40">
             <Wallet className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Your private keys never leave your wallet. Builder attribution on Hyperliquid uses a separate one-time approval when you trade.
+              Your private keys never leave your wallet. Hyperliquid trading permissions are confirmed in a separate step when you trade.
             </p>
           </div>
         </div>

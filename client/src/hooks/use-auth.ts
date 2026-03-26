@@ -11,9 +11,9 @@ export interface UseAuthResult {
   address: string | null;
   isConnected: boolean;
   chainId: number | null;
-  /** Hyperliquid L1 + local agent satisfy Apex Terminal requirements. */
+  /** Hyperliquid API agent is active on L1 for this wallet (instant trading path). */
   terminalReady: boolean;
-  /** Loading referral / builder / agent L1 snapshot. */
+  /** Loading builder / agent L1 snapshot. */
   isHlVerifying: boolean;
   isHlError: boolean;
   hlError: Error | null;
@@ -22,8 +22,8 @@ export interface UseAuthResult {
 }
 
 /**
- * Session model: wallet connection + Arbitrum + HL referral (or pre-existing other referrer)
- * + builder fee threshold (when configured) + approveAgent visible on L1 for the stored key.
+ * Terminal access once the delegated agent is valid on L1. Builder fee is handled inside
+ * ensureHyperliquidTradingSession but does not block chart access.
  */
 export function useAuth(): UseAuthResult {
   const { address, isConnected, chainId } = useWallet();
@@ -47,12 +47,9 @@ export function useAuth(): UseAuthResult {
     retry: 2,
   });
 
-  const referralOk = hlSnapshot ? hlSnapshot.referral !== "none" : false;
-  const builderOk = hlSnapshot ? hlSnapshot.builderFeeOk : false;
   const agentOk = hlSnapshot ? hlSnapshot.agentOnL1 : false;
 
-  const terminalReady =
-    gateOff || (onArb && referralOk && builderOk && agentOk);
+  const terminalReady = gateOff || (onArb && agentOk);
 
   return {
     address,

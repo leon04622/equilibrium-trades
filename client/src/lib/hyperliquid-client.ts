@@ -10,6 +10,7 @@ import {
   isBuilderFeeConfigured,
 } from "@/lib/hyperliquid-platform-config";
 import { isUserRejectedWalletError } from "@/lib/wallet-errors";
+import { signTypedDataHyperliquid } from "@/lib/eip712-typed-data";
 
 type HlWalletAuthStep = "ok" | "user_cancelled" | "failed";
 
@@ -187,6 +188,19 @@ export async function ensureHyperliquidTradingSession(
     await syncServerTime();
     const userAddress = await signer.getAddress();
 
+    try {
+      const nw = await signer.provider?.getNetwork();
+      if (nw != null && Number(nw.chainId) !== 42161) {
+        return {
+          success: false,
+          error:
+            "Switch to Arbitrum One (chain 42161) in your wallet — Hyperliquid signatures require the correct network.",
+        };
+      }
+    } catch {
+      /* ignore network read failures */
+    }
+
     let stored = getStoredAgent(userAddress);
     if (!stored) {
       const agent = generateAgentKey();
@@ -294,7 +308,13 @@ async function authorizeAgent(
   console.log("Message:", message);
   
   try {
-    const signature = await signer.signTypedData(domain, types, message);
+    const signature = await signTypedDataHyperliquid(
+      signer,
+      domain,
+      types,
+      "HyperliquidTransaction:ApproveAgent",
+      message,
+    );
     console.log("Agent authorization signature:", signature);
     
     // Parse signature
@@ -376,7 +396,13 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthSte
 
   try {
     console.log("Requesting builder fee approval signature...");
-    const signature = await signer.signTypedData(domain, types, message);
+    const signature = await signTypedDataHyperliquid(
+      signer,
+      domain,
+      types,
+      "HyperliquidTransaction:ApproveBuilderFee",
+      message,
+    );
 
     const r = signature.slice(0, 66);
     const s = "0x" + signature.slice(66, 130);
@@ -1192,7 +1218,13 @@ export async function transferUsdcBetweenAccounts(
     console.log("Domain:", domain);
     console.log("Message:", message);
 
-    const signature = await signer.signTypedData(domain, types, message);
+    const signature = await signTypedDataHyperliquid(
+      signer,
+      domain,
+      types,
+      "HyperliquidTransaction:UsdClassTransfer",
+      message,
+    );
     console.log("usdClassTransfer: signature obtained:", signature.slice(0, 20) + "...");
 
     const r = signature.slice(0, 66);
@@ -1284,7 +1316,13 @@ export async function withdrawUsdcToWallet(
     };
 
     console.log("withdraw3: requesting EIP-712 signature...");
-    const signature = await signer.signTypedData(domain, types, message);
+    const signature = await signTypedDataHyperliquid(
+      signer,
+      domain,
+      types,
+      "HyperliquidTransaction:Withdraw",
+      message,
+    );
     console.log("withdraw3: signature obtained:", signature.slice(0, 20) + "...");
 
     const r = signature.slice(0, 66);

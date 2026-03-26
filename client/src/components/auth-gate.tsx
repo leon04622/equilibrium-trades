@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Loader2, Shield, Zap, Link2 } from "lucide-react";
+import { Loader2, Shield, Smartphone } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useWallet, ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
-import { linkHyperliquidReferralCode } from "@/lib/hyperliquid-onboarding";
-import { HL_REFERRAL_CODE } from "@/lib/hyperliquid-platform-config";
 import { useToast } from "@/hooks/use-toast";
 import { isUserRejectedWalletError } from "@/lib/wallet-errors";
 import { isTerminalAuthDisabled } from "@/lib/apex-auth-flags";
@@ -21,15 +19,15 @@ import {
   clearHyperliquidAgentOnly,
   getHyperliquidLocalAgentAddress,
 } from "@/lib/hyperliquid-client";
+import { isLikelyMobileDevice } from "@/lib/eip712-typed-data";
 
 export interface AuthGateProps {
   children: React.ReactNode;
 }
 
 /**
- * Gates the Apex Sovereign terminal (chart + HL execution) until:
- * wallet on Arbitrum, referral linked (or already referred elsewhere on L1),
- * builder fee approved when configured, and API agent approved on L1.
+ * Gates the Apex terminal until the secure API agent is approved on Hyperliquid L1.
+ * Referral / platform fees are applied in the background (agent-signed setReferrer) — not shown here.
  */
 export function AuthGate({ children }: AuthGateProps) {
   const { toast } = useToast();
@@ -41,6 +39,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const gateOff = isTerminalAuthDisabled();
   const wrongChain = isConnected && chainId !== ARBITRUM_CHAIN_ID;
+  const mobile = isLikelyMobileDevice();
 
   const runSetup = useCallback(async () => {
     if (!signer || !address) return;
@@ -48,18 +47,6 @@ export function AuthGate({ children }: AuthGateProps) {
     setBusy(true);
     try {
       const snap = hlSnapshot;
-      if (snap?.referral === "none") {
-        const link = await linkHyperliquidReferralCode(signer, HL_REFERRAL_CODE);
-        if (!link.ok) {
-          setErr(link.error ?? "Could not link builder protocol on Hyperliquid.");
-          return;
-        }
-        toast({
-          title: "Builder protocol linked",
-          description: "Your account is tied to the Apex Sovereign referral on L1.",
-        });
-      }
-
       const localA = getHyperliquidLocalAgentAddress(address);
       if (snap && !snap.agentOnL1 && localA) {
         clearHyperliquidAgentOnly(address);
@@ -67,14 +54,14 @@ export function AuthGate({ children }: AuthGateProps) {
 
       const session = await prepareHyperliquidSession();
       if (!session.success) {
-        setErr(session.error ?? "Trading session setup failed.");
+        setErr(session.error ?? "Secure setup failed.");
         return;
       }
 
       await refetchHlAuth();
       toast({
-        title: "Instant trading enabled",
-        description: "SL/TP drags and closes can use your API agent — not withdrawals.",
+        title: "Instant trading ready",
+        description: "Your agent can sign trades and TP/SL — it cannot withdraw funds.",
       });
     } catch (e: unknown) {
       if (isUserRejectedWalletError(e)) {
@@ -103,7 +90,7 @@ export function AuthGate({ children }: AuthGateProps) {
           <div className="max-w-sm rounded-xl border border-border bg-card p-6 text-center shadow-lg">
             <p className="text-sm font-medium text-foreground">Wrong network</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Apex Sovereign runs against Hyperliquid on <strong>Arbitrum One</strong>.
+              Hyperliquid signing requires <strong>Arbitrum One</strong> (chain 42161).
             </p>
             <Button className="mt-4 w-full" onClick={() => void switchToArbitrum()}>
               Switch to Arbitrum
@@ -115,9 +102,6 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   const showGate = !terminalReady;
-  const snap = hlSnapshot;
-  const stepReferral = snap?.referral === "none";
-  const needsSessionOnly = snap && snap.referral !== "none";
 
   return (
     <div className="relative flex flex-1 min-h-0 flex-col">
@@ -142,11 +126,12 @@ export function AuthGate({ children }: AuthGateProps) {
                 <Shield className="h-5 w-5 text-primary" />
               </div>
               <DialogTitle className="text-lg font-semibold leading-tight pr-8">
-                Apex Sovereign Terminal
+                Secure account setup
               </DialogTitle>
               <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
-                One-time Hyperliquid L1 setup. After this, you won&apos;t be asked again for this
-                wallet.
+                One-time setup: approve your secure trading agent for instant moves on Hyperliquid.
+                This key <strong className="text-foreground">cannot withdraw</strong> your funds — it
+                only signs trades you initiate here.
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -161,40 +146,33 @@ export function AuthGate({ children }: AuthGateProps) {
                   Retry
                 </Button>
               </div>
-            ) : isHlVerifying && !snap ? (
+            ) : isHlVerifying && !hlSnapshot ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Verifying account on Hyperliquid…
+                Checking your Hyperliquid account…
               </div>
             ) : (
               <>
-                <ul className="space-y-3 text-sm text-muted-foreground">
-                  <li className="flex gap-2">
-                    <Link2 className="h-4 w-4 shrink-0 text-primary mt-0.5" />
-                    <span>
-                      <strong className="text-foreground">Builder protocol</strong> — link your
-                      account to our referral on L1
-                      {stepReferral ? " (required)." : " (already set)."}
-                    </span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Zap className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
-                    <span>
-                      <strong className="text-foreground">Instant trading</strong> — approve a
-                      non-custodial <strong className="text-foreground">API agent</strong> that
-                      can place trades only; it{" "}
-                      <strong className="text-foreground">cannot withdraw</strong> funds.
-                    </span>
-                  </li>
-                </ul>
-
-                <Alert className="border-amber-500/30 bg-amber-500/5">
+                <Alert className="border-muted">
                   <AlertDescription className="text-xs leading-relaxed text-muted-foreground">
-                    L1 actions use a small amount of gas on Arbitrum (typically under ~$0.10). You may
-                    see separate prompts for referral link, builder fee (if enabled), and agent
-                    approval.
+                    You may need a small amount of ETH on Arbitrum for gas on the first approval
+                    (typically under ~$0.10). After that, routine order updates use the agent without
+                    wallet popups until the agent expires.
                   </AlertDescription>
                 </Alert>
+
+                {busy && mobile && (
+                  <div className="flex gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm text-foreground">
+                    <Smartphone className="h-5 w-5 shrink-0 text-primary mt-0.5" />
+                    <div>
+                      <p className="font-medium">Check your wallet app</p>
+                      <p className="text-muted-foreground text-xs mt-1 leading-relaxed">
+                        If no prompt appears in the browser, switch to MetaMask, Rabby, Coinbase, or
+                        Phantom and confirm the signature there. Use HTTPS for wallet deep links.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {err && (
                   <p className="text-sm text-destructive" role="alert">
@@ -210,14 +188,10 @@ export function AuthGate({ children }: AuthGateProps) {
                   {busy ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Confirm in wallet…
+                      Waiting for wallet…
                     </>
-                  ) : stepReferral ? (
-                    "Link builder & enable trading"
-                  ) : needsSessionOnly ? (
-                    "Enable instant trading"
                   ) : (
-                    "Complete setup"
+                    "Approve secure trading agent"
                   )}
                 </Button>
               </>
