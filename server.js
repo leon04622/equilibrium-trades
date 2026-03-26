@@ -30,6 +30,9 @@
  * POST   /api/videos   — body: title, description, videoUrl, optional category (free text), thumbnailPath
  * DELETE /api/videos/:id
  *
+ * POST   /api/admin/videos   — Command Center: title, videoUrl, category, optional description, thumbnailUrl
+ * DELETE /api/admin/videos/:id
+ *
  * Source of truth for route implementations: `server/routes.ts`, `server/index.ts`, `server/support-chat-ws.ts`.
  */
 import "./dist/index.cjs";

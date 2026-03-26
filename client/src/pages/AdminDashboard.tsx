@@ -254,11 +254,11 @@ export default function AdminDashboard() {
         throw new Error("Title, category, and video URL are required");
       }
       const desc = vaultDescription.trim() || vaultTitle.trim();
-      const { data, status } = await api.post("/api/videos", {
+      const { data, status } = await api.post("/api/admin/videos", {
         title: vaultTitle.trim(),
         description: desc,
         videoUrl: vaultUrl.trim(),
-        thumbnailPath: vaultThumb.trim() || undefined,
+        thumbnailUrl: vaultThumb.trim() || undefined,
         category: vaultCategory.trim(),
       });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
@@ -283,7 +283,7 @@ export default function AdminDashboard() {
 
   const deleteVaultVideo = useMutation({
     mutationFn: async (id: string) => {
-      const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
+      const { data, status } = await api.delete(`/api/admin/videos/${encodeURIComponent(id)}`);
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) {
         throw new Error((data as { error?: string })?.error || "Delete failed");
@@ -606,8 +606,8 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <CardTitle>Add educational video</CardTitle>
                   <CardDescription>
-                    YouTube, Vimeo, or direct MP4 URL. Rows are stored in <code className="text-[10px]">tutorial_videos</code> (your
-                    VIDEO_LIBRARY in the app).
+                    POST <code className="text-[10px]">/api/admin/videos</code> — YouTube, Vimeo, or MP4. Category drives
+                    vault sections (Beginner Patterns / SMA Masterclass / Live Sessions).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">

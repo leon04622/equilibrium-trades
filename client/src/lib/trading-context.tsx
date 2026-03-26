@@ -84,7 +84,7 @@ interface TradingContextType {
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
-  /** Last `frontendOpenOrders` JSON from Hyperliquid info API (debug / mirror verification). */
+  /** Last `frontendOpenOrders` JSON from Hyperliquid info API. */
   hlFrontendOpenOrdersRaw: unknown;
   /** Unix ms when open orders + positions were last refreshed from HL (null = never / disconnected). */
   hlAccountSyncAt: number | null;

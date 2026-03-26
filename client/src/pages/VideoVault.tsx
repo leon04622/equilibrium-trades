@@ -1,13 +1,7 @@
-import { useMemo, useState, lazy, Suspense } from "react";
+import { useState, lazy, Suspense, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import {
-  GraduationCap,
-  Loader2,
-  Lock,
-  Play,
-  Sparkles,
-} from "lucide-react";
+import { GraduationCap, Loader2, Lock, Play, Sparkles } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,62 +15,23 @@ import {
 import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
 import { TIER_PRO } from "@/lib/subscription-pricing";
-import {
-  VAULT_SECTION_META,
-  inferAcademySection,
-  tutorialToPlayUrl,
-} from "@/lib/video-vault";
+import { VAULT_SECTION_META, inferAcademySection, tutorialToPlayUrl } from "@/lib/video-vault";
 import { cn } from "@/lib/utils";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 
 const ReactPlayer = lazy(() => import("react-player/lazy"));
 
-/** Curated Equilibrium Academy catalog (merged with CRM / `tutorial_videos` for Pro subscribers). */
-export const VIDEO_LIBRARY: {
+export type VaultItem = {
   id: string;
   title: string;
   description: string;
   thumbnailUrl: string;
   videoUrl: string;
   academySection: AcademySection;
-}[] = [
-  {
-    id: "seed-welcome-academy",
-    title: "Welcome to the Equilibrium Academy",
-    description:
-      "How this vault is organized: patterns first, then SMA mastery, then live-style sessions.",
-    thumbnailUrl:
-      "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=640&q=80",
-    videoUrl: "https://www.youtube.com/watch?v=ysz5S6PUM-U",
-    academySection: "beginner_patterns",
-  },
-  {
-    id: "seed-sma-intro",
-    title: "SMA Stack Overview (21 / 200)",
-    description:
-      "Why we anchor on the 21 and 200 SMAs and how they define trend and pullback context.",
-    thumbnailUrl:
-      "https://images.unsplash.com/photo-1642543494126-58b548a28cdf?w=640&q=80",
-    videoUrl: "https://vimeo.com/76979871",
-    academySection: "sma_masterclass",
-  },
-  {
-    id: "seed-live-routine",
-    title: "Pre-Session Routine",
-    description:
-      "A repeatable checklist before you touch risk: levels, volatility, and invalidation.",
-    thumbnailUrl:
-      "https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=640&q=80",
-    videoUrl:
-      "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-    academySection: "live_sessions",
-  },
-];
+};
 
-export type VaultMergedItem = (typeof VIDEO_LIBRARY)[number] & { source: "seed" | "crm" };
-
-function mergeVaultItems(apiVideos: TutorialVideo[]): VaultMergedItem[] {
-  const fromCrm: VaultMergedItem[] = apiVideos.map((v) => ({
+function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
+  return apiVideos.map((v) => ({
     id: v.id,
     title: v.title,
     description: v.description,
@@ -85,10 +40,7 @@ function mergeVaultItems(apiVideos: TutorialVideo[]): VaultMergedItem[] {
       "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
     videoUrl: tutorialToPlayUrl(v),
     academySection: inferAcademySection(v),
-    source: "crm" as const,
   }));
-  const seeds: VaultMergedItem[] = VIDEO_LIBRARY.map((s) => ({ ...s, source: "seed" as const }));
-  return [...seeds, ...fromCrm];
 }
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {
@@ -119,19 +71,20 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
+/** Educational Vault — content from `tutorial_videos` (PostgreSQL), grouped by admin category → academy section. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
-  const [active, setActive] = useState<VaultMergedItem | null>(null);
+  const [active, setActive] = useState<VaultItem | null>(null);
 
   const { data: apiVideos = [], isLoading: listLoading } = useQuery<TutorialVideo[]>({
     queryKey: ["/api/videos"],
   });
 
-  const items = useMemo(() => mergeVaultItems(apiVideos), [apiVideos]);
+  const items = useMemo(() => mapApiToVaultItems(apiVideos), [apiVideos]);
 
   const bySection = useMemo(() => {
-    const map: Record<AcademySection, VaultMergedItem[]> = {
+    const map: Record<AcademySection, VaultItem[]> = {
       beginner_patterns: [],
       sma_masterclass: [],
       live_sessions: [],
@@ -142,7 +95,6 @@ export default function VideoVault() {
     return map;
   }, [items]);
 
-  /** Gate vault preview until wallet is connected and Stripe/CRM shows active Pro (or Mentoring). */
   const showGate = !isConnected || subLoading || !isSubscribed;
 
   return (
@@ -153,11 +105,10 @@ export default function VideoVault() {
             <GraduationCap className="h-6 w-6" />
             <span className="text-xs font-semibold uppercase tracking-wider">Pro</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">
-            Educational Vault
-          </h1>
+          <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Equilibrium Academy — curated lessons, SMA masterclass, and session-style recordings.
+            Lessons from the database — grouped by Beginner Patterns, SMA Masterclass, and Live Sessions from the
+            Command Center.
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}
@@ -182,7 +133,7 @@ export default function VideoVault() {
                 ? "Connect your wallet so we can verify your subscription from billing (Stripe + CRM)."
                 : subLoading
                   ? "Checking your subscription…"
-                  : "Your plan does not include the vault. Upgrade to stream every lesson with YouTube, Vimeo, or direct MP4 links."}
+                  : "Your plan does not include the vault. Upgrade to stream lessons added in the Admin panel."}
             </p>
             <div className="flex flex-wrap gap-2 mt-5 justify-center">
               <Button asChild className="gap-2">
@@ -204,8 +155,12 @@ export default function VideoVault() {
           {listLoading ? (
             <div className="flex justify-center py-16 text-muted-foreground gap-2">
               <Loader2 className="h-6 w-6 animate-spin" />
-              Loading library…
+              Loading library from server…
             </div>
+          ) : items.length === 0 ? (
+            <p className="text-center text-muted-foreground py-12 text-sm">
+              No videos in the library yet. An admin can add lessons from the Command Center → Videos tab.
+            </p>
           ) : (
             VAULT_SECTION_META.map((section) => (
               <section key={section.id} className="space-y-4">
@@ -214,37 +169,37 @@ export default function VideoVault() {
                   <p className="text-sm text-muted-foreground">{section.description}</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {bySection[section.id].map((item) => (
-                    <Card
-                      key={item.id}
-                      className="overflow-hidden cursor-pointer hover-elevate transition-shadow"
-                      onClick={() => setActive(item)}
-                      data-testid={`vault-card-${item.id}`}
-                    >
-                      <div className="aspect-video relative bg-muted">
-                        <img
-                          src={item.thumbnailUrl}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-90 hover:opacity-100 transition-opacity">
-                          <Play className="h-12 w-12 text-white drop-shadow-md" />
+                  {bySection[section.id].length === 0 ? (
+                    <p className="text-sm text-muted-foreground col-span-full">
+                      No videos in this section — use category labels like “Beginner Patterns”, “SMA Masterclass”, or
+                      “Live” when publishing.
+                    </p>
+                  ) : (
+                    bySection[section.id].map((item) => (
+                      <Card
+                        key={item.id}
+                        className="overflow-hidden cursor-pointer hover-elevate transition-shadow"
+                        onClick={() => setActive(item)}
+                        data-testid={`vault-card-${item.id}`}
+                      >
+                        <div className="aspect-video relative bg-muted">
+                          <img
+                            src={item.thumbnailUrl}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                          <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-90 hover:opacity-100 transition-opacity">
+                            <Play className="h-12 w-12 text-white drop-shadow-md" />
+                          </div>
                         </div>
-                        {item.source === "crm" && (
-                          <Badge className="absolute top-2 right-2 text-[10px]" variant="secondary">
-                            New
-                          </Badge>
-                        )}
-                      </div>
-                      <CardContent className="p-4">
-                        <h3 className="font-semibold line-clamp-2 leading-snug">{item.title}</h3>
-                        <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
-                          {item.description}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        <CardContent className="p-4">
+                          <h3 className="font-semibold line-clamp-2 leading-snug">{item.title}</h3>
+                          <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{item.description}</p>
+                        </CardContent>
+                      </Card>
+                    ))
+                  )}
                 </div>
               </section>
             ))

@@ -497,6 +497,56 @@ export async function registerRoutes(
     }
   });
 
+  /** Admin Command Center — canonical create path (validates title, category, videoUrl, thumbnailUrl). */
+  app.post("/api/admin/videos", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const { adminVideoCreateSchema } = await import("@shared/schema");
+      const parsed = adminVideoCreateSchema.safeParse(
+        req.body && typeof req.body === "object" ? req.body : {},
+      );
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+      }
+      const row = parsed.data;
+      if (!row.youtubeId?.trim() && !row.videoPath?.trim()) {
+        return res.status(400).json({ error: "Could not resolve video URL (YouTube, Vimeo, or direct link)" });
+      }
+      const video = await storage.createVideo({
+        title: row.title,
+        description: row.description,
+        duration: row.duration,
+        category: row.category,
+        youtubeId: row.youtubeId ?? null,
+        videoPath: row.videoPath ?? null,
+        thumbnailPath: row.thumbnailPath ?? null,
+        academySection: row.academySection,
+      });
+      res.json(video);
+    } catch (error) {
+      console.error("POST /api/admin/videos:", error);
+      res.status(500).json({ error: "Failed to create video" });
+    }
+  });
+
+  app.delete("/api/admin/videos/:id", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const deleted = await storage.deleteVideo(req.params.id);
+      if (deleted) res.json({ success: true });
+      else res.status(404).json({ error: "Video not found" });
+    } catch (error) {
+      console.error("DELETE /api/admin/videos:", error);
+      res.status(500).json({ error: "Failed to delete video" });
+    }
+  });
+
   // Delete video - admin only
   app.delete("/api/videos/:id", async (req: Request, res: Response) => {
     try {
@@ -552,10 +602,23 @@ export async function registerRoutes(
       // Check if user already exists
       const existing = await storage.getWalletUser(validated.data.walletAddress);
       if (existing) {
-        return res.json({ 
-          success: true, 
+        const emailIn = validated.data.email?.trim();
+        if (emailIn) {
+          try {
+            const updated = await storage.updateWalletUserEmail(validated.data.walletAddress, emailIn);
+            return res.json({
+              success: true,
+              message: "User already registered; email updated for CRM.",
+              user: updated ?? existing,
+            });
+          } catch {
+            /* fall through */
+          }
+        }
+        return res.json({
+          success: true,
           message: "User already registered",
-          user: existing 
+          user: existing,
         });
       }
 

@@ -166,6 +166,66 @@ export const insertVideoSchema = z
     };
   });
 
+/** Admin Command Center / POST /api/admin/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
+export const adminVideoCreateSchema = z
+  .object({
+    title: z.string().trim().min(1, "Title is required"),
+    description: z.string().trim().optional(),
+    videoUrl: z.string().trim().min(1, "Video URL is required"),
+    category: z.string().trim().optional().default(""),
+    thumbnailUrl: z.string().trim().optional(),
+    thumbnailPath: z.string().trim().optional(),
+  })
+  .transform((data) => {
+    const url = data.videoUrl.trim();
+    let youtubeId: string | undefined;
+    let videoPath: string | undefined;
+    const m = url.match(
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/i,
+    );
+    if (m?.[1]) youtubeId = m[1];
+    else videoPath = url;
+
+    const rawCat = (data.category || "").trim();
+    const catLower = rawCat.toLowerCase();
+    let academySection: AcademySection = "beginner_patterns";
+    let categoryOut = rawCat || "Beginner Patterns";
+
+    if (
+      /beginner|pattern|strategy|continuation|reversal/.test(catLower) ||
+      catLower.includes("beginner patterns")
+    ) {
+      academySection = "beginner_patterns";
+      categoryOut = rawCat || "Beginner Patterns";
+    } else if (/sma|masterclass|platform|21|200/.test(catLower) || catLower.includes("sma")) {
+      academySection = "sma_masterclass";
+      categoryOut = rawCat || "SMA Masterclass";
+    } else if (/live|session|walkthrough|tips/.test(catLower)) {
+      academySection = "live_sessions";
+      categoryOut = rawCat || "Live Trading Sessions";
+    }
+
+    const thumb =
+      (data.thumbnailUrl && data.thumbnailUrl.trim()) ||
+      (data.thumbnailPath && data.thumbnailPath.trim()) ||
+      undefined;
+
+    const desc = (data.description && data.description.trim()) || data.title.trim();
+
+    return {
+      title: data.title.trim(),
+      description: desc,
+      duration: "" as const,
+      category: categoryOut.slice(0, 200),
+      youtubeId,
+      videoPath,
+      thumbnailPath: thumb,
+      academySection,
+    };
+  });
+
+export type AdminVideoCreateInput = z.infer<typeof adminVideoCreateSchema>;
+
 // Wallet Users - Database table for persistent storage
 export const walletUsers = pgTable("wallet_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

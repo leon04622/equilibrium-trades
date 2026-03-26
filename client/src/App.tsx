@@ -15,6 +15,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { WalletGate } from "@/components/wallet-gate";
+import { WalletCrmSync } from "@/components/wallet-crm-sync";
 import { BuilderCodeModal } from "@/components/builder-code-modal";
 import { TradeHandshakeProvider } from "@/components/trade-handshake-context";
 import { PaywallModal } from "@/components/paywall-modal";
@@ -53,6 +54,7 @@ function App() {
                 <ChatProvider>
                   <TooltipProvider delayDuration={200}>
                     <WalletGate>
+                      <WalletCrmSync />
                       <BuilderCodeModal />
                       <PaywallProvider>
                         <PaywallModal />

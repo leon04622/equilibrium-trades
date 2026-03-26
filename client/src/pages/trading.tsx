@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { PatternChart } from "@/components/pattern-chart";
-import { HlMirrorDebugPanel } from "@/components/hl-mirror-debug-panel";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
@@ -674,8 +673,6 @@ export default function Trading({ visible = true }: TradingProps) {
           </SheetContent>
         </Sheet>
       </div>
-
-      {visible && chartEngine === "hyperliquid" && <HlMirrorDebugPanel coin={coin} />}
     </div>
   );
 }
