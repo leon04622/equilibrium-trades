@@ -50,8 +50,18 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
     return coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
   }
   const live = await getPerpUniverseCoinNames();
-  if (live.length > 0) return live;
-  return ["BTC", "ETH", "SOL"];
+  let list = live.length > 0 ? live : ["BTC", "ETH", "SOL"];
+  const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
+  if (Number.isFinite(maxCoins) && maxCoins > 0 && list.length > maxCoins) {
+    try {
+      const tickers = await getAllTickers();
+      const vol = new Map(tickers.map((t) => [t.coin, parseFloat(t.dayNtlVlm || "0")]));
+      list = [...list].sort((a, b) => (vol.get(b) ?? 0) - (vol.get(a) ?? 0)).slice(0, maxCoins);
+    } catch {
+      /* keep full list */
+    }
+  }
+  return list;
 }
 
 /** Built-in / env admins plus Equilibrium master wallet (video CRUD, etc.). */

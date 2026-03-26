@@ -43,6 +43,20 @@ const INTERVAL_MS: Record<string, number> = {
   "1d": 86_400_000,
 };
 
+/** Serialize candleSnapshot calls so full-universe scans do not trip Hyperliquid rate limits. */
+const candleFetchLimit = pLimit(16);
+
+/**
+ * Candle intervals needed for the requested scan TFs only (not always all nine).
+ * 1m high-probability tier needs 15m SMMA — include 15m whenever 1m is scanned.
+ */
+function intervalsForPatternScan(timeframes: string[]): readonly string[] {
+  const set = new Set(timeframes.filter(Boolean));
+  if (set.size === 0) return UNIVERSAL_SCAN_TIMEFRAMES;
+  if (set.has("1m")) set.add("15m");
+  return UNIVERSAL_SCAN_TIMEFRAMES.filter((iv) => set.has(iv));
+}
+
 export type MarketBias = "bullish" | "bearish" | "neutral_choppy";
 
 export interface EducationalPatternSignal {
@@ -405,15 +419,19 @@ function upsertByScore(
 export async function fetchMtfCandleBundle(
   coin: string,
   limit: number,
+  intervals: readonly string[] = UNIVERSAL_SCAN_TIMEFRAMES,
 ): Promise<Record<string, HyperliquidCandle[]>> {
   const end = Date.now();
+  const ivs = intervals.length > 0 ? intervals : [...UNIVERSAL_SCAN_TIMEFRAMES];
   const entries = await Promise.all(
-    UNIVERSAL_SCAN_TIMEFRAMES.map(async (interval) => {
-      const ms = INTERVAL_MS[interval] ?? 60_000;
-      const start = end - ms * limit - ms * 2;
-      const candles = await getCandles(coin, interval, start, end, limit);
-      return [interval, candles] as const;
-    }),
+    ivs.map((interval) =>
+      candleFetchLimit(async () => {
+        const ms = INTERVAL_MS[interval] ?? 60_000;
+        const start = end - ms * limit - ms * 2;
+        const candles = await getCandles(coin, interval, start, end, limit);
+        return [interval, candles] as const;
+      }),
+    ),
   );
   return Object.fromEntries(entries);
 }
@@ -607,7 +625,8 @@ async function scanOneCoinMtf(
   coin: string,
   timeframes: string[],
 ): Promise<EducationalPatternSignal[]> {
-  const bundle = await fetchMtfCandleBundle(coin, 200);
+  const intervals = intervalsForPatternScan(timeframes);
+  const bundle = await fetchMtfCandleBundle(coin, 200, intervals);
   const tfLimit = pLimit(9);
   const tasks = timeframes.map(
     (tf) => () =>
@@ -619,13 +638,16 @@ async function scanOneCoinMtf(
   return results.filter((x): x is EducationalPatternSignal => x != null);
 }
 
-/** Multi-coin scan: per coin, Promise.all MTF candle fetch (9 intervals), then analyze each requested TF. */
+/** Multi-coin scan: per coin, fetch only needed intervals, then analyze each requested TF. */
 export async function scanForEducationalPatterns(
   coins: string[],
   timeframes: string[] = [...UNIVERSAL_SCAN_TIMEFRAMES],
 ): Promise<EducationalPatternSignal[]> {
-  const uniqueTf = [...new Set(timeframes.filter(Boolean))];
-  const coinLimit = pLimit(5);
+  const uniqueTf =
+    timeframes.filter(Boolean).length > 0
+      ? [...new Set(timeframes.filter(Boolean))]
+      : [...UNIVERSAL_SCAN_TIMEFRAMES];
+  const coinLimit = pLimit(4);
   const out = await Promise.all(coins.map((coin) => coinLimit(() => scanOneCoinMtf(coin, uniqueTf))));
   const flat = out.flat();
   flat.sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());

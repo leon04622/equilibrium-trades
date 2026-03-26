@@ -264,7 +264,14 @@ export function PatternScannerUI() {
   const tfParam =
     selectedTimeframes.length > 0 ? selectedTimeframes.join(",") : [...SCAN_ALL_TIMEFRAMES].join(",");
 
-  const { data: signals = [], isLoading, refetch, isFetching } = useQuery<PatternSignal[]>({
+  const {
+    data: signals = [],
+    isLoading,
+    refetch,
+    isFetching,
+    isError,
+    error,
+  } = useQuery<PatternSignal[]>({
     queryKey: ["/api/signals/patterns", tfParam],
     queryFn: async () => {
       const response = await fetch(`/api/signals/patterns?timeframes=${encodeURIComponent(tfParam)}`);
@@ -273,6 +280,7 @@ export function PatternScannerUI() {
     },
     refetchInterval: 30_000,
     staleTime: 0,
+    retry: 1,
   });
 
   useEffect(() => {
@@ -345,6 +353,23 @@ export function PatternScannerUI() {
           </div>
         </div>
       </div>
+
+      {isError && (
+        <Alert variant="destructive" className="border-red-500/50">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Scan request failed</AlertTitle>
+          <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              The pattern scan did not finish successfully (timeout or server error). Zero results here does not mean
+              there are no patterns — try Scan again or narrow timeframes.{" "}
+              {error instanceof Error ? error.message : ""}
+            </span>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => refetch()} disabled={isFetching}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Alert className="border-violet-500/40 bg-violet-500/5 hidden md:block">
         <Zap className="h-4 w-4 text-violet-600" />
