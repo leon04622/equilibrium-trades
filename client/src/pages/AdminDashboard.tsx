@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +35,7 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ export default function AdminDashboard() {
   const { address } = useWallet();
   const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
+  const { isAdmin: isAppAdmin, isLoading: appAdminLoading } = useIsAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useAdminApi(address ?? undefined);
@@ -83,9 +85,14 @@ export default function AdminDashboard() {
   const [vaultThumb, setVaultThumb] = useState("");
   const [vaultSearch, setVaultSearch] = useState("");
 
-  /** Server checks `x-wallet-address` against `ADMIN_EQUILIBRIUM_MASTER_WALLET` — same as “YOUR_MASTER_WALLET_ADDRESS” in env. */
-  const canAccessCommandCenter = !!address && masterConfigured && isMasterAdmin;
-  const accessGateLoading = adminCheckLoading;
+  /** Master wallet: full CRM. Built-in / `ADMIN_WALLET_ADDRESSES` admins: videos only unless they are also the master. */
+  const showCrmTabs = isMasterAdmin;
+  const canManageVideos = isMasterAdmin || isAppAdmin;
+  const canAccessCommandCenter =
+    !!address &&
+    ((masterConfigured && (isMasterAdmin || isAppAdmin)) || (!masterConfigured && isAppAdmin));
+  const accessGateLoading =
+    adminCheckLoading || (!!address && !isMasterAdmin && appAdminLoading);
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
     queryKey: ["admin-rest", "users", address],
@@ -112,7 +119,7 @@ export default function AdminDashboard() {
 
   const { data: vaultVideos = [], isLoading: vaultLoading, refetch: refetchVault } = useQuery({
     queryKey: ["admin-rest", "vault-videos", address],
-    enabled: !!address && isMasterAdmin && tab === "videos",
+    enabled: !!address && canManageVideos && tab === "videos",
     queryFn: async () => {
       const { data, status } = await api.get<TutorialVideo[]>("/api/videos");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
@@ -154,6 +161,12 @@ export default function AdminDashboard() {
       ws?.close();
     };
   }, [address, isMasterAdmin, tab, queryClient]);
+
+  useLayoutEffect(() => {
+    if (!showCrmTabs) {
+      setTab("videos");
+    }
+  }, [showCrmTabs]);
 
   const conversations = useMemo(() => {
     const map = new Map<string, SupportMessage[]>();
@@ -334,36 +347,36 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!masterConfigured) {
+  if (!address) {
     return (
       <div className="p-8 max-w-lg">
-        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin — not configured</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Command Center</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> to your master
-          wallet (the value that replaces <code className="text-xs bg-muted px-1 rounded">YOUR_MASTER_WALLET_ADDRESS</code> in
-          production).
+          Connect an admin wallet (master or a wallet listed in built-in admins / <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>).
         </p>
       </div>
     );
   }
 
-  if (!address) {
-    return (
-      <div className="p-8 max-w-lg">
-        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Command Center</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Connect your wallet to continue. Only the master admin address can open this panel.</p>
-      </div>
-    );
-  }
-
   if (!canAccessCommandCenter) {
+    if (!masterConfigured && !isAppAdmin) {
+      return (
+        <div className="p-8 max-w-lg">
+          <h1 className="text-2xl font-semibold tracking-tight">Admin — not configured</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server for the
+            Command Center CRM, or add your wallet to <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code> for
+            video tools only.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Access denied</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          This route is restricted to the wallet configured in{" "}
-          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>. Connect with that
-          address to manage users, support, and videos.
+          This wallet is not the master admin or an allowed admin address. CRM requires{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> to match your connected address.
         </p>
       </div>
     );
@@ -377,15 +390,19 @@ export default function AdminDashboard() {
           <div>
             <h1 className="text-xl font-bold">Command Center</h1>
             <p className="text-xs text-muted-foreground">
-              Users · Support · Video library · Manual Pro ${TIER_PRO}
+              {showCrmTabs
+                ? `Users · Support · Videos · Manual Pro $${TIER_PRO}`
+                : "Video library — add or remove lessons (CRM requires master wallet)."}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
-            <MessageCircle className="h-4 w-4" />
-            Open support inbox
-          </Button>
+          {showCrmTabs && (
+            <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
+              <MessageCircle className="h-4 w-4" />
+              Open support inbox
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="shrink-0 gap-2" asChild>
             <Link to="/videos" target="_blank" rel="noreferrer">
               <Eye className="h-4 w-4" />
@@ -397,8 +414,12 @@ export default function AdminDashboard() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <aside className="w-full md:w-52 shrink-0 space-y-1 rounded-xl border bg-card p-2">
-          {nav("users", "Users & subs", <Users className="h-4 w-4" />)}
-          {nav("support", "Support inbox", <MessageSquare className="h-4 w-4" />)}
+          {showCrmTabs && (
+            <>
+              {nav("users", "Users & subs", <Users className="h-4 w-4" />)}
+              {nav("support", "Support inbox", <MessageSquare className="h-4 w-4" />)}
+            </>
+          )}
           {nav("videos", "Videos", <Video className="h-4 w-4" />)}
         </aside>
 
