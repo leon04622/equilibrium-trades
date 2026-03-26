@@ -69,7 +69,7 @@ export function PaywallModal() {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && closePaywall()}>
       <DialogContent
-        className="max-w-md w-full p-0 overflow-hidden border-border/80 gap-0"
+        className="max-w-[min(100vw-1.25rem,28rem)] w-full p-0 overflow-hidden border-border/80 gap-0 touch-manipulation"
         data-testid="paywall-modal"
       >
         <DialogTitle className="sr-only">Unlock Full Platform</DialogTitle>
@@ -78,11 +78,13 @@ export function PaywallModal() {
         {/* Header */}
         <div className="relative bg-gradient-to-br from-primary/20 via-primary/10 to-background px-6 pt-8 pb-6 text-center border-b border-border/50">
           <button
+            type="button"
             onClick={closePaywall}
-            className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+            className="absolute top-3 right-3 flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors touch-manipulation"
             data-testid="button-close-paywall"
+            aria-label="Close"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" />
           </button>
 
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/20 border border-primary/30">
@@ -131,7 +133,7 @@ export function PaywallModal() {
           <Button
             onClick={handleSubscribe}
             disabled={isCheckingOut}
-            className="w-full h-12 text-base font-semibold gap-2"
+            className="w-full h-12 min-h-[48px] text-base font-semibold gap-2 touch-manipulation"
             data-testid="button-paywall-subscribe"
           >
             {isCheckingOut ? (
@@ -148,9 +150,10 @@ export function PaywallModal() {
           </Button>
 
           <button
+            type="button"
             onClick={closePaywall}
             className={cn(
-              "w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-1",
+              "w-full min-h-[44px] text-sm text-muted-foreground hover:text-foreground transition-colors py-2 touch-manipulation",
             )}
             data-testid="button-paywall-dismiss"
           >

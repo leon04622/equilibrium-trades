@@ -14,8 +14,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { LiveChat } from "@/components/live-chat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { WalletGate } from "@/components/wallet-gate";
-import { AuthGate } from "@/components/auth-gate";
 import { BuilderCodeModal } from "@/components/builder-code-modal";
+import { TradeHandshakeProvider } from "@/components/trade-handshake-context";
 import { PaywallModal } from "@/components/paywall-modal";
 import { PaywallProvider } from "@/lib/paywall-context";
 import NotFound from "@/pages/not-found";
@@ -65,6 +65,7 @@ function App() {
         <AppErrorBoundary>
         <WalletProvider>
           <TradingProvider>
+            <TradeHandshakeProvider>
             <ChatProvider>
             <TooltipProvider delayDuration={200}>
               <WalletGate>
@@ -101,6 +102,7 @@ function App() {
               </WalletGate>
             </TooltipProvider>
             </ChatProvider>
+            </TradeHandshakeProvider>
           </TradingProvider>
         </WalletProvider>
         </AppErrorBoundary>
@@ -122,9 +124,7 @@ function TradingLayout() {
         className="flex-1 min-h-0 overflow-hidden"
         style={{ display: isTrading ? "flex" : "none", flexDirection: "column" }}
       >
-        <AuthGate>
-          <Trading visible={isTrading} />
-        </AuthGate>
+        <Trading visible={isTrading} />
       </div>
 
       {/* All other pages: scrollable */}

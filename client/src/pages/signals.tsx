@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { SubscriptionGate } from "@/components/subscription-gate";
+import { ProSubscriptionRoute } from "@/components/protected-route";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 
 interface PatternSignal {
@@ -524,12 +524,12 @@ function SignalsContent() {
 
 export default function Signals() {
   return (
-    <SubscriptionGate 
+    <ProSubscriptionRoute
       feature="ai_signals"
-      title="AI Pattern Scanner"
-      description="Upgrade to AI Pro to access real-time AI-powered pattern detection across all timeframes."
+      title="Upgrade to Pro"
+      description="Unlock Morning Star and AI pattern signals across all timeframes."
     >
       <SignalsContent />
-    </SubscriptionGate>
+    </ProSubscriptionRoute>
   );
 }

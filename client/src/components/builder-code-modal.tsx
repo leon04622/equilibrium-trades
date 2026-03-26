@@ -5,7 +5,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useWallet } from "@/lib/wallet-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import {
   CheckCircle2,
   Shield,
@@ -14,16 +13,16 @@ import {
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getAddress } from "ethers";
-import { buildEquilibriumBuilderApprovalMessage } from "@/lib/equilibrium-builder-approval-message";
-import { isUserRejectedWalletError, parseApiRequestError } from "@/lib/wallet-errors";
+import { submitEquilibriumBuilderSignin } from "@/lib/equilibrium-builder-signin";
 
-type Step = "idle" | "signing" | "registering" | "complete" | "error";
+type Step = "idle" | "signing" | "registering" | "complete";
 
 /**
- * Equilibrium sign-in only: EIP-191 message + server verification.
- * Hyperliquid agent + builder fee are handled separately (trading banner / first order) so auth never blocks on HL.
+ * Standalone Equilibrium sign-in modal. Auto-open is disabled for go-live: the first LONG/SHORT
+ * opens the trade handshake flow instead, which bundles wallet + this sign-in + HL agent.
  */
+const AUTO_OPEN_BUILDER_MODAL = false;
+
 export function BuilderCodeModal() {
   const {
     address,
@@ -40,6 +39,7 @@ export function BuilderCodeModal() {
   const [error, setError] = useState<string | null>(null);
 
   const isOpen =
+    AUTO_OPEN_BUILDER_MODAL &&
     isConnected &&
     terminalReady &&
     !isCheckingApproval &&
@@ -55,78 +55,29 @@ export function BuilderCodeModal() {
   const handleSign = async () => {
     if (!signer || !address) return;
     setError(null);
-
-    let normalizedAddress: string;
-    try {
-      normalizedAddress = getAddress(address);
-      const signerAddr = getAddress(await signer.getAddress());
-      if (signerAddr !== normalizedAddress) {
-        setError(
-          "Wallet mismatch: the active signer does not match your connected address. Reconnect your wallet and try again.",
-        );
-        setStep("idle");
-        return;
-      }
-    } catch {
-      setError("Could not read your wallet address. Reconnect and try again.");
+    setStep("signing");
+    const result = await submitEquilibriumBuilderSignin(signer, address);
+    if (!result.ok) {
+      setError(result.error);
       setStep("idle");
+      if (!result.userCancelled) {
+        toast({
+          title: "Sign-in failed",
+          description: result.error,
+          variant: "destructive",
+        });
+      }
       return;
     }
 
-    const timestampMs = Date.now();
-    const message = buildEquilibriumBuilderApprovalMessage(normalizedAddress, timestampMs);
-    let phase: "equilibrium" | "api" = "equilibrium";
-
-    try {
-      setStep("signing");
-      phase = "equilibrium";
-      let signature: string;
-      try {
-        signature = await signer.signMessage(message);
-      } catch (e) {
-        if (isUserRejectedWalletError(e)) {
-          setError("You cancelled the Equilibrium sign-in message in your wallet. Tap Approve & Continue to try again.");
-          setStep("idle");
-          return;
-        }
-        throw e;
-      }
-
-      setStep("registering");
-      phase = "api";
-      const res = await apiRequest("POST", "/api/wallet-user/approve-builder-code", {
-        walletAddress: normalizedAddress,
-        signature,
-        message,
-      });
-      const data = await res.json();
-
-      if (!data.success) {
-        setError(data.error || "Approval was not saved. Please try again.");
-        setStep("idle");
-        return;
-      }
-
-      confirmBuilderCodeApproved();
-      await refreshApprovalStatus();
-
-      setStep("complete");
-      toast({
-        title: "You're signed in",
-        description:
-          "Hyperliquid secure trading setup runs when you trade — use the banner on the chart if prompted.",
-      });
-    } catch (err: unknown) {
-      console.error("Builder sign-in:", err);
-      if (phase === "api") {
-        const apiMsg = parseApiRequestError(err);
-        setError(apiMsg ?? (err instanceof Error ? err.message : "Could not verify your signature. Please try again."));
-        setStep("idle");
-        return;
-      }
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
-      setStep("error");
-    }
+    setStep("registering");
+    confirmBuilderCodeApproved();
+    await refreshApprovalStatus();
+    setStep("complete");
+    toast({
+      title: "You're signed in",
+      description: "Hyperliquid secure trading setup runs when you trade — use the trade panel if prompted.",
+    });
   };
 
   if (!isOpen) return null;
@@ -223,7 +174,7 @@ export function BuilderCodeModal() {
           <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/40 border border-border/40">
             <Wallet className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Your private keys never leave your wallet. Hyperliquid trading permissions are confirmed in a separate step when you trade.
+              Your private keys never leave your wallet. Hyperliquid trading permissions are confirmed when you trade.
             </p>
           </div>
         </div>

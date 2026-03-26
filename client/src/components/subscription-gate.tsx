@@ -6,12 +6,16 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
 import { usePaywall } from "@/lib/paywall-context";
 import type { PremiumFeature } from "@/hooks/use-subscription";
+import { PremiumFeatureLock } from "@/components/premium-feature-lock";
+import { cn } from "@/lib/utils";
 
 interface SubscriptionGateProps {
   feature: PremiumFeature;
   children: React.ReactNode;
   title?: string;
   description?: string;
+  /** `overlay`: show page content blurred with Pro CTA (freemium). `card`: full-page gate (default). */
+  variant?: "card" | "overlay";
 }
 
 const featureRequirements: Record<PremiumFeature, { tier: 'pro' | 'elite'; icon: React.ReactNode; name: string }> = {
@@ -25,15 +29,50 @@ const featureRequirements: Record<PremiumFeature, { tier: 'pro' | 'elite'; icon:
   coaching: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: '1-on-1 Coaching' },
 };
 
-export function SubscriptionGate({ feature, children, title, description }: SubscriptionGateProps) {
+export function SubscriptionGate({
+  feature,
+  children,
+  title,
+  description,
+  variant = "card",
+}: SubscriptionGateProps) {
   const { hasAccess, isLoading, tier } = useSubscription();
   const { isConnected } = useWallet();
   const { openPaywall } = usePaywall();
 
+  const requirement = featureRequirements[feature];
+  const featureName = requirement?.name || "Premium Feature";
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full min-h-[40vh]">
         <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  const subscribed = hasAccess(feature);
+
+  if (variant === "overlay") {
+    if (subscribed) {
+      return <>{children}</>;
+    }
+    return (
+      <div className="relative h-full min-h-0 flex flex-col">
+        <PremiumFeatureLock
+          locked
+          featureLabel={featureName}
+          title={title || "Upgrade to Pro"}
+          subtitle={
+            description ||
+            `Unlock ${featureName.toLowerCase()} — connect a wallet at checkout if you have not already.`
+          }
+          className="min-h-[min(70vh,520px)] flex-1 rounded-none"
+        >
+          <div className={cn("min-h-[min(70vh,520px)] p-4 md:p-6", !isConnected && "opacity-90")}>
+            {children}
+          </div>
+        </PremiumFeatureLock>
       </div>
     );
   }
@@ -50,7 +89,7 @@ export function SubscriptionGate({ feature, children, title, description }: Subs
           </CardHeader>
           <CardContent className="text-center space-y-4">
             <p className="text-sm text-muted-foreground">
-              Connect your wallet to access {featureRequirements[feature]?.name || 'this feature'}.
+              Connect your wallet to access {featureRequirements[feature]?.name || "this feature"}.
             </p>
           </CardContent>
         </Card>
@@ -58,13 +97,11 @@ export function SubscriptionGate({ feature, children, title, description }: Subs
     );
   }
 
-  if (hasAccess(feature)) {
+  if (subscribed) {
     return <>{children}</>;
   }
 
-  const requirement = featureRequirements[feature];
-  const requiredTier = requirement?.tier || 'pro';
-  const featureName = requirement?.name || 'Premium Feature';
+  const requiredTier = requirement?.tier || "pro";
 
   return (
     <div className="flex items-center justify-center h-full p-8">

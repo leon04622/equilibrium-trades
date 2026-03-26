@@ -13,6 +13,7 @@ import {
   isSpotCoin,
 } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
+import { useTradeHandshake } from "@/components/trade-handshake-context";
 
 interface OrderEntryProps {
   coin: string;
@@ -41,14 +42,11 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   const {
     isConnected,
     signer,
-    connect,
-    builderCodeApproved,
     isCheckingApproval,
-    hyperliquidSessionReady,
     isPreparingHyperliquidSession,
-    prepareHyperliquidSession,
   } = useWallet();
   const { toast } = useToast();
+  const { ensureTradeReady } = useTradeHandshake();
 
   useEffect(() => {
     if (isSpot) { setMaxLev(1); setLeverage_(1); return; }
@@ -77,10 +75,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
   };
 
   const handleSubmit = async (isBuy: boolean) => {
-    if (!isConnected) {
-      try { await connect(); } catch {
-        toast({ title: "Connect failed", description: "Please connect your wallet.", variant: "destructive" });
-      }
+    const ready = await ensureTradeReady();
+    if (!ready) {
       return;
     }
 
@@ -93,14 +89,6 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
       toast({ title: "One moment", description: "Checking your account setup…" });
       return;
     }
-    if (!builderCodeApproved) {
-      toast({
-        title: "Sign in required",
-        description: "Complete the Equilibrium sign-in dialog (one signature, no gas), then try again.",
-        variant: "destructive",
-      });
-      return;
-    }
 
     if (isPreparingHyperliquidSession) {
       toast({
@@ -108,18 +96,6 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
         description: "Complete any Hyperliquid prompts in your wallet, then try again.",
       });
       return;
-    }
-
-    if (!hyperliquidSessionReady) {
-      const prep = await prepareHyperliquidSession();
-      if (!prep.success) {
-        toast({
-          title: "Hyperliquid setup required",
-          description: prep.error || "Approve the trading agent and builder fee in your wallet to place orders without repeat signatures.",
-          variant: "destructive",
-        });
-        return;
-      }
     }
 
     const qty = getSizeNum();

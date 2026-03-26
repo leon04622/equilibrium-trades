@@ -25,7 +25,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useUpload } from "@/hooks/use-upload";
 import { useWallet } from "@/lib/wallet-context";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SubscriptionGate } from "@/components/subscription-gate";
+import { ProSubscriptionRoute } from "@/components/protected-route";
 import type { TutorialVideo } from "@shared/schema";
 
 interface VideoPlayerProps {
@@ -49,14 +49,14 @@ function VideoPlayer({ video, open, onClose }: VideoPlayerProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl p-0 overflow-hidden">
-        <DialogHeader className="p-4 pb-0">
-          <DialogTitle className="pr-8">{video.title}</DialogTitle>
+      <DialogContent className="max-h-[min(92dvh,900px)] w-[min(100vw-1rem,56rem)] max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overflow-x-hidden p-0 sm:max-w-4xl touch-manipulation">
+        <DialogHeader className="p-4 pb-2 sm:p-5 sm:pb-0">
+          <DialogTitle className="pr-10 text-base sm:text-lg leading-snug">{video.title}</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {video.description}
           </DialogDescription>
         </DialogHeader>
-        <div className="aspect-video w-full bg-black">
+        <div className="aspect-video w-full min-h-[200px] max-h-[min(70dvh,56.25vw)] bg-black sm:max-h-none">
           {video.youtubeId ? (
             <iframe
               src={`https://www.youtube.com/embed/${video.youtubeId}?autoplay=1&rel=0`}
@@ -671,12 +671,12 @@ function VideosContent() {
 
 export default function Videos() {
   return (
-    <SubscriptionGate
+    <ProSubscriptionRoute
       feature="video_library"
-      title="Course Video Library"
-      description="Upgrade to Pro to unlock the full course library — strategy breakdowns, pattern walkthroughs, and live trade reviews."
+      title="Upgrade to Pro"
+      description="Unlock high-fidelity course video — strategy breakdowns, pattern walkthroughs, and platform walkthroughs."
     >
       <VideosContent />
-    </SubscriptionGate>
+    </ProSubscriptionRoute>
   );
 }

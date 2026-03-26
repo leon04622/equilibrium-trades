@@ -7,6 +7,10 @@ import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, T
 
 const PUBLIC_PATHS = ["/pricing"];
 
+function isPublicTradingPath(path: string): boolean {
+  return path === "/trading" || path.startsWith("/trading?");
+}
+
 /**
  * Browse without a wallet when:
  * - `VITE_WALLET_GATE_DISABLED=true` (or `1`) — use for Replit/production preview; unset for go-live.
@@ -28,7 +32,14 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
 
   const path = typeof location === "string" ? location : "";
-  if (isWalletGateDisabled() || isConnected || PUBLIC_PATHS.includes(path)) return <>{children}</>;
+  if (
+    isWalletGateDisabled() ||
+    isConnected ||
+    PUBLIC_PATHS.includes(path) ||
+    isPublicTradingPath(path)
+  ) {
+    return <>{children}</>;
+  }
 
   const handleEmailCapture = async (e: React.FormEvent) => {
     e.preventDefault();

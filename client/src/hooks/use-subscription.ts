@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useWallet } from "@/lib/wallet-context";
+import { checkSubscription } from "@/lib/check-subscription";
 
 export interface SubscriptionStatus {
   tier: 'free' | 'pro' | 'elite';
@@ -26,11 +27,12 @@ export function useSubscription() {
     staleTime: 30000,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      const res = await fetch(`/api/stripe/subscription/${address}`);
-      if (!res.ok) {
-        return { tier: "free", active: false, expiresAt: null } satisfies SubscriptionStatus;
-      }
-      return res.json() as Promise<SubscriptionStatus>;
+      const r = await checkSubscription(address!);
+      return {
+        tier: r.tier,
+        active: r.active,
+        expiresAt: r.expiresAt,
+      } satisfies SubscriptionStatus;
     },
   });
 
@@ -65,6 +67,8 @@ export function useSubscription() {
     isPro,
     isElite,
     isFree,
+    /** Alias for an active Pro or Elite plan (Stripe-verified when connected). */
+    isSubscribed: !!(isPro || isElite),
     tier: subscription?.tier || 'free',
     hasAccess,
     isConnected,

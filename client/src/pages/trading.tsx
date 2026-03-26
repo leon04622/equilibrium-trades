@@ -88,14 +88,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const { updatePrices, refreshAccount, connected: tradingConnected } = useTrading();
   const { openPaywall } = usePaywall();
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
-  const {
-    address: walletAddr,
-    builderCodeApproved,
-    isCheckingApproval: builderCheckLoading,
-    hyperliquidSessionReady,
-    isPreparingHyperliquidSession,
-    prepareHyperliquidSession,
-  } = useWallet();
+  const { address: walletAddr } = useWallet();
 
   const [location] = useLocation();
 
@@ -140,24 +133,11 @@ export default function Trading({ visible = true }: TradingProps) {
 
   const chartInterval = TF_TO_INTERVAL[timeframe] || "5m";
 
-  // Basic charting is free for all connected wallets
-  const canShowIndicatorChart = isConnected;
-  // AI pattern signals and SMA overlays are Pro-only (both gated together)
-  const canUseAIPatterns = isConnected && hasAccess('ai_signals');
+  // Tier 1: anyone can use the native chart; Tier 2: AI scans + indicator stack are Pro-gated in-chart
+  const canUseAIPatterns = isConnected && hasAccess("ai_signals");
+  const lockPremiumIndicatorStack = showIndicators && !canUseAIPatterns;
 
-  // Reset AI chart if user disconnects
-  useEffect(() => {
-    if (!canShowIndicatorChart && showAIChart) {
-      setShowAIChart(false);
-    }
-  }, [canShowIndicatorChart, showAIChart]);
-
-  // Handler: toggle AI chart with paywall gate
   const handleAIChartToggle = (checked: boolean) => {
-    if (checked && !canUseAIPatterns) {
-      openPaywall("AI Pattern Recognition");
-      return;
-    }
     setShowAIChart(checked);
   };
 
@@ -262,7 +242,7 @@ export default function Trading({ visible = true }: TradingProps) {
     );
   }
 
-  // Show loading spinner while checking subscription (prevents bypass during load)
+  // While subscription loads for a connected wallet, avoid flashing paid UI
   if (subLoading && isConnected) {
     return (
       <div className="h-full flex items-center justify-center bg-background">
@@ -285,38 +265,7 @@ export default function Trading({ visible = true }: TradingProps) {
       <div className={cn(
         "relative flex flex-wrap items-center gap-2 md:gap-4 px-2 md:px-3 py-2 border-b bg-card/50",
         isFullscreen && "hidden md:flex",
-        isConnected &&
-          !builderCheckLoading &&
-          (!builderCodeApproved || !hyperliquidSessionReady) &&
-          "pt-10 md:pt-10"
       )}>
-        {isConnected && !builderCheckLoading && !builderCodeApproved && (
-          <div className="absolute left-0 right-0 top-0 z-[60] flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/40 px-3 py-2 text-[11px] md:text-xs text-amber-200">
-            <span className="font-medium">Sign in to Equilibrium</span>
-            <span className="hidden sm:inline opacity-90">— One wallet signature in the dialog (no gas). Required to trade.</span>
-          </div>
-        )}
-        {isConnected &&
-          !builderCheckLoading &&
-          builderCodeApproved &&
-          !hyperliquidSessionReady && (
-            <div className="absolute left-0 right-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-sky-500/15 border-b border-sky-500/35 px-3 py-2 text-[11px] md:text-xs text-sky-100">
-              <span className="font-medium">Finish Hyperliquid session</span>
-              <span className="hidden sm:inline opacity-90">
-                — One-time agent + fee approval; then orders and TP/SL need no wallet signatures.
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="h-7 text-[10px] md:text-xs shrink-0"
-                disabled={isPreparingHyperliquidSession}
-                onClick={() => prepareHyperliquidSession()}
-              >
-                {isPreparingHyperliquidSession ? "Waiting for wallet…" : "Continue in wallet"}
-              </Button>
-            </div>
-          )}
         <p
           className="absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-1/2 pointer-events-none text-center text-[10px] md:text-[11px] text-muted-foreground px-2 max-w-[min(92vw,420px)]"
           aria-live="polite"
@@ -590,6 +539,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       currentPrice={price}
                       patternScanEnabled={canUseAIPatterns && !isSpot}
                       hideIndicators={!showIndicators}
+                      lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                       className="absolute inset-0" 
                     />
                   ) : (
@@ -624,6 +574,7 @@ export default function Trading({ visible = true }: TradingProps) {
                   currentPrice={price}
                   patternScanEnabled={canUseAIPatterns && !isSpot}
                   hideIndicators={!showIndicators}
+                  lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                   className="h-full" 
                 />
               ) : (

@@ -20,6 +20,7 @@ import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
 import { ApexSovereign } from "@/components/apex-sovereign";
 import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
+import { PremiumFeatureLock } from "@/components/premium-feature-lock";
 
 interface EducationalPatternSignal {
   id: string;
@@ -47,6 +48,8 @@ interface PatternChartProps {
   /** When true, fetches educational patterns for this symbol/timeframe and shows the top-left alert card (Pro). */
   patternScanEnabled?: boolean;
   hideIndicators?: boolean;
+  /** Blur RSI/Stoch stack with Pro CTA (non-subscribers can still use the main candle pane). */
+  lockPremiumIndicatorStack?: boolean;
 }
 
 interface CandleData {
@@ -144,6 +147,7 @@ function PatternChartComponent({
   currentPrice = 0,
   patternScanEnabled = false,
   hideIndicators = false,
+  lockPremiumIndicatorStack = false,
 }: PatternChartProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -832,52 +836,60 @@ function PatternChartComponent({
       </div>
 
       {!hideIndicators && (
-        <>
-          {/* ── Drag handle: main (price + volume) ↔ RSI ── */}
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            title="Drag to resize chart vs indicators"
-            onPointerDown={startResizeDrag(0)}
-            className="flex-shrink-0 cursor-row-resize touch-none group select-none"
-            style={{ height: HANDLE_PX, background: BORDER }}
-          >
-            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
-          </div>
-
-          {/* ── RSI pane ── */}
-          <div style={{ flexGrow: weights[1], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
-            <div ref={rsiContainerRef} className="absolute inset-0" />
-            <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
-              <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
-              <span className="text-[10px] text-[#b2b5be] font-mono">14</span>
-              {lastRSI !== null && <span className="text-[10px] font-mono" style={{ color: "#a78bfa" }}>{lastRSI.toFixed(2)}</span>}
+        <PremiumFeatureLock
+          locked={lockPremiumIndicatorStack}
+          featureLabel="AI Pattern Detection & indicators"
+          title="Upgrade to Pro"
+          subtitle="Unlock RSI / Stoch RSI, Morning Star–style scans, and full AI pattern readouts."
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <>
+            {/* ── Drag handle: main (price + volume) ↔ RSI ── */}
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              title="Drag to resize chart vs indicators"
+              onPointerDown={startResizeDrag(0)}
+              className="flex-shrink-0 cursor-row-resize touch-none group select-none"
+              style={{ height: HANDLE_PX, background: BORDER }}
+            >
+              <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
             </div>
-          </div>
 
-          {/* ── Drag handle: RSI ↔ Stoch ── */}
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            title="Drag to resize RSI vs Stoch"
-            onPointerDown={startResizeDrag(1)}
-            className="flex-shrink-0 cursor-row-resize touch-none group select-none"
-            style={{ height: HANDLE_PX, background: BORDER }}
-          >
-            <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
-          </div>
-
-          {/* ── Stoch RSI pane ── */}
-          <div style={{ flexGrow: weights[2], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
-            <div ref={stochContainerRef} className="absolute inset-0" />
-            <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
-              <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
-              <span className="text-[10px] text-[#b2b5be] font-mono">14 14 3 3</span>
-              {lastK !== null && <span className="text-[10px] font-mono" style={{ color: "#2962ff" }}>{lastK.toFixed(2)}</span>}
-              {lastD !== null && <span className="text-[10px] font-mono" style={{ color: "#ff6d00" }}>{lastD.toFixed(2)}</span>}
+            {/* ── RSI pane ── */}
+            <div style={{ flexGrow: weights[1], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
+              <div ref={rsiContainerRef} className="absolute inset-0" />
+              <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+                <span className="text-[10px] text-[#b2b5be] font-mono">RSI</span>
+                <span className="text-[10px] text-[#b2b5be] font-mono">14</span>
+                {lastRSI !== null && <span className="text-[10px] font-mono" style={{ color: "#a78bfa" }}>{lastRSI.toFixed(2)}</span>}
+              </div>
             </div>
-          </div>
-        </>
+
+            {/* ── Drag handle: RSI ↔ Stoch ── */}
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              title="Drag to resize RSI vs Stoch"
+              onPointerDown={startResizeDrag(1)}
+              className="flex-shrink-0 cursor-row-resize touch-none group select-none"
+              style={{ height: HANDLE_PX, background: BORDER }}
+            >
+              <div className="w-full h-full group-hover:bg-blue-500/60 transition-colors rounded-sm" />
+            </div>
+
+            {/* ── Stoch RSI pane ── */}
+            <div style={{ flexGrow: weights[2], minHeight: 50, background: BG_IND }} className="relative overflow-hidden">
+              <div ref={stochContainerRef} className="absolute inset-0" />
+              <div className="absolute top-0.5 left-1 z-10 pointer-events-none flex items-center gap-1.5">
+                <span className="text-[10px] text-[#b2b5be] font-mono">Stoch RSI</span>
+                <span className="text-[10px] text-[#b2b5be] font-mono">14 14 3 3</span>
+                {lastK !== null && <span className="text-[10px] font-mono" style={{ color: "#2962ff" }}>{lastK.toFixed(2)}</span>}
+                {lastD !== null && <span className="text-[10px] font-mono" style={{ color: "#ff6d00" }}>{lastD.toFixed(2)}</span>}
+              </div>
+            </div>
+          </>
+        </PremiumFeatureLock>
       )}
 
       {/* Hidden RSI/Stoch containers — kept in DOM so refs are always mounted */}
