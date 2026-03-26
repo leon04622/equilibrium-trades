@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import { Zap, TrendingUp, TrendingDown, Clock, RefreshCw, AlertTriangle, Activity, Target, BookOpen, BarChart3, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,9 +25,12 @@ interface PatternSignal {
   educationalNote: string;
   whatToWatch: string;
   detectedAt: string;
+  counterTrend?: boolean;
+  volumeConfirmed?: boolean;
+  marketBiasLabel?: string;
 }
 
-function PatternCard({ signal }: { signal: PatternSignal }) {
+const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSignal }) {
   const isBullish = signal.bias === "bullish";
   const isBearish = signal.bias === "bearish";
   
@@ -106,9 +109,21 @@ function PatternCard({ signal }: { signal: PatternSignal }) {
           )}>
             {signal.patternName}
           </span>
-          <Badge variant="secondary" className="ml-auto text-[10px] md:text-xs shrink-0">
-            {signal.bias.charAt(0).toUpperCase()} Bias
-          </Badge>
+          <div className="ml-auto flex flex-wrap gap-1 justify-end shrink-0">
+            {signal.counterTrend && (
+              <Badge variant="outline" className="text-[10px] md:text-xs border-amber-500/50 text-amber-600">
+                Counter-Trend
+              </Badge>
+            )}
+            {signal.volumeConfirmed && (
+              <Badge variant="outline" className="text-[10px] md:text-xs border-emerald-500/40 text-emerald-600">
+                Vol ✓
+              </Badge>
+            )}
+            <Badge variant="secondary" className="text-[10px] md:text-xs">
+              {signal.bias.charAt(0).toUpperCase()} Bias
+            </Badge>
+          </div>
         </div>
 
         {/* SMA Relationship - Educational */}
@@ -156,7 +171,18 @@ function PatternCard({ signal }: { signal: PatternSignal }) {
       </CardContent>
     </Card>
   );
-}
+});
+
+/** Memoized grid so switching All / Bullish / Bearish tabs does not re-render unchanged cards. */
+const PatternGrid = memo(function PatternGrid({ items }: { items: PatternSignal[] }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {items.map((signal) => (
+        <PatternCard key={signal.id} signal={signal} />
+      ))}
+    </div>
+  );
+});
 
 function LoadingSkeleton() {
   return (
@@ -193,7 +219,7 @@ function SignalsContent() {
       return response.json();
     },
     refetchInterval: 60_000,
-    staleTime: 30_000,
+    staleTime: 0,
   });
 
   useEffect(() => {
@@ -202,10 +228,23 @@ function SignalsContent() {
     }
   }, [isFetching]);
 
-  const bullishSignals = signals.filter(s => s.bias === "bullish");
-  const bearishSignals = signals.filter(s => s.bias === "bearish");
-  const formingSignals = signals.filter(s => s.patternStatus === "forming");
-  const developedSignals = signals.filter(s => s.patternStatus === "developed" || s.patternStatus === "breakout_watch");
+  const tabRows = useMemo(() => {
+    const bullishSignals = signals.filter((s) => s.bias === "bullish");
+    const bearishSignals = signals.filter((s) => s.bias === "bearish");
+    const formingSignals = signals.filter((s) => s.patternStatus === "forming");
+    const developedSignals = signals.filter(
+      (s) => s.patternStatus === "developed" || s.patternStatus === "breakout_watch",
+    );
+    return {
+      all: signals,
+      bullishSignals,
+      bearishSignals,
+      formingSignals,
+      developedSignals,
+    };
+  }, [signals]);
+
+  const { bullishSignals, bearishSignals, formingSignals, developedSignals } = tabRows;
 
   const toggleTimeframe = (tf: string) => {
     setSelectedTimeframes(prev => 
@@ -425,11 +464,7 @@ function SignalsContent() {
                   </Button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {signals.map(signal => (
-                    <PatternCard key={signal.id} signal={signal} />
-                  ))}
-                </div>
+                <PatternGrid items={tabRows.all} />
               )}
             </TabsContent>
 
@@ -461,11 +496,7 @@ function SignalsContent() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {developedSignals.map(signal => (
-                    <PatternCard key={signal.id} signal={signal} />
-                  ))}
-                </div>
+                <PatternGrid items={tabRows.developedSignals} />
               )}
             </TabsContent>
 
@@ -479,11 +510,7 @@ function SignalsContent() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {bullishSignals.map(signal => (
-                    <PatternCard key={signal.id} signal={signal} />
-                  ))}
-                </div>
+                <PatternGrid items={tabRows.bullishSignals} />
               )}
             </TabsContent>
 
@@ -497,11 +524,7 @@ function SignalsContent() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {bearishSignals.map(signal => (
-                    <PatternCard key={signal.id} signal={signal} />
-                  ))}
-                </div>
+                <PatternGrid items={tabRows.bearishSignals} />
               )}
             </TabsContent>
           </>

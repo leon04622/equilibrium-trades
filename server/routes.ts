@@ -15,7 +15,8 @@ import {
   getPerpUniverseCoinNames,
   getPerpExchangeAggregates,
 } from "./hyperliquid";
-import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
+import { scanForSignals, getSMAStatus } from "./sma-detection";
+import { scanForEducationalPatterns } from "./universal-scanner";
 import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";

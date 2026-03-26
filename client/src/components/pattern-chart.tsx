@@ -38,6 +38,9 @@ interface EducationalPatternSignal {
   detectedAt: string;
   tradeable: boolean;
   maFilterReason: string;
+  counterTrend?: boolean;
+  volumeConfirmed?: boolean;
+  marketBiasLabel?: string;
 }
 
 interface PatternChartProps {
