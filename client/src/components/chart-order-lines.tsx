@@ -62,6 +62,19 @@ const HL_GUTTER_PX = 72;
 const HL_TAG_BG = "rgba(19, 23, 34, 0.96)";
 /** Tall grab zone so clicks hit the overlay (root is pointer-events: none; gaps fall through to the chart). */
 const TPSL_DRAG_BAND_HALF_PX = 56;
+/** Extra half-height for SL only — line often sits near chart/volume edge where the row was culled or hard to hit. */
+const SL_DRAG_BAND_EXTRA_HALF_PX = 24;
+/**
+ * Dev-only SL drag trace. Enable with: localStorage.setItem("debug_sl_drag","1") then reload.
+ * (mousemove throttled to avoid console spam.)
+ */
+function slDragDebugEnabled(): boolean {
+  try {
+    return import.meta.env.DEV && localStorage.getItem("debug_sl_drag") === "1";
+  } catch {
+    return false;
+  }
+}
 
 function snapOrderPrice(price: number, refPrice: number): number {
   if (!Number.isFinite(price) || price <= 0) return price;
@@ -114,13 +127,21 @@ function clampTpslDragPrice(
     }
   } else if (kind === "sl" && mk > 0) {
     if (isLong) {
-      const maxSl = snapOrderPrice(mk - tick, refPrice);
-      p = Math.min(p, maxSl);
-      if (p >= mk) p = maxSl;
+      // Below mark (no instant trigger) and below entry (long risk side).
+      const maxSlMark = snapOrderPrice(mk - tick, refPrice);
+      const maxSlEntry =
+        entry > 0 ? snapOrderPrice(entry - tick, refPrice) : Number.POSITIVE_INFINITY;
+      const cap = Math.min(maxSlMark, maxSlEntry);
+      p = Math.min(p, cap);
+      if (p >= mk) p = cap;
     } else {
-      const minSl = snapOrderPrice(mk + tick, refPrice);
-      p = Math.max(p, minSl);
-      if (p <= mk) p = minSl;
+      // Above mark and above entry (short risk side).
+      const minSlMark = snapOrderPrice(mk + tick, refPrice);
+      const minSlEntry =
+        entry > 0 ? snapOrderPrice(entry + tick, refPrice) : Number.NEGATIVE_INFINITY;
+      const floor = Math.max(minSlMark, minSlEntry);
+      p = Math.max(p, floor);
+      if (p <= mk) p = floor;
     }
   }
 
@@ -246,6 +267,8 @@ export function ChartOrderLines({
   useEffect(() => {
     if (!dragging) return;
 
+    let lastSlMoveLogMs = 0;
+
     const readY = (e: MouseEvent | TouchEvent | PointerEvent): number | null => {
       if ("clientY" in e && typeof (e as PointerEvent).clientY === "number") {
         return (e as PointerEvent).clientY;
@@ -276,6 +299,14 @@ export function ChartOrderLines({
       dragPriceRef.current = clamped;
       setDragPrice(clamped);
       onTpslDragVisualRef.current?.(kind, clamped);
+
+      if (slDragDebugEnabled() && kind === "sl") {
+        const t = Date.now();
+        if (t - lastSlMoveLogMs > 150) {
+          lastSlMoveLogMs = t;
+          console.debug("[chart SL drag] move → price", clamped);
+        }
+      }
     };
 
     const onMove = (e: MouseEvent | TouchEvent | PointerEvent) => {
@@ -288,6 +319,7 @@ export function ChartOrderLines({
     };
 
     const onUp = async (e: MouseEvent | TouchEvent | PointerEvent) => {
+      const endedKind = draggingRef.current;
       const y = readY(e);
       const pos = positionsRef.current.find((p) => p.coin === coinRef.current);
       const refPx = currentPriceRef.current;
@@ -324,6 +356,10 @@ export function ChartOrderLines({
       dragPriceRef.current = null;
       setDragging(null);
       setDragPrice(null);
+
+      if (slDragDebugEnabled() && endedKind === "sl") {
+        console.debug("[chart SL drag] end", finalPrice ?? "(cancelled)");
+      }
 
       if (!finalDragging || finalPrice === null || finalPrice <= 0 || !pos) return;
 
@@ -458,6 +494,9 @@ export function ChartOrderLines({
       setDragPrice(line.price);
       setDragging(line.editType!);
       onTpslDragVisual?.(line.editType!, line.price);
+      if (slDragDebugEnabled() && line.editType === "sl") {
+        console.debug("[chart SL drag] start", line.price);
+      }
     },
     [onTpslDragVisual],
   );
@@ -694,8 +733,22 @@ export function ChartOrderLines({
 
       {lines.map((line) => {
         const layout = layoutForPrice(line.price, priceToCoordinate, effMin, effMax);
-        if (layout.mode === "pct" && (layout.pct < -8 || layout.pct > 108)) return null;
-        if (layout.mode === "px" && (layout.y < -40 || layout.y > containerHeight + 40)) return null;
+        const isSlInteractive = line.editType === "sl";
+        // SL often sits just off-chart (long: below / short: above). Culling the row removed all hit targets.
+        if (layout.mode === "pct") {
+          if (isSlInteractive) {
+            if (layout.pct < -30 || layout.pct > 130) return null;
+          } else if (layout.pct < -8 || layout.pct > 108) {
+            return null;
+          }
+        } else if (layout.mode === "px") {
+          if (isSlInteractive) {
+            const m = 280;
+            if (layout.y < -m || layout.y > containerHeight + m) return null;
+          } else if (layout.y < -40 || layout.y > containerHeight + 40) {
+            return null;
+          }
+        }
 
         const isEditing = editMode === line.editType;
         const isTpSl = line.editType === "tp" || line.editType === "sl";
@@ -705,10 +758,13 @@ export function ChartOrderLines({
         const tpslHot = useDragBand && (line.editType === "tp" || line.editType === "sl");
         const tpslActive = tpslHot && dragging === line.editType;
 
-        const bandStyle = rowStyleFromLayout(
-          layout,
-          useDragBand ? TPSL_DRAG_BAND_HALF_PX : 22,
-        );
+        const bandHalfPx = !useDragBand
+          ? 22
+          : isSlInteractive
+            ? TPSL_DRAG_BAND_HALF_PX + SL_DRAG_BAND_EXTRA_HALF_PX
+            : TPSL_DRAG_BAND_HALF_PX;
+
+        const bandStyle = rowStyleFromLayout(layout, bandHalfPx);
         const centerStyle = centerStyleFromLayout(layout);
         const outerStyle: CSSProperties = useDragBand
           ? { ...bandStyle, zIndex: z }
