@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -31,9 +32,18 @@ import Portfolio from "@/pages/portfolio";
 import Videos from "@/pages/videos";
 import Candles from "@/pages/candles";
 import Admin from "@/pages/admin";
-import AdminEquilibrium from "@/pages/admin-equilibrium";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
+
+function AdminEquilibriumRedirect() {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation("/admin");
+  }, [setLocation]);
+  return (
+    <div className="p-6 text-sm text-muted-foreground">Opening Equilibrium Command Center…</div>
+  );
+}
 
 function OtherRoutes() {
   return (
@@ -49,7 +59,7 @@ function OtherRoutes() {
       <Route path="/portfolio" component={Portfolio} />
       <Route path="/videos" component={Videos} />
       <Route path="/admin" component={Admin} />
-      <Route path="/admin-equilibrium" component={AdminEquilibrium} />
+      <Route path="/admin-equilibrium" component={AdminEquilibriumRedirect} />
       <Route component={NotFound} />
     </Switch>
   );

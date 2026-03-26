@@ -1,13 +1,17 @@
 export type SubscriptionCheckResult = {
-  tier: "free" | "pro" | "elite";
+  tier: "free" | "pro" | "mentoring" | "elite";
   active: boolean;
   expiresAt: string | null;
-  /** True when Stripe (or backend) reports an active Pro or Elite plan. */
+  /** True when Stripe (or backend) reports an active Pro or Mentoring plan. */
   isSubscribed: boolean;
 };
 
+function isPaidTier(t: string | undefined): boolean {
+  return t === "pro" || t === "mentoring" || t === "elite";
+}
+
 /**
- * Verifies $50/mo Pro (or Elite) status for a wallet via the existing Stripe subscription API.
+ * Resolves Pro ($50/mo) vs Mentoring ($500/mo, includes Pro) via `/api/stripe/subscription/:wallet`.
  */
 export async function checkSubscription(walletAddress: string): Promise<SubscriptionCheckResult> {
   const res = await fetch(`/api/stripe/subscription/${walletAddress}`);
@@ -24,9 +28,11 @@ export async function checkSubscription(walletAddress: string): Promise<Subscrip
     active: boolean;
     expiresAt: string | null;
   };
-  const isSubscribed = !!(data.active && (data.tier === "pro" || data.tier === "elite"));
+  const rawTier = data.tier ?? "free";
+  const tier = rawTier === "elite" ? "mentoring" : rawTier;
+  const isSubscribed = !!(data.active && isPaidTier(rawTier));
   return {
-    tier: data.tier ?? "free",
+    tier,
     active: !!data.active,
     expiresAt: data.expiresAt ?? null,
     isSubscribed,

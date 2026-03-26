@@ -3,11 +3,20 @@ import { getUncachableStripeClient } from './stripeClient';
 import { db } from './db';
 import { sql } from 'drizzle-orm';
 
-// Product ID → tier mapping (from replit.md)
-const PRODUCT_TIER_MAP: Record<string, 'pro' | 'elite'> = {
-  'prod_TpGvzRznydzDhy': 'pro',   // AI Pro
-  'prod_TpGvGOpqOoE8xL': 'elite', // Elite Mentoring
+/** Stripe product id → app tier ($50/mo Pro vs $500/mo Mentoring includes Pro). */
+const PRODUCT_TIER_MAP: Record<string, "pro" | "mentoring"> = {
+  prod_TpGvzRznydzDhy: "pro",
+  prod_TpGvGOpqOoE8xL: "mentoring",
 };
+
+/** When product id is missing from map, infer from recurring USD cents (50_00 vs 500_00). */
+function tierFromUnitAmountCents(unitAmount: unknown): "pro" | "mentoring" | null {
+  const n = typeof unitAmount === "number" ? unitAmount : Number(unitAmount);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 40_00 && n <= 60_00) return "pro";
+  if (n >= 400_00 && n <= 600_00) return "mentoring";
+  return null;
+}
 
 export class StripeService {
   async createCustomer(email: string, walletAddress: string) {
@@ -189,7 +198,7 @@ export class StripeService {
    * Returns null if no active subscription found.
    */
   async getActiveSubscriptionByWalletAddress(walletAddress: string): Promise<{
-    tier: 'pro' | 'elite';
+    tier: "pro" | "mentoring";
     active: true;
     expiresAt: string | null;
   } | null> {
@@ -237,7 +246,8 @@ export class StripeService {
             s.status,
             s.current_period_end,
             si.price as price_id,
-            p.product as product_id
+            p.product as product_id,
+            p.unit_amount as unit_amount
           FROM stripe.subscriptions s
           JOIN stripe.subscription_items si ON si.subscription = s.id
           JOIN stripe.prices p ON p.id = si.price
@@ -252,8 +262,8 @@ export class StripeService {
 
       const row = subResult.rows[0] as any;
       const productId = row.product_id as string;
-      const tier = PRODUCT_TIER_MAP[productId];
-      
+      let tier: "pro" | "mentoring" | null = PRODUCT_TIER_MAP[productId] ?? null;
+      if (!tier) tier = tierFromUnitAmountCents(row.unit_amount);
       if (!tier) return null;
 
       const expiresAt = row.current_period_end

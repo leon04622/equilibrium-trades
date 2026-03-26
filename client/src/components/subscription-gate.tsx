@@ -18,15 +18,15 @@ interface SubscriptionGateProps {
   variant?: "card" | "overlay";
 }
 
-const featureRequirements: Record<PremiumFeature, { tier: 'pro' | 'elite'; icon: React.ReactNode; name: string }> = {
-  ai_signals: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'AI Pattern Detection' },
-  sma_overlays: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'SMA Strategy Overlays' },
-  live_trading: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Live Trading' },
-  trade_journal: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Trade Journal' },
-  advanced_education: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Advanced Education' },
-  video_library: { tier: 'pro', icon: <Zap className="h-5 w-5" />, name: 'Course Video Library' },
-  heatmap: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: 'Liquidity Heatmap' },
-  coaching: { tier: 'elite', icon: <Crown className="h-5 w-5" />, name: '1-on-1 Coaching' },
+const featureRequirements: Record<PremiumFeature, { tier: "pro" | "mentoring"; icon: React.ReactNode; name: string }> = {
+  ai_signals: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "AI Pattern Detection" },
+  sma_overlays: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "SMA Strategy Overlays" },
+  live_trading: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "Live Trading" },
+  trade_journal: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "Trade Journal" },
+  advanced_education: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "Advanced Education" },
+  video_library: { tier: "pro", icon: <Zap className="h-5 w-5" />, name: "Course Video Library" },
+  heatmap: { tier: "mentoring", icon: <Crown className="h-5 w-5" />, name: "Liquidity Heatmap" },
+  coaching: { tier: "mentoring", icon: <Crown className="h-5 w-5" />, name: "1-on-1 Coaching" },
 };
 
 export function SubscriptionGate({
@@ -113,9 +113,9 @@ export function SubscriptionGate({
           <CardTitle className="text-lg">
             {title || featureName}
           </CardTitle>
-          {requiredTier === 'elite' ? (
+          {requiredTier === "mentoring" ? (
             <Badge variant="secondary" className="mx-auto bg-amber-500/10 text-amber-500 border-amber-500/30">
-              Elite Required
+              Mentoring Required
             </Badge>
           ) : (
             <Badge variant="secondary" className="mx-auto bg-primary/10 text-primary border-primary/30">
@@ -139,15 +139,15 @@ export function SubscriptionGate({
             onClick={() => openPaywall(featureName)}
             data-testid="button-upgrade-subscription"
           >
-            {requiredTier === 'elite' ? (
+            {requiredTier === "mentoring" ? (
               <>
                 <Crown className="mr-2 h-4 w-4" />
-                Upgrade to Elite
+                Upgrade to Mentoring
               </>
             ) : (
               <>
                 <Zap className="mr-2 h-4 w-4" />
-                Unlock Full Platform — £50/month
+                Unlock Full Platform — $50/month
               </>
             )}
           </Button>

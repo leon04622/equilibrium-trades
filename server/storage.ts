@@ -7,9 +7,10 @@ import {
   type TradeGrade, type InsertTradeGrade, type WeeklyStats,
   type TutorialVideo, type InsertTutorialVideo,
   type WalletUser, type InsertWalletUser,
+  type WalletSubscriptionTier,
   type SupportMessage, type InsertSupportMessage,
   type Lead, type InsertLead,
-  tutorialVideos, supportMessages, walletUsers, leads
+  tutorialVideos, supportTickets, walletUsers, leads
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -18,6 +19,18 @@ import { eq, desc } from "drizzle-orm";
 let dbAvailable: boolean | null = null;
 let lastDbCheck = 0;
 const DB_CHECK_INTERVAL = 30_000;
+
+function normalizeWalletTier(raw: string | null | undefined): WalletSubscriptionTier {
+  const t = (raw || "free").toLowerCase();
+  if (t === "elite" || t === "mentoring") return "mentoring";
+  if (t === "pro") return "pro";
+  return "free";
+}
+
+function tierForDb(tier?: WalletSubscriptionTier | "elite"): string {
+  const t = tier ?? "free";
+  return t === "elite" ? "mentoring" : t;
+}
 
 async function isDbUp(): Promise<boolean> {
   if (!db) return false;
@@ -78,7 +91,7 @@ export interface IStorage {
   createWalletUser(user: InsertWalletUser): Promise<WalletUser>;
   updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined>;
   updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined>;
-  updateWalletUserSubscription(walletAddress: string, tier: 'free' | 'pro' | 'elite', active: boolean, expiresAt?: Date | null): Promise<WalletUser | undefined>;
+  updateWalletUserSubscription(walletAddress: string, tier: WalletSubscriptionTier | 'elite', active: boolean, expiresAt?: Date | null): Promise<WalletUser | undefined>;
   setManualProOverride(walletAddress: string, value: boolean): Promise<WalletUser | undefined>;
   recordInstantTradingHandshake(walletAddress: string): Promise<WalletUser | undefined>;
   
@@ -440,7 +453,7 @@ export class MemStorage implements IStorage {
       manualProOverride: user.manualProOverride ?? false,
       referralBuilderStatus: user.referralBuilderStatus ?? null,
       instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionTier: normalizeWalletTier(user.subscriptionTier),
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
       subscribedAt: user.subscribedAt ?? null,
@@ -486,7 +499,7 @@ export class MemStorage implements IStorage {
       manualProOverride: user.manualProOverride ?? false,
       referralBuilderStatus: user.referralBuilderStatus ?? null,
       instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
-      subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
+      subscriptionTier: normalizeWalletTier(user.subscriptionTier),
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: null,
       subscribedAt: null,
@@ -505,7 +518,7 @@ export class MemStorage implements IStorage {
         manualProOverride: user.manualProOverride ?? false,
         referralBuilderStatus: user.referralBuilderStatus ?? null,
         instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
-        subscriptionTier: user.subscriptionTier ?? 'free',
+        subscriptionTier: tierForDb(user.subscriptionTier as WalletSubscriptionTier | "elite" | undefined),
         subscriptionActive: user.subscriptionActive ?? false,
       }).returning();
       const mapped = this.mapDbUser(newUser);
@@ -589,17 +602,19 @@ export class MemStorage implements IStorage {
 
   async updateWalletUserSubscription(
     walletAddress: string, 
-    tier: 'free' | 'pro' | 'elite', 
+    tier: WalletSubscriptionTier | 'elite', 
     active: boolean, 
     expiresAt?: Date | null
   ): Promise<WalletUser | undefined> {
     const normalizedAddress = walletAddress.toLowerCase();
     const now = new Date();
+    const displayTier = normalizeWalletTier(tier);
+    const dbTier = tierForDb(tier);
     try {
       if (!db) {
         const cached = this.walletUsersCache.get(normalizedAddress);
         if (cached) {
-          cached.subscriptionTier = tier;
+          cached.subscriptionTier = displayTier;
           cached.subscriptionActive = active;
           cached.subscriptionExpiresAt = expiresAt ?? null;
           if (active && !cached.subscribedAt) cached.subscribedAt = now;
@@ -612,7 +627,7 @@ export class MemStorage implements IStorage {
       const setSubscribedAt = active && existing && !existing.subscribedAt ? now : (existing?.subscribedAt ?? null);
       const [user] = await db.update(walletUsers)
         .set({ 
-          subscriptionTier: tier, 
+          subscriptionTier: dbTier, 
           subscriptionActive: active, 
           subscriptionExpiresAt: expiresAt ?? null,
           subscribedAt: setSubscribedAt,
@@ -627,7 +642,7 @@ export class MemStorage implements IStorage {
     } catch {
       const cached = this.walletUsersCache.get(normalizedAddress);
       if (cached) {
-        cached.subscriptionTier = tier;
+        cached.subscriptionTier = displayTier;
         cached.subscriptionActive = active;
         cached.subscriptionExpiresAt = expiresAt ?? null;
         if (active && !cached.subscribedAt) cached.subscribedAt = now;
@@ -712,9 +727,9 @@ export class MemStorage implements IStorage {
   async getMessages(conversationId: string): Promise<SupportMessage[]> {
     if (!db) return [];
     try {
-      const messages = await db.select().from(supportMessages)
-        .where(eq(supportMessages.conversationId, conversationId.toLowerCase()))
-        .orderBy(supportMessages.createdAt);
+      const messages = await db.select().from(supportTickets)
+        .where(eq(supportTickets.conversationId, conversationId.toLowerCase()))
+        .orderBy(supportTickets.createdAt);
       return messages;
     } catch {
       return [];
@@ -724,7 +739,7 @@ export class MemStorage implements IStorage {
   async getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]> {
     if (!db) return [];
     try {
-      const messages = await db.select().from(supportMessages).orderBy(desc(supportMessages.createdAt));
+      const messages = await db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt));
       
       const conversationMap = new Map<string, { messages: SupportMessage[] }>();
       for (const msg of messages) {
@@ -756,16 +771,20 @@ export class MemStorage implements IStorage {
           message: message.message,
           isRead: message.isRead || false,
           conversationId: message.conversationId.toLowerCase(),
+          walletAddress: message.walletAddress?.toLowerCase() ?? null,
+          clientSentAt: message.clientSentAt ?? null,
           createdAt: new Date(),
         };
       }
-      const [newMessage] = await db.insert(supportMessages).values({
+      const [newMessage] = await db.insert(supportTickets).values({
         senderType: message.senderType,
         senderWallet: message.senderWallet?.toLowerCase() || null,
         senderName: message.senderName || null,
         message: message.message,
         isRead: message.isRead || false,
         conversationId: message.conversationId.toLowerCase(),
+        walletAddress: message.walletAddress?.toLowerCase() ?? null,
+        clientSentAt: message.clientSentAt ?? null,
       }).returning();
       return newMessage;
     } catch {
@@ -777,6 +796,8 @@ export class MemStorage implements IStorage {
         message: message.message,
         isRead: message.isRead || false,
         conversationId: message.conversationId.toLowerCase(),
+        walletAddress: message.walletAddress?.toLowerCase() ?? null,
+        clientSentAt: message.clientSentAt ?? null,
         createdAt: new Date(),
       };
     }
@@ -785,9 +806,9 @@ export class MemStorage implements IStorage {
   async markMessagesAsRead(conversationId: string): Promise<void> {
     if (!db) return;
     try {
-      await db.update(supportMessages)
+      await db.update(supportTickets)
         .set({ isRead: true })
-        .where(eq(supportMessages.conversationId, conversationId.toLowerCase()));
+        .where(eq(supportTickets.conversationId, conversationId.toLowerCase()));
     } catch {
       // ignore if DB is down
     }

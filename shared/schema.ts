@@ -258,6 +258,11 @@ export const tradeGradeInputSchema = z.object({
 
 export type TradeGradeInput = z.infer<typeof tradeGradeInputSchema>;
 
+/** Stored in wallet_users.subscription_tier. Legacy DB rows may still say `elite` — normalize to mentoring when reading. */
+export type WalletSubscriptionTier = "free" | "pro" | "mentoring";
+
+const tierInputSchema = z.enum(["free", "pro", "mentoring", "elite"]).transform((t) => (t === "elite" ? "mentoring" : t));
+
 // Wallet User (for Hyperliquid onboarding)
 export interface WalletUser {
   id: string;
@@ -267,7 +272,7 @@ export interface WalletUser {
   manualProOverride: boolean;
   referralBuilderStatus: string | null;
   instantTradingCompletedAt: Date | null;
-  subscriptionTier: 'free' | 'pro' | 'elite';
+  subscriptionTier: WalletSubscriptionTier;
   subscriptionActive: boolean;
   subscriptionExpiresAt: Date | null;
   subscribedAt: Date | null;
@@ -282,7 +287,7 @@ export interface InsertWalletUser {
   manualProOverride?: boolean;
   referralBuilderStatus?: string | null;
   instantTradingCompletedAt?: Date | null;
-  subscriptionTier?: 'free' | 'pro' | 'elite';
+  subscriptionTier?: WalletSubscriptionTier | "elite";
   subscriptionActive?: boolean;
 }
 
@@ -290,7 +295,7 @@ export const insertWalletUserSchema = z.object({
   walletAddress: z.string().min(1, "Wallet address is required"),
   email: z.string().email().optional().nullable(),
   builderCodeApproved: z.boolean().optional().default(false),
-  subscriptionTier: z.enum(['free', 'pro', 'elite']).optional().default('free'),
+  subscriptionTier: tierInputSchema.optional().default("free"),
   subscriptionActive: z.boolean().optional().default(false),
 });
 
@@ -299,7 +304,7 @@ export type InsertWalletUserType = z.infer<typeof insertWalletUserSchema>;
 // Subscription update schema for admin
 export const updateSubscriptionSchema = z.object({
   walletAddress: z.string().min(1),
-  subscriptionTier: z.enum(['free', 'pro', 'elite']),
+  subscriptionTier: tierInputSchema,
   subscriptionActive: z.boolean(),
   subscriptionExpiresAt: z.string().optional().nullable(),
   /** When set, updates builder onboarding flag (e.g. pre-approve test wallets). */
@@ -326,21 +331,39 @@ export const builderCodeApprovalSchema = z.object({
 
 export type BuilderCodeApprovalInput = z.infer<typeof builderCodeApprovalSchema>;
 
-// Support Chat Messages
-export const supportMessages = pgTable("support_messages", {
+// Support tickets (persisted messages; replaces legacy support_messages table name in app code)
+export const supportTickets = pgTable("support_tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   senderType: text("sender_type").notNull(), // 'user' | 'admin'
-  senderWallet: text("sender_wallet"), // wallet address for users
-  senderName: text("sender_name"), // display name
+  senderWallet: text("sender_wallet"),
+  senderName: text("sender_name"),
   message: text("message").notNull(),
   isRead: boolean("is_read").default(false),
-  conversationId: text("conversation_id").notNull(), // wallet address as conversation ID
+  conversationId: text("conversation_id").notNull(),
+  /** End-user wallet when sender is user (for auditing; may match conversationId). */
+  walletAddress: text("wallet_address"),
+  clientSentAt: timestamp("client_sent_at"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const insertSupportMessageSchema = createInsertSchema(supportMessages).omit({ id: true, createdAt: true });
-export type InsertSupportMessage = z.infer<typeof insertSupportMessageSchema>;
-export type SupportMessage = typeof supportMessages.$inferSelect;
+export const insertSupportTicketSchema = createInsertSchema(supportTickets).omit({ id: true, createdAt: true });
+export type InsertSupportTicket = z.infer<typeof insertSupportTicketSchema>;
+export type SupportTicket = typeof supportTickets.$inferSelect;
+
+/** @deprecated use SupportTicket */
+export type SupportMessage = SupportTicket;
+/** @deprecated use insertSupportTicketSchema */
+export const insertSupportMessageSchema = insertSupportTicketSchema;
+/** @deprecated use insertSupportTicketSchema */
+export type InsertSupportMessage = InsertSupportTicket;
+
+export const supportSendBodySchema = z.object({
+  message: z.string().min(1).max(8000),
+  walletAddress: z.string().min(1),
+  conversationId: z.string().min(1).optional(),
+  clientTimestamp: z.string().optional(),
+});
+export type SupportSendBody = z.infer<typeof supportSendBodySchema>;
 
 // Email leads capture
 export const leads = pgTable("leads", {

@@ -21,6 +21,9 @@ import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
 import { getPublicAppBaseUrl } from "./public-url";
 import { isAdminAddress } from "./admin-access";
+import { requireMasterAdminWallet, isMasterAdminAddress, getMasterAdminAddress } from "./master-admin";
+import { issueCommandCenterWsToken } from "./command-center-ws-token";
+import { pushAdminLog } from "./admin-log-bus";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -692,9 +695,9 @@ export async function registerRoutes(
     try {
       const { walletAddress } = req.params;
       
-      // Admin wallet always gets elite access
+      // Admin wallets get full product access (same as Mentoring tier)
       if (isAdminAddress(walletAddress)) {
-        return res.json({ tier: 'elite', active: true, expiresAt: null });
+        return res.json({ tier: "mentoring", active: true, expiresAt: null });
       }
 
       // Check Stripe directly for real-time subscription status
@@ -760,7 +763,7 @@ export async function registerRoutes(
 
       let user = await storage.updateWalletUserSubscription(
         paramWallet,
-        subscriptionTier as 'free' | 'pro' | 'elite',
+        subscriptionTier,
         subscriptionActive,
         expiresAt
       );
@@ -768,7 +771,7 @@ export async function registerRoutes(
       if (!user) {
         user = await storage.createWalletUser({
           walletAddress: paramWallet,
-          subscriptionTier: subscriptionTier as 'free' | 'pro' | 'elite',
+          subscriptionTier,
           subscriptionActive: subscriptionActive,
           builderCodeApproved: builderCodeApproved ?? false,
           manualProOverride: typeof manualProOverride === "boolean" ? manualProOverride : false,
@@ -829,26 +832,6 @@ export async function registerRoutes(
     }
   });
 
-  // Helper to verify wallet ownership for chat - allows any connected wallet to chat
-  // For admin wallets, we trust them as they are hardcoded
-  async function verifyWalletAccess(walletAddress: string | undefined, requireAdmin = false): Promise<{ valid: boolean; isAdmin: boolean; error?: string }> {
-    if (!walletAddress) {
-      return { valid: false, isAdmin: false, error: "Wallet address required" };
-    }
-    
-    const isAdmin = isAdminAddress(walletAddress);
-    
-    if (requireAdmin && !isAdmin) {
-      return { valid: false, isAdmin: false, error: "Admin access required" };
-    }
-    
-    if (isAdmin) {
-      return { valid: true, isAdmin: true };
-    }
-    
-    return { valid: true, isAdmin: false };
-  }
-
   // Support Chat API
   // Get messages for a conversation — wallet users own their conversation, guests own their session, admins can access all
   app.get("/api/support/messages/:conversationId", async (req: Request, res: Response) => {
@@ -857,9 +840,9 @@ export async function registerRoutes(
       const sessionId = req.headers["x-session-id"] as string | undefined;
       const conversationId = req.params.conversationId.toLowerCase();
 
-      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
+      const master = isMasterAdminAddress(walletAddress);
 
-      if (!isAdmin) {
+      if (!master) {
         const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
         if (!ownerIdentifier || ownerIdentifier !== conversationId) {
           return res.status(403).json({ error: "Access denied" });
@@ -874,16 +857,13 @@ export async function registerRoutes(
     }
   });
 
-  // Get all conversations - admin only
+  // Get all conversations — master admin wallet only (Equilibrium Command Center / inbox)
   app.get("/api/support/conversations", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      const { valid, error } = await verifyWalletAccess(walletAddress, true);
-      if (!valid) {
-        return res.status(403).json({ error });
+      if (!isMasterAdminAddress(walletAddress)) {
+        return res.status(403).json({ error: "Master admin wallet required" });
       }
-      
       const conversations = await storage.getAllConversations();
       res.json(conversations);
     } catch (error) {
@@ -892,14 +872,14 @@ export async function registerRoutes(
     }
   });
 
-  // Send a message — wallet users, guest sessions, and admins can all post
+  // Send a message — end-users / guests, or master admin (support replies from bubble)
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
       const { insertSupportMessageSchema } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       const sessionId = req.headers["x-session-id"] as string | undefined;
 
-      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
+      const asAdmin = isMasterAdminAddress(walletAddress);
 
       const conversationId = (req.body.conversationId || "").toLowerCase();
 
@@ -907,8 +887,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "conversationId is required" });
       }
 
-      if (!isAdmin) {
-        // Non-admin users must own the conversation (matched by wallet or session ID)
+      if (!asAdmin) {
         const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
         if (!ownerIdentifier || ownerIdentifier !== conversationId) {
           return res.status(403).json({ error: "Can only send to your own conversation" });
@@ -917,9 +896,11 @@ export async function registerRoutes(
 
       const messageData = {
         ...req.body,
-        senderType: isAdmin ? "admin" : "user",
-        senderWallet: isAdmin ? null : (walletAddress?.toLowerCase() || null),
+        senderType: asAdmin ? "admin" : "user",
+        senderWallet: asAdmin ? null : (walletAddress?.toLowerCase() || null),
         conversationId,
+        walletAddress: asAdmin ? null : (walletAddress?.toLowerCase() ?? null),
+        clientSentAt: req.body.clientSentAt ? new Date(req.body.clientSentAt) : null,
       };
 
       const validated = insertSupportMessageSchema.safeParse(messageData);
@@ -929,7 +910,7 @@ export async function registerRoutes(
       const message = await storage.createMessage(validated.data);
       const { emitSupportMessage } = await import("./support-events");
       emitSupportMessage(message);
-      if (!isAdmin) {
+      if (!asAdmin) {
         const { notifyTelegramUserSupportMessage, isTelegramConfigured } = await import("./telegram-notify");
         if (isTelegramConfigured()) {
           const w = (walletAddress || sessionId || conversationId).toLowerCase();
@@ -943,14 +924,117 @@ export async function registerRoutes(
     }
   });
 
+  /** Preferred user support path: wallet + timestamp + body → support_tickets + Telegram. */
+  app.post("/api/support/send", async (req: Request, res: Response) => {
+    try {
+      const { supportSendBodySchema, insertSupportMessageSchema } = await import("@shared/schema");
+      const parsed = supportSendBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        pushAdminLog({
+          channel: "support",
+          level: "warn",
+          message: "POST /api/support/send validation failed",
+          meta: { issues: parsed.error.flatten() },
+        });
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.errors });
+      }
+
+      const bodyWallet = parsed.data.walletAddress.trim();
+      const conversationId = (parsed.data.conversationId?.trim() || bodyWallet).toLowerCase();
+      const headerWallet = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+      const sessionId = (req.headers["x-session-id"] as string | undefined)?.trim();
+      const asAdmin = isMasterAdminAddress(headerWallet);
+
+      if (!asAdmin) {
+        const owner = (headerWallet || sessionId || "").toLowerCase();
+        if (!owner || owner !== conversationId) {
+          pushAdminLog({
+            channel: "support",
+            level: "warn",
+            message: "support/send denied (conversation owner mismatch)",
+            meta: { conversationId },
+          });
+          return res.status(403).json({ error: "Access denied" });
+        }
+        if (headerWallet && headerWallet.toLowerCase() !== bodyWallet.toLowerCase()) {
+          return res.status(403).json({ error: "walletAddress must match connected wallet" });
+        }
+      }
+
+      let clientSentAt: Date;
+      if (parsed.data.clientTimestamp) {
+        const d = new Date(parsed.data.clientTimestamp);
+        clientSentAt = Number.isNaN(d.getTime()) ? new Date() : d;
+      } else {
+        clientSentAt = new Date();
+      }
+
+      const messageData = {
+        conversationId,
+        senderType: asAdmin ? ("admin" as const) : ("user" as const),
+        senderWallet: asAdmin ? null : bodyWallet.toLowerCase(),
+        senderName: asAdmin
+          ? "Support Team"
+          : headerWallet
+            ? `User ${headerWallet.slice(0, 6)}…${headerWallet.slice(-4)}`
+            : "Guest",
+        message: parsed.data.message,
+        isRead: false,
+        walletAddress: asAdmin ? null : bodyWallet.toLowerCase(),
+        clientSentAt,
+      };
+
+      const validated = insertSupportMessageSchema.safeParse(messageData);
+      if (!validated.success) {
+        pushAdminLog({
+          channel: "support",
+          level: "warn",
+          message: "support/send insert validation failed",
+          meta: { details: validated.error.errors },
+        });
+        return res.status(400).json({ error: "Invalid message payload", details: validated.error.errors });
+      }
+
+      pushAdminLog({
+        channel: "support",
+        level: "info",
+        message: "support/send persisting ticket",
+        meta: { conversationId, bytes: parsed.data.message.length },
+      });
+
+      const message = await storage.createMessage(validated.data);
+      const { emitSupportMessage } = await import("./support-events");
+      emitSupportMessage(message);
+
+      if (!asAdmin) {
+        const { notifyTelegramUserSupportMessage, isTelegramConfigured } = await import("./telegram-notify");
+        if (isTelegramConfigured()) {
+          void notifyTelegramUserSupportMessage(bodyWallet.toLowerCase(), parsed.data.message);
+        } else {
+          pushAdminLog({
+            channel: "telegram",
+            level: "warn",
+            message: "User message saved but Telegram is not configured (no phone alert)",
+          });
+        }
+      }
+
+      res.json(message);
+    } catch (error) {
+      console.error("support/send:", error);
+      pushAdminLog({ channel: "support", level: "error", message: String(error) });
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
   /** SSE: push new messages to the trading UI when admin replies (or self echo). */
   app.get("/api/support/stream/:conversationId", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       const sessionId = req.headers["x-session-id"] as string | undefined;
       const conversationId = req.params.conversationId.toLowerCase();
-      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
-      if (!isAdmin) {
+      const master = isMasterAdminAddress(walletAddress);
+      if (!master) {
         const owner = (walletAddress || sessionId || "").toLowerCase();
         if (!owner || owner !== conversationId) {
           return res.status(403).json({ error: "Access denied" });
@@ -988,16 +1072,13 @@ export async function registerRoutes(
     }
   });
 
-  // Mark messages as read - admin only
+  // Mark messages as read — master admin only
   app.post("/api/support/messages/:conversationId/read", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      const { valid, error } = await verifyWalletAccess(walletAddress, true);
-      if (!valid) {
-        return res.status(403).json({ error });
+      if (!isMasterAdminAddress(walletAddress)) {
+        return res.status(403).json({ error: "Master admin wallet required" });
       }
-      
       await storage.markMessagesAsRead(req.params.conversationId);
       res.json({ success: true });
     } catch (error) {
@@ -1014,6 +1095,155 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error checking admin status:", error);
       res.status(500).json({ error: "Failed to check admin status" });
+    }
+  });
+
+  // ── Equilibrium Command Center (master wallet + `x-wallet-address` header) ──
+  app.get("/api/command-center/status", (req: Request, res: Response) => {
+    const addr = String(req.query.address || "").trim();
+    res.json({
+      masterConfigured: !!getMasterAdminAddress(),
+      isMasterAdmin: isMasterAdminAddress(addr),
+    });
+  });
+
+  app.get("/api/command-center/ws-token", (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const token = issueCommandCenterWsToken();
+    pushAdminLog({
+      channel: "api",
+      level: "info",
+      message: "Issued Command Center WebSocket log token",
+    });
+    res.json({ token, expiresInSec: 300 });
+  });
+
+  app.get("/api/command-center/users", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      res.json(await storage.getAllWalletUsers());
+    } catch {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/command-center/leads", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      res.json(await storage.getAllLeads());
+    } catch {
+      res.status(500).json({ error: "Failed to fetch leads" });
+    }
+  });
+
+  app.get("/api/command-center/conversations", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      res.json(await storage.getAllConversations());
+    } catch {
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.post("/api/command-center/support/reply", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      const { insertSupportMessageSchema } = await import("@shared/schema");
+      const conversationId = String(req.body?.conversationId || "").toLowerCase().trim();
+      const text = String(req.body?.message || "").trim();
+      if (!conversationId || !text) {
+        return res.status(400).json({ error: "conversationId and message are required" });
+      }
+      const messageData = {
+        senderType: "admin" as const,
+        senderWallet: null as string | null,
+        senderName: String(req.body?.senderName || "Support Team"),
+        message: text,
+        isRead: true,
+        conversationId,
+      };
+      const validated = insertSupportMessageSchema.safeParse(messageData);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+      const message = await storage.createMessage(validated.data);
+      const { emitSupportMessage } = await import("./support-events");
+      emitSupportMessage(message);
+      pushAdminLog({
+        channel: "support",
+        level: "info",
+        message: "Command Center admin reply",
+        meta: { conversationId },
+      });
+      res.json(message);
+    } catch (e) {
+      console.error("command-center support reply:", e);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  app.patch("/api/command-center/users/:walletAddress/subscription", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      const { updateSubscriptionSchema } = await import("@shared/schema");
+      const paramWallet = decodeURIComponent(req.params.walletAddress);
+      const validated = updateSubscriptionSchema.safeParse({ walletAddress: paramWallet, ...req.body });
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+      }
+      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
+        validated.data;
+      const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
+      let user = await storage.updateWalletUserSubscription(paramWallet, subscriptionTier, subscriptionActive, expiresAt);
+      if (!user) {
+        user = await storage.createWalletUser({
+          walletAddress: paramWallet,
+          subscriptionTier,
+          subscriptionActive,
+          builderCodeApproved: builderCodeApproved ?? false,
+          manualProOverride: typeof manualProOverride === "boolean" ? manualProOverride : false,
+        });
+      } else if (typeof builderCodeApproved === "boolean") {
+        await storage.updateWalletUserApproval(paramWallet, builderCodeApproved);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
+      }
+      if (typeof manualProOverride === "boolean") {
+        await storage.setManualProOverride(paramWallet, manualProOverride);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
+      }
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("command-center subscription:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.get("/api/command-center/analytics/hyperliquid", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      const [hl, allUsers] = await Promise.all([getPerpExchangeAggregates(), storage.getAllWalletUsers()]);
+      const handshakeComplete = allUsers.filter((u) => u.instantTradingCompletedAt).length;
+      const builderApproved = allUsers.filter((u) => u.builderCodeApproved).length;
+      res.json({
+        hyperliquid: hl,
+        sovereignCohort: {
+          totalWalletRows: allUsers.length,
+          instantTradingHandshakeComplete: handshakeComplete,
+          builderCodeApproved: builderApproved,
+        },
+        note:
+          "Exchange totals are Hyperliquid-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+      });
+    } catch (e) {
+      console.error("command-center analytics:", e);
+      res.status(500).json({ error: "Failed to load analytics" });
     }
   });
 
@@ -1083,14 +1313,14 @@ export async function registerRoutes(
       const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
       let user = await storage.updateWalletUserSubscription(
         paramWallet,
-        subscriptionTier as "free" | "pro" | "elite",
+        subscriptionTier,
         subscriptionActive,
         expiresAt,
       );
       if (!user) {
         user = await storage.createWalletUser({
           walletAddress: paramWallet,
-          subscriptionTier: subscriptionTier as "free" | "pro" | "elite",
+          subscriptionTier,
           subscriptionActive,
           builderCodeApproved: builderCodeApproved ?? false,
           manualProOverride: typeof manualProOverride === "boolean" ? manualProOverride : false,

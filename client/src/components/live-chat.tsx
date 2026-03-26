@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MessageCircle, X, Send, Shield, User, Minimize2, Loader2, ArrowLeft } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useChat } from "@/lib/chat-context";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
@@ -81,18 +82,8 @@ export function LiveChat() {
     }
   }, [pendingMessage, isOpen, clearPendingMessage]);
 
-  const { data: isAdminData } = useQuery<{ isAdmin: boolean }>({
-    queryKey: ["/api/admin/check", address],
-    queryFn: async () => {
-      if (!address) return { isAdmin: false };
-      const res = await fetch(`/api/admin/check/${address}`);
-      return res.json();
-    },
-    enabled: !!address,
-  });
-
-  const isAdmin = isAdminData?.isAdmin ?? false;
-  const conversationId = isAdmin ? selectedConversation : conversationOwnerId;
+  const { isMasterAdmin } = useIsMasterAdmin();
+  const conversationId = isMasterAdmin ? selectedConversation : conversationOwnerId;
 
   const buildHeaders = useCallback(() => {
     const h: Record<string, string> = {};
@@ -166,38 +157,55 @@ export function LiveChat() {
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: isAdmin && !!address && isOpen && !isMinimized,
-    refetchInterval: isAdmin && isOpen && !isMinimized ? 4000 : false,
+    enabled: isMasterAdmin && !!address && isOpen && !isMinimized,
+    refetchInterval: isMasterAdmin && isOpen && !isMinimized ? 4000 : false,
   });
 
   const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 
   useEffect(() => {
-    if (isAdmin && totalUnread > prevUnreadRef.current) {
+    if (isMasterAdmin && totalUnread > prevUnreadRef.current) {
       playNotificationSound();
     }
     prevUnreadRef.current = totalUnread;
-  }, [isAdmin, totalUnread]);
+  }, [isMasterAdmin, totalUnread]);
 
   const sendMutation = useMutation({
     mutationFn: async (msg: string) => {
       if (!conversationId) throw new Error("No conversation");
-      const res = await fetch("/api/support/messages", {
+      if (isMasterAdmin) {
+        const res = await fetch("/api/support/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...buildHeaders(),
+          },
+          body: JSON.stringify({
+            senderType: "admin",
+            senderWallet: null,
+            senderName: "Support Team",
+            message: msg,
+            conversationId,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to send message");
+        }
+        return res.json();
+      }
+      const walletForBody = (address?.toLowerCase() || guestId || conversationOwnerId).toLowerCase();
+      const res = await fetch("/api/support/send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...buildHeaders(),
         },
         body: JSON.stringify({
-          senderType: isAdmin ? "admin" : "user",
-          senderWallet: isAdmin ? null : (address?.toLowerCase() || null),
-          senderName: isAdmin
-            ? "Support Team"
-            : address
-              ? `User ${address.slice(0, 6)}...${address.slice(-4)}`
-              : "Guest",
           message: msg,
-          conversationId,
+          walletAddress: walletForBody,
+          conversationId: conversationOwnerId.toLowerCase(),
+          clientTimestamp: new Date().toISOString(),
         }),
       });
       if (!res.ok) {
@@ -209,7 +217,7 @@ export function LiveChat() {
     onSuccess: () => {
       setInputValue("");
       refetchMessages();
-      if (isAdmin) refetchConversations();
+      if (isMasterAdmin) refetchConversations();
     },
     onError: (err: Error) => {
       toast({
@@ -258,7 +266,7 @@ export function LiveChat() {
     >
       <div className="flex items-center justify-between px-4 py-3 border-b bg-primary text-primary-foreground rounded-t-xl">
         <div className="flex items-center gap-2">
-          {isAdmin && selectedConversation && (
+          {isMasterAdmin && selectedConversation && (
             <Button
               variant="ghost"
               size="icon"
@@ -271,11 +279,11 @@ export function LiveChat() {
           <Shield className="h-5 w-5" />
           <div>
             <p className="font-semibold text-sm">
-              {isAdmin ? "Support Inbox" : "Live Support"}
+              {isMasterAdmin ? "Support Inbox" : "Live Support"}
             </p>
             {!isMinimized && (
               <p className="text-xs opacity-80">
-                {isAdmin
+                {isMasterAdmin
                   ? selectedConversation
                     ? `${selectedConversation.slice(0, 6)}...${selectedConversation.slice(-4)}`
                     : `${conversations.length} conversation${conversations.length !== 1 ? "s" : ""}`
@@ -308,7 +316,7 @@ export function LiveChat() {
 
       {!isMinimized && (
         <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-          {isAdmin && !selectedConversation ? (
+          {isMasterAdmin && !selectedConversation ? (
             <ScrollArea className="flex-1 min-h-0 p-3">
               {conversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-12">
@@ -364,7 +372,7 @@ export function LiveChat() {
                     <div className="flex flex-col items-center justify-center min-h-[120px] py-8">
                       <MessageCircle className="h-10 w-10 text-muted-foreground/30 mb-2" />
                       <p className="text-sm text-muted-foreground text-center px-2">
-                        {isAdmin ? "No messages yet in this conversation." : "Send us a message and we'll reply soon!"}
+                        {isMasterAdmin ? "No messages yet in this conversation." : "Send us a message and we'll reply soon!"}
                       </p>
                     </div>
                   ) : (
@@ -411,7 +419,7 @@ export function LiveChat() {
                   )}
                 </div>
 
-                {messages.length === 0 && !isAdmin && (
+                {messages.length === 0 && !isMasterAdmin && (
                   <div className="mt-4 space-y-2">
                     <p className="text-xs text-muted-foreground">Quick questions:</p>
                     <div className="flex flex-wrap gap-2">

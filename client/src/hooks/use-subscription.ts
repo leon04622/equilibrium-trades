@@ -3,7 +3,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { checkSubscription } from "@/lib/check-subscription";
 
 export interface SubscriptionStatus {
-  tier: 'free' | 'pro' | 'elite';
+  tier: "free" | "pro" | "mentoring" | "elite";
   active: boolean;
   expiresAt: string | null;
 }
@@ -36,24 +36,26 @@ export function useSubscription() {
     },
   });
 
-  const isPro = subscription?.active && (subscription.tier === 'pro' || subscription.tier === 'elite');
-  const isElite = subscription?.active && subscription.tier === 'elite';
-  const isFree = !subscription?.active || subscription?.tier === 'free';
+  const isMentoring =
+    subscription?.active &&
+    (subscription.tier === "mentoring" || subscription.tier === "elite");
+  const isPro =
+    subscription?.active &&
+    (subscription.tier === "pro" || subscription.tier === "mentoring" || subscription.tier === "elite");
+  const isFree = !subscription?.active || subscription?.tier === "free";
 
   const hasAccess = (feature: PremiumFeature): boolean => {
     switch (feature) {
-      // Pro features
-      case 'ai_signals':
-      case 'advanced_education':
-      case 'sma_overlays':
-      case 'live_trading':
-      case 'trade_journal':
-      case 'video_library':
-        return !!(isPro || isElite);
-      // Elite features
-      case 'heatmap':
-      case 'coaching':
-        return !!isElite;
+      case "ai_signals":
+      case "advanced_education":
+      case "sma_overlays":
+      case "live_trading":
+      case "trade_journal":
+      case "video_library":
+        return !!isPro;
+      case "heatmap":
+      case "coaching":
+        return !!isMentoring;
       default:
         return false;
     }
@@ -65,10 +67,13 @@ export function useSubscription() {
     error,
     refetch,
     isPro,
-    isElite,
+    /** Active Mentoring ($500/mo) or legacy elite tier from API. */
+    isMentoring,
+    /** @deprecated use isMentoring */
+    isElite: isMentoring,
     isFree,
-    /** Alias for an active Pro or Elite plan (Stripe-verified when connected). */
-    isSubscribed: !!(isPro || isElite),
+    /** Alias for an active Pro or Mentoring plan (Stripe-verified when connected). */
+    isSubscribed: !!isPro,
     tier: subscription?.tier || 'free',
     hasAccess,
     isConnected,

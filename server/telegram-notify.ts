@@ -50,10 +50,33 @@ export async function notifyTelegramUserSupportMessage(
     });
     const data = (await res.json()) as { ok?: boolean; description?: string };
     if (!res.ok || !data.ok) {
-      return { ok: false, error: data.description || res.statusText };
+      const err = data.description || res.statusText;
+      const { pushAdminLog } = await import("./admin-log-bus");
+      pushAdminLog({
+        channel: "telegram",
+        level: "error",
+        message: `Telegram sendMessage failed: ${err}`,
+        meta: { walletAddress, status: res.status },
+      });
+      return { ok: false, error: err };
     }
+    const { pushAdminLog } = await import("./admin-log-bus");
+    pushAdminLog({
+      channel: "telegram",
+      level: "info",
+      message: "Telegram user support alert delivered",
+      meta: { walletAddress, preview: messageContent.slice(0, 120) },
+    });
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "send failed" };
+    const msg = e instanceof Error ? e.message : "send failed";
+    const { pushAdminLog } = await import("./admin-log-bus");
+    pushAdminLog({
+      channel: "telegram",
+      level: "error",
+      message: `Telegram sendMessage exception: ${msg}`,
+      meta: { walletAddress },
+    });
+    return { ok: false, error: msg };
   }
 }

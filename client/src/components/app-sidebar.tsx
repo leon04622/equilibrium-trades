@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/lib/wallet-context";
-import { useIsAdmin } from "@/hooks/use-is-admin";
+import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useChat } from "@/lib/chat-context";
 import { useQuery } from "@tanstack/react-query";
 
@@ -109,7 +109,7 @@ const accountNavItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { address } = useWallet();
-  const { isAdmin } = useIsAdmin();
+  const { isMasterAdmin } = useIsMasterAdmin();
   const { openChat } = useChat();
 
   const { data: supportConversations = [] } = useQuery<
@@ -124,11 +124,11 @@ export function AppSidebar() {
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: isAdmin && !!address,
+    enabled: isMasterAdmin && !!address,
     refetchInterval: 30_000,
   });
 
-  const supportUnread = isAdmin
+  const supportUnread = isMasterAdmin
     ? supportConversations.reduce((sum, c) => sum + c.unreadCount, 0)
     : 0;
 
@@ -249,7 +249,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {isAdmin && (
+        {isMasterAdmin && (
           <>
             <SidebarSeparator />
             <SidebarGroup>
@@ -264,27 +264,12 @@ export function AppSidebar() {
                     >
                       <Link href="/admin">
                         <Shield className="h-4 w-4" />
-                        <span>Admin Panel</span>
+                        <span>Command Center</span>
                         <Badge 
                           variant="destructive"
                           className="ml-auto text-[10px] px-1.5 py-0"
                         >
-                          Admin
-                        </Badge>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === "/admin-equilibrium"}
-                      data-testid="nav-admin-equilibrium"
-                    >
-                      <Link href="/admin-equilibrium">
-                        <Shield className="h-4 w-4" />
-                        <span>Admin CRM</span>
-                        <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0">
-                          Sign
+                          Master
                         </Badge>
                       </Link>
                     </SidebarMenuButton>
