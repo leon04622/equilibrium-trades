@@ -64,10 +64,64 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   return list;
 }
 
-/** Built-in / env admins plus Equilibrium master wallet (video CRUD, etc.). */
+/** Built-in / env admins plus Equilibrium master wallet (non-Command Center features). */
 function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
   if (!walletAddress) return false;
   return isAdminAddress(walletAddress) || isMasterAdminAddress(walletAddress);
+}
+
+/** POST /api/videos and POST /api/admin/videos — same body; master wallet only (`x-wallet-address`). */
+async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
+  const gate = requireMasterAdminWallet(req);
+  if (!gate.ok) {
+    res.status(gate.status).json({ error: gate.error });
+    return;
+  }
+  try {
+    const { adminVideoCreateSchema } = await import("@shared/schema");
+    const parsed = adminVideoCreateSchema.safeParse(
+      req.body && typeof req.body === "object" ? req.body : {},
+    );
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+      return;
+    }
+    const row = parsed.data;
+    if (!row.youtubeId?.trim() && !row.videoPath?.trim()) {
+      res.status(400).json({ error: "Could not resolve video URL (YouTube, Vimeo, or direct link)" });
+      return;
+    }
+    const video = await storage.createVideo({
+      title: row.title,
+      description: row.description,
+      duration: row.duration,
+      category: row.category,
+      youtubeId: row.youtubeId ?? null,
+      videoPath: row.videoPath ?? null,
+      thumbnailPath: row.thumbnailPath ?? null,
+      academySection: row.academySection,
+    });
+    res.json(video);
+  } catch (error) {
+    console.error("POST /api/videos (unified):", error);
+    res.status(500).json({ error: "Failed to create video" });
+  }
+}
+
+async function deleteCommandCenterVideo(req: Request, res: Response): Promise<void> {
+  const gate = requireMasterAdminWallet(req);
+  if (!gate.ok) {
+    res.status(gate.status).json({ error: gate.error });
+    return;
+  }
+  try {
+    const deleted = await storage.deleteVideo(req.params.id);
+    if (deleted) res.json({ success: true });
+    else res.status(404).json({ error: "Video not found" });
+  } catch (error) {
+    console.error("DELETE /api/videos/:id:", error);
+    res.status(500).json({ error: "Failed to delete video" });
+  }
 }
 
 export async function registerRoutes(
@@ -464,119 +518,15 @@ export async function registerRoutes(
     }
   });
 
-  // Create video - admin only (accept `videoUrl` for YouTube / Vimeo / direct MP4)
-  app.post("/api/videos", async (req: Request, res: Response) => {
-    try {
-      const { insertVideoSchema } = await import("@shared/schema");
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+  /** Create vault lesson — JSON: title, category, videoUrl, optional description, thumbnailUrl. Master wallet only. */
+  app.post("/api/videos", persistCommandCenterVideo);
 
-      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
+  /** Backward-compatible alias for Command Center clients. */
+  app.post("/api/admin/videos", persistCommandCenterVideo);
 
-      const body = { ...(req.body && typeof req.body === "object" ? req.body : {}) } as Record<string, unknown>;
-      const customCategory =
-        typeof body.category === "string" && body.category.trim().length > 0
-          ? body.category.trim().slice(0, 200)
-          : "";
-      delete body.category;
-      const hasYt = typeof body.youtubeId === "string" && body.youtubeId.trim().length > 0;
-      const hasVp = typeof body.videoPath === "string" && body.videoPath.trim().length > 0;
-      if (!hasYt && !hasVp && typeof body.videoUrl === "string" && body.videoUrl.trim()) {
-        const url = body.videoUrl.trim();
-        const m = url.match(
-          /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/i,
-        );
-        if (m) body.youtubeId = m[1];
-        else body.videoPath = url;
-      }
-      delete body.videoUrl;
+  app.delete("/api/admin/videos/:id", deleteCommandCenterVideo);
 
-      const validated = insertVideoSchema.safeParse(body);
-      if (!validated.success) {
-        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
-      }
-      const row = customCategory ? { ...validated.data, category: customCategory } : validated.data;
-      const video = await storage.createVideo(row);
-      res.json(video);
-    } catch (error) {
-      console.error("Error creating video:", error);
-      const message =
-        error instanceof Error ? error.message : "Failed to create video";
-      res.status(500).json({ error: message });
-    }
-  });
-
-  /** Admin Command Center — canonical create path (validates title, category, videoUrl, thumbnailUrl). */
-  app.post("/api/admin/videos", async (req: Request, res: Response) => {
-    try {
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-      const { adminVideoCreateSchema } = await import("@shared/schema");
-      const parsed = adminVideoCreateSchema.safeParse(
-        req.body && typeof req.body === "object" ? req.body : {},
-      );
-      if (!parsed.success) {
-        return res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
-      }
-      const row = parsed.data;
-      if (!row.youtubeId?.trim() && !row.videoPath?.trim()) {
-        return res.status(400).json({ error: "Could not resolve video URL (YouTube, Vimeo, or direct link)" });
-      }
-      const video = await storage.createVideo({
-        title: row.title,
-        description: row.description,
-        duration: row.duration,
-        category: row.category,
-        youtubeId: row.youtubeId ?? null,
-        videoPath: row.videoPath ?? null,
-        thumbnailPath: row.thumbnailPath ?? null,
-        academySection: row.academySection,
-      });
-      res.json(video);
-    } catch (error) {
-      console.error("POST /api/admin/videos:", error);
-      res.status(500).json({ error: "Failed to create video" });
-    }
-  });
-
-  app.delete("/api/admin/videos/:id", async (req: Request, res: Response) => {
-    try {
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-      const deleted = await storage.deleteVideo(req.params.id);
-      if (deleted) res.json({ success: true });
-      else res.status(404).json({ error: "Video not found" });
-    } catch (error) {
-      console.error("DELETE /api/admin/videos:", error);
-      res.status(500).json({ error: "Failed to delete video" });
-    }
-  });
-
-  // Delete video - admin only
-  app.delete("/api/videos/:id", async (req: Request, res: Response) => {
-    try {
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-
-      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-      
-      const deleted = await storage.deleteVideo(req.params.id);
-      if (deleted) {
-        res.json({ success: true });
-      } else {
-        res.status(404).json({ error: "Video not found" });
-      }
-    } catch (error) {
-      console.error("Error deleting video:", error);
-      res.status(500).json({ error: "Failed to delete video" });
-    }
-  });
+  app.delete("/api/videos/:id", deleteCommandCenterVideo);
 
   // ============ WALLET USER / HYPERLIQUID ONBOARDING ============
 

@@ -46,7 +46,12 @@ export function inferAcademySection(v: TutorialVideo): AcademySection {
   if (s === "beginner_patterns" || s === "sma_masterclass" || s === "live_sessions") {
     return s;
   }
-  const cat = (v.category || "").toLowerCase();
+  const cat = (v.category || "").trim().toLowerCase();
+  if (cat === "beginner patterns" || cat === "sma masterclass" || cat === "live trading sessions") {
+    if (cat === "sma masterclass") return "sma_masterclass";
+    if (cat === "live trading sessions") return "live_sessions";
+    return "beginner_patterns";
+  }
   for (const { id, needles } of SECTION_LABEL_MATCH) {
     if (needles.some((n) => cat.includes(n))) return id;
   }

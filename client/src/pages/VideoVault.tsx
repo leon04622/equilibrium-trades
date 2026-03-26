@@ -30,17 +30,26 @@ export type VaultItem = {
   academySection: AcademySection;
 };
 
+const ACADEMY_IDS = new Set<AcademySection>(["beginner_patterns", "sma_masterclass", "live_sessions"]);
+
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
-  return apiVideos.map((v) => ({
-    id: v.id,
-    title: v.title,
-    description: v.description,
-    thumbnailUrl:
-      (v.thumbnailPath && v.thumbnailPath.trim()) ||
-      "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
-    videoUrl: tutorialToPlayUrl(v),
-    academySection: inferAcademySection(v),
-  }));
+  return apiVideos.map((v) => {
+    const rawSection = v.academySection as string | null | undefined;
+    const section: AcademySection =
+      rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
+        ? (rawSection as AcademySection)
+        : inferAcademySection(v);
+    return {
+      id: v.id,
+      title: v.title,
+      description: v.description,
+      thumbnailUrl:
+        (v.thumbnailPath && v.thumbnailPath.trim()) ||
+        "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
+      videoUrl: tutorialToPlayUrl(v),
+      academySection: section,
+    };
+  });
 }
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {

@@ -166,7 +166,16 @@ export const insertVideoSchema = z
     };
   });
 
-/** Admin Command Center / POST /api/admin/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
+function isValidAbsoluteHttpUrl(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Admin Command Center / POST /api/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
 export const adminVideoCreateSchema = z
   .object({
     title: z.string().trim().min(1, "Title is required"),
@@ -175,6 +184,27 @@ export const adminVideoCreateSchema = z
     category: z.string().trim().optional().default(""),
     thumbnailUrl: z.string().trim().optional(),
     thumbnailPath: z.string().trim().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const vUrl = data.videoUrl.trim();
+    if (!isValidAbsoluteHttpUrl(vUrl)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Video URL must be a valid http(s) URL",
+        path: ["videoUrl"],
+      });
+    }
+    const thumb =
+      (data.thumbnailUrl && data.thumbnailUrl.trim()) ||
+      (data.thumbnailPath && data.thumbnailPath.trim()) ||
+      "";
+    if (thumb && !isValidAbsoluteHttpUrl(thumb)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Thumbnail must be a valid http(s) URL",
+        path: ["thumbnailUrl"],
+      });
+    }
   })
   .transform((data) => {
     const url = data.videoUrl.trim();

@@ -2,7 +2,6 @@ import { Link, useLocation } from "react-router-dom";
 import { BarChart3, TrendingUp, User, GraduationCap, Home, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
-import { useIsAdmin } from "@/hooks/use-is-admin";
 
 const baseItems = [
   { to: "/", icon: Home, label: "Home" },
@@ -14,10 +13,9 @@ const baseItems = [
 
 export function MobileBottomNav() {
   const { pathname } = useLocation();
-  const { isMasterAdmin } = useIsMasterAdmin();
-  const { isAdmin: isAppAdmin } = useIsAdmin();
+  const { isMasterAdmin, masterConfigured } = useIsMasterAdmin();
 
-  const navItems = isMasterAdmin || isAppAdmin
+  const navItems = masterConfigured && isMasterAdmin
     ? [...baseItems, { to: "/admin", icon: Shield, label: "Admin" }]
     : baseItems;
 

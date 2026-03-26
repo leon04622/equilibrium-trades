@@ -2,37 +2,43 @@
  * Equilibrium Trades — production Node entry (optional)
  *
  * This file loads the compiled Express application from `dist/index.cjs`.
- * The canonical start command is: `npm start` → `node dist/index.cjs`
+ * Canonical start: `npm start` → `node dist/index.cjs`
  * Alternate: `npm run start:serverjs` → `node server.js`
  *
- * ── Admin Command Center API (all handlers use try/catch in `server/routes.ts`) ──
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Admin “collections” (PostgreSQL / Drizzle — single source of truth)
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- * Master wallet: set `ADMIN_EQUILIBRIUM_MASTER_WALLET=0xYourAddress` (replaces YOUR_MASTER_WALLET_ADDRESS).
- * Client route: `/admin` — sends `x-wallet-address` header; server enforces master on CRM endpoints.
+ * • users (CRM)     → table `wallet_users` — wallet, email, subscription tier
+ * • videos (Vault) → table `tutorial_videos` — title, category, youtube_id / video_path, academy_section
+ * • messages (Support) → table `support_tickets` — chat + Telegram webhook when env is set
  *
- * GET  /api/users
- * PATCH /api/users/:walletAddress/subscription
- *   Body: `{ isSubscribed: true }` (Grant Pro) | `{ removePro: true }` (Remove Pro / free + clear override)
+ * Master wallet: `ADMIN_EQUILIBRIUM_MASTER_WALLET=0xYourAddress`
+ * Command Center client: `/admin` — sends header `x-wallet-address` (must match master).
  *
- * GET  /api/support              — master: inbox dump (support_tickets table; legacy name support_messages in docs)
- * POST /api/support              — same as /api/support/send (persist + optional Telegram)
- * POST /api/support/message      — alias
- * POST /api/support/send         — user/guest message from chat bubble
- * GET  /api/support/conversations
- * GET  /api/support/messages/:conversationId
- * POST /api/support/messages     — admin reply (also triggers WS + SSE)
- * GET  /api/support/stream/:conversationId — SSE
+ * ── Videos (Vault + Command Center) ──
+ * GET    /api/videos              — public list for Educational Vault
+ * POST   /api/videos              — master only; JSON { title, category, videoUrl, description?, thumbnailUrl? }
+ * DELETE /api/videos/:id          — master only
+ * POST   /api/admin/videos        — alias of POST /api/videos
+ * DELETE /api/admin/videos/:id    — alias of DELETE /api/videos/:id
  *
- * WebSocket /ws/support-chat — subscribe { type, conversationId, walletAddress?, sessionId? } or
- *   { type, scope: "admin_inbox", walletAddress } for master inbox refresh.
+ * ── Users (CRM) ──
+ * GET    /api/users               — master only
+ * PATCH  /api/users/:walletAddress/subscription — Grant Pro / Remove Pro
  *
- * GET    /api/videos
- * POST   /api/videos   — body: title, description, videoUrl, optional category (free text), thumbnailPath
- * DELETE /api/videos/:id
+ * ── Support / messages ──
+ * GET    /api/support             — master: inbox
+ * POST   /api/support             — persist user message + optional Telegram (same as /api/support/send)
+ * POST   /api/support/message     — alias
+ * POST   /api/support/send        — chat bubble ingest
+ * POST   /api/support/messages    — admin reply (WS + SSE)
+ * GET    /api/support/conversations
+ * GET    /api/support/messages/:conversationId
+ * GET    /api/support/stream/:conversationId — SSE
  *
- * POST   /api/admin/videos   — Command Center: title, videoUrl, category, optional description, thumbnailUrl
- * DELETE /api/admin/videos/:id
+ * WebSocket /ws/support-chat — subscribe with conversationId or scope `admin_inbox` + master wallet.
  *
- * Source of truth for route implementations: `server/routes.ts`, `server/index.ts`, `server/support-chat-ws.ts`.
+ * Route implementations: `server/routes.ts`, `server/index.ts`, `server/support-chat-ws.ts`.
  */
 import "./dist/index.cjs";

@@ -35,12 +35,31 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
-import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type TabKey = "users" | "support" | "videos";
+
+const MASTER_PANEL_STORAGE_KEY = "equilibrium_command_center_master_wallet";
+
+function isValidHttpUrl(raw: string): boolean {
+  const s = raw.trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 function useAdminApi(address: string | undefined): AxiosInstance {
   return useMemo(() => {
@@ -70,7 +89,6 @@ export default function AdminDashboard() {
   const { address } = useWallet();
   const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
-  const { isAdmin: isAppAdmin, isLoading: appAdminLoading } = useIsAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useAdminApi(address ?? undefined);
@@ -80,19 +98,26 @@ export default function AdminDashboard() {
   const [replyText, setReplyText] = useState("");
   const [vaultTitle, setVaultTitle] = useState("");
   const [vaultDescription, setVaultDescription] = useState("");
-  const [vaultCategory, setVaultCategory] = useState("");
+  const [vaultCategory, setVaultCategory] = useState("SMA Masterclass");
   const [vaultUrl, setVaultUrl] = useState("");
   const [vaultThumb, setVaultThumb] = useState("");
   const [vaultSearch, setVaultSearch] = useState("");
 
-  /** Master wallet: full CRM. Built-in / `ADMIN_WALLET_ADDRESSES` admins: videos only unless they are also the master. */
+  /** Command Center UI and video CRUD: configured master wallet only (server enforces the same). */
   const showCrmTabs = isMasterAdmin;
-  const canManageVideos = isMasterAdmin || isAppAdmin;
-  const canAccessCommandCenter =
-    !!address &&
-    ((masterConfigured && (isMasterAdmin || isAppAdmin)) || (!masterConfigured && isAppAdmin));
-  const accessGateLoading =
-    adminCheckLoading || (!!address && !isMasterAdmin && appAdminLoading);
+  const canManageVideos = isMasterAdmin;
+  const canAccessCommandCenter = !!address && masterConfigured && isMasterAdmin;
+  const accessGateLoading = adminCheckLoading;
+
+  useEffect(() => {
+    if (address && isMasterAdmin) {
+      try {
+        localStorage.setItem(MASTER_PANEL_STORAGE_KEY, address.toLowerCase());
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+  }, [address, isMasterAdmin]);
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
     queryKey: ["admin-rest", "users", address],
@@ -253,15 +278,25 @@ export default function AdminDashboard() {
       if (!vaultTitle.trim() || !vaultUrl.trim() || !vaultCategory.trim()) {
         throw new Error("Title, category, and video URL are required");
       }
+      const url = vaultUrl.trim();
+      if (!isValidHttpUrl(url)) {
+        throw new Error("Video URL must be a valid http(s) link (e.g. https://…)");
+      }
+      const thumb = vaultThumb.trim();
+      if (thumb && !isValidHttpUrl(thumb)) {
+        throw new Error("Thumbnail must be a valid http(s) URL or left empty");
+      }
       const desc = vaultDescription.trim() || vaultTitle.trim();
-      const { data, status } = await api.post("/api/admin/videos", {
+      const { data, status } = await api.post("/api/videos", {
         title: vaultTitle.trim(),
         description: desc,
-        videoUrl: vaultUrl.trim(),
-        thumbnailUrl: vaultThumb.trim() || undefined,
+        videoUrl: url,
+        thumbnailUrl: thumb || undefined,
         category: vaultCategory.trim(),
       });
-      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status === 401 || status === 403 || status === 503) {
+        throw new Error((data as { error?: string })?.error || "Unauthorized");
+      }
       if (status < 200 || status >= 300) {
         throw new Error((data as { error?: string })?.error || "Failed to add video");
       }
@@ -283,8 +318,10 @@ export default function AdminDashboard() {
 
   const deleteVaultVideo = useMutation({
     mutationFn: async (id: string) => {
-      const { data, status } = await api.delete(`/api/admin/videos/${encodeURIComponent(id)}`);
-      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
+      if (status === 401 || status === 403 || status === 503) {
+        throw new Error((data as { error?: string })?.error || "Unauthorized");
+      }
       if (status < 200 || status >= 300) {
         throw new Error((data as { error?: string })?.error || "Delete failed");
       }
@@ -352,21 +389,21 @@ export default function AdminDashboard() {
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Command Center</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Connect an admin wallet (master or a wallet listed in built-in admins / <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>).
+          Connect the master wallet configured as{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server.
         </p>
       </div>
     );
   }
 
   if (!canAccessCommandCenter) {
-    if (!masterConfigured && !isAppAdmin) {
+    if (!masterConfigured) {
       return (
         <div className="p-8 max-w-lg">
           <h1 className="text-2xl font-semibold tracking-tight">Admin — not configured</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server for the
-            Command Center CRM, or add your wallet to <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code> for
-            video tools only.
+            Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server to your
+            wallet address. Only that master wallet can open the Command Center, CRM, support inbox, and video library tools.
           </p>
         </div>
       );
@@ -375,8 +412,9 @@ export default function AdminDashboard() {
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Access denied</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          This wallet is not the master admin or an allowed admin address. CRM requires{" "}
-          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> to match your connected address.
+          Connect the wallet that matches{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>. No other wallet can use the
+          Command Center.
         </p>
       </div>
     );
@@ -391,8 +429,8 @@ export default function AdminDashboard() {
             <h1 className="text-xl font-bold">Command Center</h1>
             <p className="text-xs text-muted-foreground">
               {showCrmTabs
-                ? `Users · Support · Videos · Manual Pro $${TIER_PRO}`
-                : "Video library — add or remove lessons (CRM requires master wallet)."}
+                ? `CRM · Messages · Videos · Manual Pro $${TIER_PRO}`
+                : "Video library — master wallet only."}
             </p>
           </div>
         </div>
@@ -414,10 +452,10 @@ export default function AdminDashboard() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <aside className="w-full md:w-52 shrink-0 space-y-1 rounded-xl border bg-card p-2">
-          {showCrmTabs && (
+              {showCrmTabs && (
             <>
-              {nav("users", "Users & subs", <Users className="h-4 w-4" />)}
-              {nav("support", "Support inbox", <MessageSquare className="h-4 w-4" />)}
+              {nav("users", "User list", <Users className="h-4 w-4" />)}
+              {nav("support", "Messages", <MessageSquare className="h-4 w-4" />)}
             </>
           )}
           {nav("videos", "Videos", <Video className="h-4 w-4" />)}
@@ -429,7 +467,10 @@ export default function AdminDashboard() {
               <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <CardTitle>User CRM</CardTitle>
-                  <CardDescription>Wallet users from PostgreSQL — tier reflects Stripe + manual override</CardDescription>
+                  <CardDescription>
+                    Emails and wallets from sign-up (<code className="text-[10px]">wallet_users</code>) — tier reflects Stripe +
+                    manual override
+                  </CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <div className="relative flex-1 min-w-[180px]">
@@ -513,7 +554,7 @@ export default function AdminDashboard() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Support inbox</CardTitle>
+                    <CardTitle>Messages</CardTitle>
                     <CardDescription>
                       Messages from the chat bubble are stored in <code className="text-[10px]">support_tickets</code>{" "}
                       and trigger Telegram when <code className="text-[10px]">TELEGRAM_BOT_TOKEN</code> +{" "}
@@ -606,8 +647,8 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <CardTitle>Add educational video</CardTitle>
                   <CardDescription>
-                    POST <code className="text-[10px]">/api/admin/videos</code> — YouTube, Vimeo, or MP4. Category drives
-                    vault sections (Beginner Patterns / SMA Masterclass / Live Sessions).
+                    POST <code className="text-[10px]">/api/videos</code> — YouTube, Vimeo, or direct MP4. Vault section follows
+                    the category you pick (same labels as the Educational Vault).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">
@@ -616,12 +657,20 @@ export default function AdminDashboard() {
                     <Input value={vaultTitle} onChange={(e) => setVaultTitle(e.target.value)} placeholder="Lesson title" />
                   </div>
                   <div className="space-y-1">
-                    <Label>Category</Label>
-                    <Input
-                      value={vaultCategory}
-                      onChange={(e) => setVaultCategory(e.target.value)}
-                      placeholder="e.g. SMA Strategy"
-                    />
+                    <Label>Vault section (category)</Label>
+                    <Select value={vaultCategory} onValueChange={setVaultCategory}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose section…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Beginner Patterns">Beginner Patterns</SelectItem>
+                        <SelectItem value="SMA Masterclass">SMA Masterclass</SelectItem>
+                        <SelectItem value="Live Trading Sessions">Live Trading Sessions</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      Choosing <strong>SMA Masterclass</strong> stores the lesson under that vault heading automatically.
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <Label>Description (optional)</Label>
