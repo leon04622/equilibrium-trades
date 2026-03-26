@@ -912,12 +912,35 @@ export async function cancelOrder(
     });
 
     const result = await response.json();
+    console.log("[HL cancel] request action.cancels:", JSON.stringify(action.cancels));
+    console.log("[HL cancel] full response:", JSON.stringify(result));
 
-    if (result.status === "ok") {
+    if (result.status !== "ok") {
+      return {
+        success: false,
+        error:
+          typeof result.response === "string"
+            ? result.response
+            : result.response?.data || result.error || JSON.stringify(result),
+      };
+    }
+
+    // Hyperliquid returns status "ok" even when a cancel fails — real outcome is in data.statuses.
+    const statuses = result.response?.data?.statuses;
+    if (Array.isArray(statuses) && statuses.length > 0) {
+      for (let i = 0; i < statuses.length; i++) {
+        const st = statuses[i];
+        if (st === "success") continue;
+        if (st && typeof st === "object" && "error" in st) {
+          return { success: false, error: String((st as { error: string }).error) };
+        }
+        return { success: false, error: `Cancel failed: ${JSON.stringify(st)}` };
+      }
       return { success: true };
     }
 
-    return { success: false, error: result.response?.data || "Failed to cancel order" };
+    console.warn("[HL cancel] ok response but no statuses — treating as failure", result);
+    return { success: false, error: "Could not verify cancel (missing statuses in response)" };
   } catch (error: any) {
     console.error("Cancel order error:", error);
     return { success: false, error: error.message || "Failed to cancel order" };

@@ -68,6 +68,10 @@ interface TradingContextType {
   openOrders: HLOpenOrder[];
   /** Last `frontendOpenOrders` JSON from Hyperliquid info API (debug / mirror verification). */
   hlFrontendOpenOrdersRaw: unknown;
+  /** Unix ms when open orders + positions were last refreshed from HL (null = never / disconnected). */
+  hlAccountSyncAt: number | null;
+  /** Last refresh error message (debug). */
+  hlAccountFetchError: string | null;
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
   currentPrices: Record<string, number>;
@@ -195,6 +199,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
   const [hlFrontendOpenOrdersRaw, setHlFrontendOpenOrdersRaw] = useState<unknown>(null);
+  const [hlAccountSyncAt, setHlAccountSyncAt] = useState<number | null>(null);
+  const [hlAccountFetchError, setHlAccountFetchError] = useState<string | null>(null);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
@@ -219,6 +225,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!walletAddress) return;
     
     setIsLoadingAccount(true);
+    setHlAccountFetchError(null);
     try {
       const [accountState, hlPositions, hlOrders] = await Promise.all([
         getAccountState(walletAddress),
@@ -284,9 +291,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         } else if (tc.includes("below")) {
           orderType = "stop_loss";
         }
+        const oidRaw = ord.oid;
+        const oidNum =
+          typeof oidRaw === "string" ? parseInt(oidRaw, 10) : Number(oidRaw);
         return {
           coin: ord.coin,
-          oid: ord.oid,
+          oid: Number.isFinite(oidNum) ? oidNum : 0,
           side: ord.side,
           sz: ord.sz,
           limitPx: ord.limitPx,
@@ -301,9 +311,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setHlFrontendOpenOrdersRaw(
         Array.isArray(hlOrders) ? hlOrders.map((o: unknown) => (typeof o === "object" && o !== null ? { ...(o as object) } : o)) : [],
       );
+      setHlAccountSyncAt(Date.now());
+      setHlAccountFetchError(null);
 
     } catch (error) {
       console.error("Error fetching Hyperliquid account:", error);
+      setHlAccountFetchError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsLoadingAccount(false);
     }
@@ -317,6 +330,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setPositions([]);
       setOpenOrders([]);
       setHlFrontendOpenOrdersRaw(null);
+      setHlAccountSyncAt(null);
+      setHlAccountFetchError(null);
       setBalance(0);
       setWithdrawable(0);
       setAccountValue(0);
@@ -356,6 +371,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     setPositions([]);
     setOpenOrders([]);
     setHlFrontendOpenOrdersRaw(null);
+    setHlAccountSyncAt(null);
+    setHlAccountFetchError(null);
   }, []);
 
   const closePosition = useCallback(async (positionId: string): Promise<{ success: boolean; error?: string }> => {
@@ -467,15 +484,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!signer) {
       return { success: false, error: "Wallet not connected" };
     }
-    
+    if (!oid || !Number.isFinite(oid)) {
+      return { success: false, error: "Invalid order id" };
+    }
+
     try {
       const result = await hlCancelOrder(signer, coin, oid);
-      if (result.success) {
-        await refreshAccount();
-      }
+      // Always refetch so UI matches HL (success, failure, or stale list).
+      await refreshAccount();
       return result;
     } catch (error: any) {
       console.error("Error cancelling order:", error);
+      await refreshAccount().catch(() => {});
       return { success: false, error: error.message || "Failed to cancel order" };
     }
   }, [signer, refreshAccount]);
@@ -640,6 +660,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       positions,
       openOrders,
       hlFrontendOpenOrdersRaw,
+      hlAccountSyncAt,
+      hlAccountFetchError,
       tradeHistory,
       indicators,
       currentPrices,
