@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Switch, Route, useLocation } from "wouter";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
@@ -22,45 +22,9 @@ import { PaywallProvider } from "@/lib/paywall-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 
-import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Trading from "@/pages/trading";
-import Patterns from "@/pages/patterns";
-import Learn from "@/pages/learn";
-import Signals from "@/pages/signals";
-import Heatmap from "@/pages/heatmap";
-import Pricing from "@/pages/pricing";
-import Settings from "@/pages/settings";
-import Portfolio from "@/pages/portfolio";
-import Videos from "@/pages/videos";
-import Candles from "@/pages/candles";
-import Admin from "@/pages/admin";
-import AdminEquilibriumPage from "@/pages/admin-equilibrium";
-
-/**
- * Public: `/` home, `/trade` trading UI, `/subscribe` pricing.
- * Protected: `/admin-equilibrium` (master wallet + AdminGuard).
- */
-function OtherRoutes() {
-  return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/subscribe" component={Pricing} />
-      <Route path="/patterns" component={Patterns} />
-      <Route path="/candles" component={Candles} />
-      <Route path="/learn" component={Learn} />
-      <Route path="/signals" component={Signals} />
-      <Route path="/heatmap" component={Heatmap} />
-      <Route path="/pricing" component={Pricing} />
-      <Route path="/settings" component={Settings} />
-      <Route path="/portfolio" component={Portfolio} />
-      <Route path="/videos" component={Videos} />
-      <Route path="/admin-equilibrium" component={AdminEquilibriumPage} />
-      <Route path="/admin" component={Admin} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
+import AdminDashboard from "@/pages/AdminDashboard";
 
 function App() {
   const style = {
@@ -119,13 +83,8 @@ function App() {
 }
 
 function TradingLayout() {
-  const [location] = useLocation();
-  const path = typeof location === "string" ? location : "";
-  const isTrading =
-    path === "/trading" ||
-    path.startsWith("/trading?") ||
-    path === "/trade" ||
-    path.startsWith("/trade?");
+  const { pathname } = useLocation();
+  const isTrading = pathname === "/trading" || pathname === "/trade";
 
   return (
     <>
@@ -138,7 +97,11 @@ function TradingLayout() {
       {!isTrading && (
         <ScrollArea className="flex-1">
           <main className="min-h-0 pb-16 md:pb-0">
-            <OtherRoutes />
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/admin-equilibrium" element={<AdminDashboard />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           </main>
         </ScrollArea>
       )}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation } from "react-router-dom";
 import { PatternChart } from "@/components/pattern-chart";
 import { HlMirrorDebugPanel } from "@/components/hl-mirror-debug-panel";
 import { TradingViewChart } from "@/components/trading-view-chart";
@@ -90,23 +90,18 @@ export default function Trading({ visible = true }: TradingProps) {
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
   const { address: walletAddr } = useWallet();
 
-  const [location] = useLocation();
+  const { pathname, search } = useLocation();
 
-  // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
-  // update the selected coin. Wouter includes query string in location, so
-  // we check startsWith and parse coin from the location string directly.
+  // When navigating to /trading?coin=XXX or /trade?coin=XXX, sync selected coin.
   useEffect(() => {
-    const path = typeof location === "string" ? location : "";
-    if (!path.startsWith("/trading")) return;
-    const qIndex = path.indexOf("?");
-    const search = qIndex !== -1 ? path.slice(qIndex) : window.location.search;
-    const params = new URLSearchParams(search);
+    if (pathname !== "/trading" && pathname !== "/trade") return;
+    const params = new URLSearchParams(search || window.location.search);
     const coinParam = params.get("coin");
     if (coinParam) {
       setIsResolvingCoin(true);
       setCoin(coinParam);
     }
-  }, [location]);
+  }, [pathname, search]);
 
   useEffect(() => {
     if (!tradingConnected) return;

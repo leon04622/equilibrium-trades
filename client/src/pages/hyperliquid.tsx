@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useNavigate } from "react-router-dom";
 import { 
   TrendingUp, Link2, ExternalLink, Shield, Zap, 
   Wallet, AlertCircle, CheckCircle2, Copy, Info
@@ -28,7 +28,7 @@ interface HyperliquidConnection {
 }
 
 export default function Hyperliquid() {
-  const [, navigate] = useLocation();
+  const navigate = useNavigate();
   const [connectionMethod, setConnectionMethod] = useState<"wallet" | "api">("wallet");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");

@@ -20,7 +20,7 @@ import {
   Crosshair
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Link } from "wouter";
+import { Link } from "react-router-dom";
 
 interface HeatmapData {
   priceLevel: number;
@@ -431,7 +431,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
             <p className="text-xs text-muted-foreground text-center mb-4 max-w-[200px]">
               See real-time order flow and identify where institutional orders are placed
             </p>
-            <Link href="/pricing">
+            <Link to="/">
               <Button size="sm" data-testid="button-upgrade-heatmap">
                 Upgrade to Elite
               </Button>

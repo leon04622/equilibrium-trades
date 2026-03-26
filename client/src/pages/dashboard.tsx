@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
   TrendingUp, Target, BookOpen, Zap, ArrowRight, 
@@ -22,12 +22,11 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
 
   // Fetch active patterns from API
-  const { data: activePatterns = [] } = useQuery<any[]>({
+  const { data: activePatterns = [] } = useQuery<unknown[]>({
     queryKey: ["/api/patterns/active"],
   });
 
-  // Fetch subscription tiers
-  const { data: subscriptionTiers = [] } = useQuery<any[]>({
+  const { data: subscriptionTiers = [] } = useQuery<unknown[]>({
     queryKey: ["/api/subscriptions"],
   });
 
@@ -89,7 +88,7 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Link href="/trading">
+              <Link to="/trading">
                 <Card className="hover-elevate cursor-pointer h-full">
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/15">
@@ -105,7 +104,7 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
               </Link>
-              <Link href="/learn">
+              <Link to="/learn">
                 <Card className="hover-elevate cursor-pointer h-full">
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-success/15">
@@ -132,7 +131,7 @@ export default function Dashboard() {
                   Start with these easy-to-identify patterns
                 </p>
               </div>
-              <Link href="/patterns">
+              <Link to="/patterns">
                 <Button variant="ghost" size="sm" className="gap-1">
                   View All
                   <ArrowRight className="h-4 w-4" />
@@ -223,7 +222,7 @@ export default function Dashboard() {
                 </div>
                 <Progress value={33} className="h-2" />
               </div>
-              <Link href="/learn">
+              <Link to="/learn">
                 <Button variant="secondary" size="sm" className="w-full mt-2">
                   Continue Learning
                 </Button>
@@ -258,7 +257,7 @@ export default function Dashboard() {
                 </div>
                 <Badge className="bg-bullish text-bullish-foreground">72%</Badge>
               </div>
-              <Link href="/signals">
+              <Link to="/signals">
                 <Button variant="ghost" size="sm" className="w-full gap-1">
                   View All Signals
                   <ArrowRight className="h-4 w-4" />

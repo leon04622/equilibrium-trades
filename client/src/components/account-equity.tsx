@@ -5,12 +5,12 @@ import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLocation } from "wouter";
+import { useNavigate } from "react-router-dom";
 
 export function AccountEquity() {
   const { connected, accountValue, balance, marginUsed, isLoadingAccount, positions } = useTrading();
   const { connect } = useWallet();
-  const [, setLocation] = useLocation();
+  const navigate = useNavigate();
 
   const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
   const crossMarginRatio = accountValue > 0 ? (marginUsed / accountValue) * 100 : 0;
@@ -51,7 +51,7 @@ export function AccountEquity() {
             variant="default" 
             size="sm" 
             className="h-7 text-xs bg-primary"
-            onClick={() => setLocation("/portfolio")}
+            onClick={() => navigate("/")}
             data-testid="button-deposit"
           >
             Deposit
@@ -60,7 +60,7 @@ export function AccountEquity() {
             variant="outline" 
             size="sm" 
             className="h-7 text-xs"
-            onClick={() => setLocation("/portfolio")}
+            onClick={() => navigate("/")}
             data-testid="button-withdraw"
           >
             Withdraw
@@ -124,7 +124,7 @@ export function AccountEquity() {
                 <p className="text-muted-foreground">
                   Deposit funds to start trading. Visit the{" "}
                   <button
-                    onClick={() => setLocation("/portfolio")}
+                    onClick={() => navigate("/")}
                     className="text-primary underline"
                   >
                     Portfolio page

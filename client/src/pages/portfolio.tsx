@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, depositUsdcToHyperliquid, getArbitrumUsdcBalance, type SpotBalance } from "@/lib/hyperliquid-client";
-import { Link, useLocation } from "wouter";
+import { Link } from "react-router-dom";
 
 export default function Portfolio() {
   const { 
@@ -56,7 +56,6 @@ export default function Portfolio() {
   } = useTrading();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
   const [isLoadingSpot, setIsLoadingSpot] = useState(false);
 
@@ -435,7 +434,7 @@ export default function Portfolio() {
             <p className="text-muted-foreground mb-4">
               Connect your wallet to view your portfolio, positions, and balances.
             </p>
-            <Link href="/hyperliquid">
+            <Link to="/">
               <Button data-testid="button-connect-wallet">
                 <Wallet className="h-4 w-4 mr-2" />
                 Connect Wallet
@@ -578,7 +577,7 @@ export default function Portfolio() {
                   <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No open positions</p>
                   <p className="text-sm">Start trading to see your positions here</p>
-                  <Link href="/trading">
+                  <Link to="/trading">
                     <Button variant="outline" className="mt-4" data-testid="button-go-trading">
                       Go to Trading
                     </Button>
@@ -644,7 +643,7 @@ export default function Portfolio() {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <Link href={`/trading?coin=${position.coin}`}>
+                            <Link to={`/trading?coin=${position.coin}`}>
                               <Button variant="outline" size="sm" data-testid={`button-trade-${position.coin}`}>
                                 Trade
                               </Button>
@@ -756,7 +755,7 @@ export default function Portfolio() {
                                 Transfer to Perp
                               </Button>
                             ) : (
-                              <Link href={`/trading?coin=${balance.coin}`}>
+                              <Link to={`/trading?coin=${balance.coin}`}>
                                 <Button variant="outline" size="sm" data-testid={`button-trade-spot-${balance.coin}`}>
                                   Trade
                                 </Button>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useNavigate } from "react-router-dom";
 import { Wallet, Shield, CheckCircle2, Loader2, AlertCircle, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -25,7 +25,7 @@ interface OnboardingFlowProps {
 }
 
 export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowProps) {
-  const [, navigate] = useLocation();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const {
     address,
