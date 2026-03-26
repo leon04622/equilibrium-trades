@@ -499,12 +499,13 @@ export function ChartOrderLines({
       dragPriceRef.current = line.price;
       setDragPrice(line.price);
       setDragging(line.editType!);
+      onDraggingChange?.(true);
       onTpslDragVisual?.(line.editType!, line.price);
       if (slDragDebugEnabled() && line.editType === "sl") {
         console.debug("[chart SL drag] start", line.price);
       }
     },
-    [onTpslDragVisual],
+    [onTpslDragVisual, onDraggingChange],
   );
 
   if (!position) return null;
