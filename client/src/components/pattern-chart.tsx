@@ -219,20 +219,6 @@ function PatternChartComponent({
     }
   }, []);
 
-  /** Same origin as coordinateToPrice — TP/SL hit layer must use this for Y, not the overlay div top. */
-  const tpslPaneClientTop = useCallback((): number | null => {
-    try {
-      const chart = mainChartRef.current;
-      if (!chart) return null;
-      const pane0 = chart.panes()[0];
-      const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
-      if (!paneEl) return null;
-      return paneEl.getBoundingClientRect().top;
-    } catch {
-      return null;
-    }
-  }, []);
-
   const onTpslDragVisual = useCallback((kind: "tp" | "sl", price: number) => {
     const r = tpslLineRefs.current;
     if (kind === "tp") {
@@ -797,8 +783,8 @@ function PatternChartComponent({
       tpslLineRefs.current.tp = series.createPriceLine({
         price: tpPrice,
         color: HL_TP,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
         axisLabelVisible: false,
       });
     } else if (ghostTp != null) {
@@ -815,8 +801,8 @@ function PatternChartComponent({
       tpslLineRefs.current.sl = series.createPriceLine({
         price: slPrice,
         color: HL_SL,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
         axisLabelVisible: false,
       });
     } else if (ghostSl != null) {
@@ -857,7 +843,6 @@ function PatternChartComponent({
           nativeTpslLines
           onTpslDragVisual={onTpslDragVisual}
           onDraggingChange={onTpslDraggingChange}
-          tpslPaneClientTop={tpslPaneClientTop}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
