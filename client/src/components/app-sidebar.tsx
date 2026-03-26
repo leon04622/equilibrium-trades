@@ -30,6 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/lib/wallet-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useChat } from "@/lib/chat-context";
 import { useQuery } from "@tanstack/react-query";
 
@@ -92,8 +93,9 @@ function pathMatches(pathname: string, url: string): boolean {
 export function AppSidebar() {
   const { pathname } = useLocation();
   const { address } = useWallet();
-  const { isMasterAdmin, masterConfigured } = useIsMasterAdmin();
-  const showAdminNav = masterConfigured && isMasterAdmin;
+  const { isMasterAdmin } = useIsMasterAdmin();
+  const { isAdmin: isAppAdmin } = useIsAdmin();
+  const showAdminNav = isMasterAdmin || isAppAdmin;
   const { openChat, openSupportInbox } = useChat();
 
   const { data: supportConversations = [] } = useQuery<

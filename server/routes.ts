@@ -70,11 +70,15 @@ function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
   return isAdminAddress(walletAddress) || isMasterAdminAddress(walletAddress);
 }
 
-/** POST /api/videos and POST /api/admin/videos — same body; master wallet only (`x-wallet-address`). */
+/** POST /api/videos and POST /api/admin/videos — same body; master or `ADMIN_WALLET_ADDRESSES` (`x-wallet-address`). */
 async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  const gate = requireMasterAdminWallet(req);
-  if (!gate.ok) {
-    res.status(gate.status).json({ error: gate.error });
+  const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+  if (!walletAddress) {
+    res.status(401).json({ error: "x-wallet-address header required" });
+    return;
+  }
+  if (!isAppAdminWallet(walletAddress)) {
+    res.status(403).json({ error: "Admin access required" });
     return;
   }
   try {
@@ -109,9 +113,13 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
 }
 
 async function deleteCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  const gate = requireMasterAdminWallet(req);
-  if (!gate.ok) {
-    res.status(gate.status).json({ error: gate.error });
+  const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+  if (!walletAddress) {
+    res.status(401).json({ error: "x-wallet-address header required" });
+    return;
+  }
+  if (!isAppAdminWallet(walletAddress)) {
+    res.status(403).json({ error: "Admin access required" });
     return;
   }
   try {

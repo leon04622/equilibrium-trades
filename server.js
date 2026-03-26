@@ -14,12 +14,13 @@
  * • messages (Support) → table `support_tickets` — chat + Telegram webhook when env is set
  *
  * Master wallet: `ADMIN_EQUILIBRIUM_MASTER_WALLET=0xYourAddress`
- * Command Center client: `/admin` — sends header `x-wallet-address` (must match master).
+ * App admins: `ADMIN_WALLET_ADDRESSES` — video CRUD; CRM tabs in UI stay master-only.
+ * Command Center client: `/admin` — sends header `x-wallet-address`.
  *
  * ── Videos (Vault + Command Center) ──
  * GET    /api/videos              — public list for Educational Vault
- * POST   /api/videos              — master only; JSON { title, category, videoUrl, description?, thumbnailUrl? }
- * DELETE /api/videos/:id          — master only
+ * POST   /api/videos              — master or admin list; JSON { title, category, videoUrl, description?, thumbnailUrl? }
+ * DELETE /api/videos/:id          — master or admin list
  * POST   /api/admin/videos        — alias of POST /api/videos
  * DELETE /api/admin/videos/:id    — alias of DELETE /api/videos/:id
  *

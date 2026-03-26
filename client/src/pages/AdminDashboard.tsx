@@ -35,6 +35,7 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ export default function AdminDashboard() {
   const { address } = useWallet();
   const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
+  const { isAdmin: isAppAdmin, isLoading: appAdminLoading } = useIsAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useAdminApi(address ?? undefined);
@@ -103,11 +105,14 @@ export default function AdminDashboard() {
   const [vaultThumb, setVaultThumb] = useState("");
   const [vaultSearch, setVaultSearch] = useState("");
 
-  /** Command Center UI and video CRUD: configured master wallet only (server enforces the same). */
+  /** Master: full CRM + videos. App admins (`ADMIN_WALLET_ADDRESSES`): videos when master is set, or full entry if master env unset. */
   const showCrmTabs = isMasterAdmin;
-  const canManageVideos = isMasterAdmin;
-  const canAccessCommandCenter = !!address && masterConfigured && isMasterAdmin;
-  const accessGateLoading = adminCheckLoading;
+  const canManageVideos = isMasterAdmin || isAppAdmin;
+  const canAccessCommandCenter =
+    !!address &&
+    ((masterConfigured && (isMasterAdmin || isAppAdmin)) || (!masterConfigured && isAppAdmin));
+  const accessGateLoading =
+    adminCheckLoading || (!!address && !isMasterAdmin && appAdminLoading);
 
   useEffect(() => {
     if (address && isMasterAdmin) {
@@ -294,7 +299,7 @@ export default function AdminDashboard() {
         thumbnailUrl: thumb || undefined,
         category: vaultCategory.trim(),
       });
-      if (status === 401 || status === 403 || status === 503) {
+      if (status === 401 || status === 403) {
         throw new Error((data as { error?: string })?.error || "Unauthorized");
       }
       if (status < 200 || status >= 300) {
@@ -319,7 +324,7 @@ export default function AdminDashboard() {
   const deleteVaultVideo = useMutation({
     mutationFn: async (id: string) => {
       const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
-      if (status === 401 || status === 403 || status === 503) {
+      if (status === 401 || status === 403) {
         throw new Error((data as { error?: string })?.error || "Unauthorized");
       }
       if (status < 200 || status >= 300) {
@@ -389,21 +394,23 @@ export default function AdminDashboard() {
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Command Center</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Connect the master wallet configured as{" "}
-          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server.
+          Connect an admin wallet: the address in{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> and/or{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>.
         </p>
       </div>
     );
   }
 
   if (!canAccessCommandCenter) {
-    if (!masterConfigured) {
+    if (!masterConfigured && !isAppAdmin) {
       return (
         <div className="p-8 max-w-lg">
           <h1 className="text-2xl font-semibold tracking-tight">Admin — not configured</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on the server to your
-            wallet address. Only that master wallet can open the Command Center, CRM, support inbox, and video library tools.
+            Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> for the Command Center
+            CRM, or add your wallet to <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code> for video
+            tools.
           </p>
         </div>
       );
@@ -412,9 +419,9 @@ export default function AdminDashboard() {
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Access denied</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Connect the wallet that matches{" "}
-          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>. No other wallet can use the
-          Command Center.
+          This wallet is not the master admin or an allowed admin address. CRM needs{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> to match your address; video
+          tools also accept <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>.
         </p>
       </div>
     );
@@ -430,7 +437,7 @@ export default function AdminDashboard() {
             <p className="text-xs text-muted-foreground">
               {showCrmTabs
                 ? `CRM · Messages · Videos · Manual Pro $${TIER_PRO}`
-                : "Video library — master wallet only."}
+                : "Video library — add or remove lessons (CRM requires master wallet)."}
             </p>
           </div>
         </div>
