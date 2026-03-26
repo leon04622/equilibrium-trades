@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { PatternChart } from "@/components/pattern-chart";
@@ -14,19 +14,19 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useSubscription } from "@/hooks/use-subscription";
 import { usePaywall } from "@/lib/paywall-context";
 import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { hasHyperliquidBuilderFeeApproved } from "@/lib/hyperliquid-client";
-import { isBuilderFeeConfigured } from "@/lib/hyperliquid-platform-config";
 import { cn } from "@/lib/utils";
 import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
 
 const LS_COIN = "eq_trading_coin";
 const LS_TF = "eq_trading_timeframe";
 const LS_CHART_ENGINE = "eq_chart_engine";
+const LS_CHART_FLEX = "eq_trading_chart_flex_ratio";
 
 type ChartEngine = "hyperliquid" | "tradingview";
 
@@ -98,13 +98,53 @@ export default function Trading({ visible = true }: TradingProps) {
     prepareHyperliquidSession,
   } = useWallet();
 
-  const showBuilderFeeNudge =
-    Boolean(walletAddr) &&
-    builderCodeApproved &&
-    hyperliquidSessionReady &&
-    isBuilderFeeConfigured() &&
-    !hasHyperliquidBuilderFeeApproved(walletAddr!);
   const [location] = useLocation();
+  const isMobile = useIsMobile();
+  const desktopSplit = !isMobile && !isFullscreen;
+
+  /** Flex weight for chart block vs bottom panel (desktop); higher = taller chart. */
+  const [chartFlexWeight, setChartFlexWeight] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem(LS_CHART_FLEX) || "");
+      if (Number.isFinite(v)) return Math.min(9, Math.max(3, Math.round(v)));
+    } catch { /* ignore */ }
+    return 6;
+  });
+  const splitDragRef = useRef<{ startY: number; startWeight: number; totalH: number } | null>(null);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_CHART_FLEX, String(chartFlexWeight));
+    } catch { /* ignore */ }
+  }, [chartFlexWeight]);
+
+  const bottomFlexWeight = Math.max(2, 11 - chartFlexWeight);
+
+  const onSplitPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const el = splitContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    splitDragRef.current = { startY: e.clientY, startWeight: chartFlexWeight, totalH: rect.height };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [chartFlexWeight]);
+
+  const onSplitPointerMove = useCallback((e: React.PointerEvent) => {
+    const d = splitDragRef.current;
+    if (!d) return;
+    const deltaY = e.clientY - d.startY;
+    const sens = 10 / Math.max(d.totalH, 320);
+    const next = Math.min(9, Math.max(3, Math.round(d.startWeight - deltaY * sens)));
+    setChartFlexWeight(next);
+  }, []);
+
+  const onSplitPointerUp = useCallback((e: React.PointerEvent) => {
+    splitDragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch { /* ignore */ }
+  }, []);
 
   // When navigating to /trading?coin=XXX (e.g. from portfolio Trade button),
   // update the selected coin. Wouter includes query string in location, so
@@ -281,7 +321,7 @@ export default function Trading({ visible = true }: TradingProps) {
         isFullscreen && "hidden md:flex",
         isConnected &&
           !builderCheckLoading &&
-          (!builderCodeApproved || !hyperliquidSessionReady || showBuilderFeeNudge) &&
+          (!builderCodeApproved || !hyperliquidSessionReady) &&
           "pt-10 md:pt-10"
       )}>
         {isConnected && !builderCheckLoading && !builderCodeApproved && (
@@ -311,26 +351,12 @@ export default function Trading({ visible = true }: TradingProps) {
               </Button>
             </div>
           )}
-        {isConnected &&
-          !builderCheckLoading &&
-          showBuilderFeeNudge && (
-            <div className="absolute left-0 right-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-violet-500/10 border-b border-violet-500/30 px-3 py-2 text-[11px] md:text-xs text-violet-100">
-              <span className="font-medium">Optional: approve builder fee</span>
-              <span className="hidden sm:inline opacity-90">
-                — Adds platform attribution on your Hyperliquid orders. You can trade without it.
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="h-7 text-[10px] md:text-xs shrink-0"
-                disabled={isPreparingHyperliquidSession}
-                onClick={() => prepareHyperliquidSession()}
-              >
-                {isPreparingHyperliquidSession ? "Wallet…" : "Approve in wallet"}
-              </Button>
-            </div>
-          )}
+        <p
+          className="absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-1/2 pointer-events-none text-center text-[10px] md:text-[11px] text-muted-foreground px-2 max-w-[min(92vw,420px)]"
+          aria-live="polite"
+        >
+          This is not financial advice.
+        </p>
         <SymbolSelector currentSymbol={coin} onSymbolChange={setCoin} />
         
         <Separator orientation="vertical" className="h-6 hidden sm:block" />
@@ -442,9 +468,21 @@ export default function Trading({ visible = true }: TradingProps) {
         </button>
       </div>
 
-      {/* Main trading area - fills remaining space */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left side - Chart */}
+      {/* Main trading area: chart + order column, optional resize bar, bottom panel */}
+      <div ref={splitContainerRef} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div
+          className={cn(
+            "flex min-h-0 overflow-hidden",
+            isFullscreen ? "flex-1 flex-row" : "flex-1 flex-row min-h-[200px]",
+          )}
+          style={
+            isFullscreen
+              ? { flex: "1 1 0%", minHeight: 0 }
+              : desktopSplit
+                ? { flex: `${chartFlexWeight} 1 220px`, minHeight: 200 }
+                : { flex: "1 1 0%", minHeight: 0 }
+          }
+        >
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Chart toolbar - only show when chart tab is active on mobile */}
           <div className={cn(
@@ -467,33 +505,8 @@ export default function Trading({ visible = true }: TradingProps) {
                 TV: use <strong className="text-foreground">AI</strong> for chart TP/SL (Hyperliquid-style drag)
               </span>
             )}
-            <div
-              className="flex items-center gap-0.5 shrink-0 border-r border-border/50 pr-1 mr-0.5"
-              title="AI = native chart with draggable TP/SL lines (like Hyperliquid). TV = embedded TradingView only."
-            >
-              <Button
-                type="button"
-                variant={chartEngine === "hyperliquid" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-6 px-2 text-[10px] font-semibold"
-                onClick={() => setChartEngine("hyperliquid")}
-                data-testid="chart-engine-ai"
-              >
-                AI
-              </Button>
-              <Button
-                type="button"
-                variant={chartEngine === "tradingview" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-6 px-2 text-[10px] font-semibold"
-                onClick={() => setChartEngine("tradingview")}
-                data-testid="chart-engine-tv"
-              >
-                TV
-              </Button>
-            </div>
-            
-            <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1">
+
+            <div className="flex items-center gap-0.5 md:gap-1 overflow-x-auto flex-1 min-w-0">
               {timeframes.map((tf) => (
                 <Button
                   key={tf.value}
@@ -508,7 +521,32 @@ export default function Trading({ visible = true }: TradingProps) {
               ))}
             </div>
             
-            <div className="flex flex-wrap items-center gap-2 md:gap-4 justify-end shrink-0">
+            <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
+              <div
+                className="flex items-center gap-0 shrink-0 rounded-md border border-border/60 overflow-hidden bg-muted/20"
+                title="AI = native chart with draggable TP/SL lines (like Hyperliquid). TV = embedded TradingView only."
+              >
+                <Button
+                  type="button"
+                  variant={chartEngine === "hyperliquid" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 px-2 text-[10px] font-semibold rounded-none"
+                  onClick={() => setChartEngine("hyperliquid")}
+                  data-testid="chart-engine-ai"
+                >
+                  AI
+                </Button>
+                <Button
+                  type="button"
+                  variant={chartEngine === "tradingview" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 px-2 text-[10px] font-semibold rounded-none border-l border-border/50"
+                  onClick={() => setChartEngine("tradingview")}
+                  data-testid="chart-engine-tv"
+                >
+                  TV
+                </Button>
+              </div>
               {chartEngine === "hyperliquid" && (
                 <>
                   <div className="flex items-center gap-1.5">
@@ -660,7 +698,7 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
 
         {/* Right side - Order Entry Panel */}
-        <div className="w-72 xl:w-80 border-l flex flex-col bg-card/30 hidden md:flex">
+        <div className="w-72 xl:w-80 border-l flex flex-col bg-card/30 hidden md:flex shrink-0">
           <div className="flex-1 overflow-y-auto">
             <div className="p-3 space-y-3">
               <OrderEntry 
@@ -673,11 +711,43 @@ export default function Trading({ visible = true }: TradingProps) {
             </div>
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* Bottom - Positions and Orders Panel (Hyperliquid style) - hidden in fullscreen on mobile */}
-      <div className={cn(isFullscreen && "hidden md:block")}>
-        <BottomTradingPanel coin={coin} onCoinChange={setCoin} />
+        {desktopSplit && (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Drag to resize chart and positions panel"
+            className="hidden md:flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-border/50 bg-muted/25 hover:bg-muted/45 touch-none select-none"
+            onPointerDown={onSplitPointerDown}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={onSplitPointerUp}
+            onPointerCancel={onSplitPointerUp}
+          >
+            <div className="h-1 w-16 rounded-full bg-border shadow-sm" />
+          </div>
+        )}
+
+        {(!isFullscreen || !isMobile) && (
+          <div
+            className={cn(
+              "shrink-0 border-t border-border/60 bg-background",
+              isFullscreen && "hidden md:block",
+              desktopSplit && "md:min-h-0 md:overflow-hidden",
+            )}
+            style={
+              desktopSplit
+                ? {
+                    flex: `${bottomFlexWeight} 1 140px`,
+                    minHeight: 100,
+                    maxHeight: "min(52vh, 480px)",
+                  }
+                : undefined
+            }
+          >
+            <BottomTradingPanel coin={coin} onCoinChange={setCoin} />
+          </div>
+        )}
       </div>
 
       {/* Mobile Order Entry Button - positioned above the collapsed bottom panel - hidden in fullscreen */}

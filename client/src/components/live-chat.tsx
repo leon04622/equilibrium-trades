@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { MessageCircle, X, Send, Shield, User, Minimize2, Loader2, ArrowLeft } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
+import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { SupportMessage } from "@shared/schema";
 
@@ -56,6 +57,7 @@ function playNotificationSound() {
 
 export function LiveChat() {
   const { isOpen, openChat, closeChat, pendingMessage, clearPendingMessage } = useChat();
+  const { toast } = useToast();
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -162,6 +164,13 @@ export function LiveChat() {
       refetchMessages();
       if (isAdmin) refetchConversations();
     },
+    onError: (err: Error) => {
+      toast({
+        title: "Message not sent",
+        description: err.message || "Check your connection and try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   useEffect(() => {
@@ -190,8 +199,8 @@ export function LiveChat() {
         </span>
       )}
       {!isAdmin && (
-        <span className="flex h-2 w-2 shrink-0">
-          <span className="animate-ping absolute h-2 w-2 rounded-full bg-green-400 opacity-75" />
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-green-400 opacity-75" />
           <span className="relative h-2 w-2 rounded-full bg-green-500" />
         </span>
       )}
@@ -256,9 +265,9 @@ export function LiveChat() {
       </div>
 
       {!isMinimized && (
-        <>
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
           {isAdmin && !selectedConversation ? (
-            <ScrollArea className="flex-1 p-3">
+            <ScrollArea className="flex-1 min-h-0 p-3">
               {conversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-12">
                   <MessageCircle className="h-12 w-12 text-muted-foreground/30 mb-3" />
@@ -304,12 +313,15 @@ export function LiveChat() {
             </ScrollArea>
           ) : (
             <>
-              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+              <div
+                ref={scrollRef}
+                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 overscroll-contain"
+              >
                 <div className="space-y-4">
                   {messages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full py-8">
+                    <div className="flex flex-col items-center justify-center min-h-[120px] py-8">
                       <MessageCircle className="h-10 w-10 text-muted-foreground/30 mb-2" />
-                      <p className="text-sm text-muted-foreground text-center">
+                      <p className="text-sm text-muted-foreground text-center px-2">
                         {isAdmin ? "No messages yet in this conversation." : "Send us a message and we'll reply soon!"}
                       </p>
                     </div>
@@ -375,7 +387,7 @@ export function LiveChat() {
                     </div>
                   </div>
                 )}
-              </ScrollArea>
+              </div>
 
               <div className="p-3 border-t">
                 <form
@@ -409,7 +421,7 @@ export function LiveChat() {
               </div>
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   );
