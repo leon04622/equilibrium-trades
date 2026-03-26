@@ -64,6 +64,7 @@ const SIDEBAR_ICON_W = "3.5rem";
 export function LiveChat() {
   const {
     isOpen,
+    openChat,
     closeChat,
     pendingMessage,
     clearPendingMessage,
@@ -511,6 +512,24 @@ export function LiveChat() {
     </div>
   );
 
-  if (!isOpen) return null;
-  return createPortal(chatContent, document.body);
+  const launcher = !isOpen ? (
+    <Button
+      type="button"
+      size="icon"
+      className="fixed bottom-20 right-4 z-[99950] h-12 w-12 rounded-full shadow-lg md:bottom-6 md:right-6"
+      onClick={() => openChat()}
+      aria-label="Open support chat"
+      data-testid="button-open-live-chat"
+    >
+      <MessageCircle className="h-6 w-6" />
+    </Button>
+  ) : null;
+
+  return createPortal(
+    <>
+      {launcher}
+      {chatContent}
+    </>,
+    document.body,
+  );
 }

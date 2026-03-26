@@ -117,6 +117,8 @@ export class MemStorage implements IStorage {
   private walletUsersCache: Map<string, WalletUser>;
   /** In-memory tutorial videos when DATABASE_URL is unset (dev / no DB). */
   private tutorialVideosMem: TutorialVideo[] = [];
+  /** In-memory support tickets when DATABASE_URL is unset — chat send/receive works for the running server process. */
+  private supportTicketsMem: SupportMessage[] = [];
 
   constructor() {
     this.users = new Map();
@@ -726,10 +728,15 @@ export class MemStorage implements IStorage {
 
   // Support Messages - Using database for persistence
   async getMessages(conversationId: string): Promise<SupportMessage[]> {
-    if (!db) return [];
+    const cid = conversationId.toLowerCase();
+    if (!db) {
+      return this.supportTicketsMem
+        .filter((m) => m.conversationId.toLowerCase() === cid)
+        .sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
+    }
     try {
       const messages = await db.select().from(supportTickets)
-        .where(eq(supportTickets.conversationId, conversationId.toLowerCase()))
+        .where(eq(supportTickets.conversationId, cid))
         .orderBy(supportTickets.createdAt);
       return messages;
     } catch {
@@ -738,7 +745,12 @@ export class MemStorage implements IStorage {
   }
 
   async getAllSupportMessages(limit = 500): Promise<SupportMessage[]> {
-    if (!db) return [];
+    if (!db) {
+      const cap = Math.min(Math.max(limit, 1), 2000);
+      return [...this.supportTicketsMem]
+        .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
+        .slice(0, cap);
+    }
     try {
       return await db
         .select()
@@ -750,25 +762,32 @@ export class MemStorage implements IStorage {
     }
   }
 
+  private buildConversationsFromMessages(messages: SupportMessage[]): { conversationId: string; lastMessage: SupportMessage; unreadCount: number }[] {
+    const conversationMap = new Map<string, { messages: SupportMessage[] }>();
+    for (const msg of messages) {
+      const convId = msg.conversationId.toLowerCase();
+      if (!conversationMap.has(convId)) {
+        conversationMap.set(convId, { messages: [] });
+      }
+      conversationMap.get(convId)!.messages.push(msg);
+    }
+    return Array.from(conversationMap.entries()).map(([conversationId, data]) => ({
+      conversationId,
+      lastMessage: data.messages[0],
+      unreadCount: data.messages.filter((m) => !m.isRead && m.senderType === "user").length,
+    }));
+  }
+
   async getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]> {
-    if (!db) return [];
+    if (!db) {
+      const sorted = [...this.supportTicketsMem].sort(
+        (a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0),
+      );
+      return this.buildConversationsFromMessages(sorted);
+    }
     try {
       const messages = await db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt));
-      
-      const conversationMap = new Map<string, { messages: SupportMessage[] }>();
-      for (const msg of messages) {
-        const convId = msg.conversationId.toLowerCase();
-        if (!conversationMap.has(convId)) {
-          conversationMap.set(convId, { messages: [] });
-        }
-        conversationMap.get(convId)!.messages.push(msg);
-      }
-      
-      return Array.from(conversationMap.entries()).map(([conversationId, data]) => ({
-        conversationId,
-        lastMessage: data.messages[0],
-        unreadCount: data.messages.filter(m => !m.isRead && m.senderType === 'user').length,
-      }));
+      return this.buildConversationsFromMessages(messages);
     } catch {
       return [];
     }
@@ -777,7 +796,7 @@ export class MemStorage implements IStorage {
   async createMessage(message: InsertSupportMessage): Promise<SupportMessage> {
     try {
       if (!db) {
-        return {
+        const row: SupportMessage = {
           id: randomUUID(),
           senderType: message.senderType,
           senderWallet: message.senderWallet?.toLowerCase() || null,
@@ -789,6 +808,8 @@ export class MemStorage implements IStorage {
           clientSentAt: message.clientSentAt ?? null,
           createdAt: new Date(),
         };
+        this.supportTicketsMem.push(row);
+        return row;
       }
       const [newMessage] = await db.insert(supportTickets).values({
         senderType: message.senderType,
@@ -818,11 +839,17 @@ export class MemStorage implements IStorage {
   }
 
   async markMessagesAsRead(conversationId: string): Promise<void> {
-    if (!db) return;
+    const cid = conversationId.toLowerCase();
+    if (!db) {
+      for (const m of this.supportTicketsMem) {
+        if (m.conversationId.toLowerCase() === cid) m.isRead = true;
+      }
+      return;
+    }
     try {
       await db.update(supportTickets)
         .set({ isRead: true })
-        .where(eq(supportTickets.conversationId, conversationId.toLowerCase()));
+        .where(eq(supportTickets.conversationId, cid));
     } catch {
       // ignore if DB is down
     }

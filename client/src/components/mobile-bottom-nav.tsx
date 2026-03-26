@@ -1,12 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
-import { BarChart3, TrendingUp, User, BookOpen, Home, Shield } from "lucide-react";
+import { BarChart3, TrendingUp, User, GraduationCap, Home, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 
 const baseItems = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/trading", icon: TrendingUp, label: "Trade" },
-  { to: "/patterns", icon: BookOpen, label: "Learn" },
+  { to: "/learn", icon: GraduationCap, label: "Learn" },
   { to: "/portfolio", icon: BarChart3, label: "Portfolio" },
   { to: "/settings", icon: User, label: "Account" },
 ];

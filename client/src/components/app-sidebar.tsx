@@ -48,6 +48,11 @@ const mainNavItems = [
 
 const learnNavItems = [
   {
+    title: "Courses",
+    url: "/learn",
+    icon: GraduationCap,
+  },
+  {
     title: "Videos",
     url: "/videos",
     icon: Play,
