@@ -101,6 +101,8 @@ export const tutorialVideos = pgTable("tutorial_videos", {
   youtubeId: text("youtube_id"),
   videoPath: text("video_path"),
   thumbnailPath: text("thumbnail_path"),
+  /** Educational Vault section: beginner_patterns | sma_masterclass | live_sessions */
+  academySection: text("academy_section"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -117,18 +119,51 @@ const optionalTrimmed = z
     return t === "" ? undefined : t;
   });
 
+export const academySectionSchema = z.enum([
+  "beginner_patterns",
+  "sma_masterclass",
+  "live_sessions",
+]);
+
+export type AcademySection = z.infer<typeof academySectionSchema>;
+
 export const insertVideoSchema = z
   .object({
     title: z.string().trim().min(1, "Title is required"),
     description: z.string().trim().min(1, "Description is required"),
     duration: z.string().optional().default(""),
-    category: z.enum(["strategy", "platform", "tips"]),
+    category: z.enum(["strategy", "platform", "tips"]).optional(),
     youtubeId: optionalTrimmed,
     videoPath: optionalTrimmed,
     thumbnailPath: optionalTrimmed,
+    academySection: academySectionSchema.optional().nullable(),
   })
-  .refine((data) => !!(data.youtubeId || data.videoPath), {
-    message: "Either YouTube ID or uploaded video is required",
+  .superRefine((data, ctx) => {
+    if (!data.youtubeId && !data.videoPath) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "YouTube ID, video URL (Vimeo/MP4), or uploaded file path is required",
+      });
+    }
+  })
+  .transform((data) => {
+    let category = data.category;
+    if (!category) {
+      if (data.academySection === "beginner_patterns") category = "strategy";
+      else if (data.academySection === "sma_masterclass") category = "platform";
+      else if (data.academySection === "live_sessions") category = "tips";
+      else category = "strategy";
+    }
+    return {
+      title: data.title,
+      description: data.description,
+      duration: data.duration || "",
+      category,
+      youtubeId: data.youtubeId,
+      videoPath: data.videoPath,
+      thumbnailPath: data.thumbnailPath,
+      academySection: data.academySection ?? null,
+    };
   });
 
 // Wallet Users - Database table for persistent storage

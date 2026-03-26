@@ -14,8 +14,10 @@ import {
   Sparkles,
   MessageCircle,
   ExternalLink,
+  Video,
+  Trash2,
 } from "lucide-react";
-import type { WalletUser, SupportMessage } from "@shared/schema";
+import type { AcademySection, WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +39,16 @@ import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO, TIER_MENTOR } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
+import { VAULT_SECTION_META } from "@/lib/video-vault";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-type TabKey = "users" | "support" | "analytics";
+type TabKey = "users" | "support" | "analytics" | "videos";
 
 function useAdminApi(address: string | undefined): AxiosInstance {
   return useMemo(() => {
@@ -68,6 +78,11 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState("");
   const [replyConv, setReplyConv] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [vaultTitle, setVaultTitle] = useState("");
+  const [vaultDescription, setVaultDescription] = useState("");
+  const [vaultUrl, setVaultUrl] = useState("");
+  const [vaultThumb, setVaultThumb] = useState("");
+  const [vaultSection, setVaultSection] = useState<AcademySection>("beginner_patterns");
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
     queryKey: ["admin-rest", "users", address],
@@ -88,6 +103,17 @@ export default function AdminDashboard() {
       const { data, status } = await api.get<SupportMessage[]>("/api/messages", { params: { limit: 800 } });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status !== 200) throw new Error("Failed to load messages");
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
+  const { data: vaultVideos = [], isLoading: vaultLoading, refetch: refetchVault } = useQuery({
+    queryKey: ["admin-rest", "vault-videos", address],
+    enabled: !!address && isMasterAdmin && tab === "videos",
+    queryFn: async () => {
+      const { data, status } = await api.get<TutorialVideo[]>("/api/videos");
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status !== 200) throw new Error("Failed to load videos");
       return Array.isArray(data) ? data : [];
     },
   });
@@ -158,6 +184,56 @@ export default function AdminDashboard() {
       toast({ title: "Override applied" });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const addVaultVideo = useMutation({
+    mutationFn: async () => {
+      if (!vaultTitle.trim() || !vaultDescription.trim() || !vaultUrl.trim()) {
+        throw new Error("Title, description, and video URL are required");
+      }
+      const { data, status } = await api.post("/api/videos", {
+        title: vaultTitle.trim(),
+        description: vaultDescription.trim(),
+        videoUrl: vaultUrl.trim(),
+        thumbnailPath: vaultThumb.trim() || undefined,
+        academySection: vaultSection,
+      });
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) {
+        throw new Error((data as { error?: string })?.error || "Failed to add video");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      setVaultTitle("");
+      setVaultDescription("");
+      setVaultUrl("");
+      setVaultThumb("");
+      setVaultSection("beginner_patterns");
+      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
+      toast({ title: "Video published", description: "Visible in Educational Vault for Pro users." });
+      void refetchVault();
+    },
+    onError: (e: Error) => toast({ title: "Add failed", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteVaultVideo = useMutation({
+    mutationFn: async (id: string) => {
+      const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) {
+        throw new Error((data as { error?: string })?.error || "Delete failed");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
+      toast({ title: "Video removed" });
+      void refetchVault();
+    },
+    onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
   });
 
   const sendReply = useMutation({
@@ -258,6 +334,7 @@ export default function AdminDashboard() {
           {nav("users", "CRM & users", <Users className="h-4 w-4" />)}
           {nav("support", "Support tickets", <MessageSquare className="h-4 w-4" />)}
           {nav("analytics", "L1 analytics", <BarChart3 className="h-4 w-4" />)}
+          {nav("videos", "Video management", <Video className="h-4 w-4" />)}
         </aside>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -480,6 +557,147 @@ export default function AdminDashboard() {
                 {l1?.note && <p className="text-xs text-muted-foreground mt-4 border-t pt-3">{l1.note}</p>}
               </CardContent>
             </Card>
+          )}
+
+          {tab === "videos" && (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Publish to Educational Vault</CardTitle>
+                  <CardDescription>
+                    Paste a YouTube, Vimeo, or direct MP4 URL — appears under Videos for active Pro subscribers after
+                    save.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 max-w-xl">
+                  <div className="space-y-1">
+                    <Label>Title</Label>
+                    <Input value={vaultTitle} onChange={(e) => setVaultTitle(e.target.value)} placeholder="Lesson title" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Description</Label>
+                    <Textarea
+                      rows={3}
+                      value={vaultDescription}
+                      onChange={(e) => setVaultDescription(e.target.value)}
+                      placeholder="Short summary for the vault card"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Video URL</Label>
+                    <Input
+                      value={vaultUrl}
+                      onChange={(e) => setVaultUrl(e.target.value)}
+                      placeholder="https://youtube.com/... or https://vimeo.com/... or .mp4"
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Thumbnail URL (optional)</Label>
+                    <Input
+                      value={vaultThumb}
+                      onChange={(e) => setVaultThumb(e.target.value)}
+                      placeholder="https://..."
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Academy section</Label>
+                    <Select
+                      value={vaultSection}
+                      onValueChange={(v) => setVaultSection(v as AcademySection)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VAULT_SECTION_META.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    className="w-full sm:w-auto"
+                    disabled={addVaultVideo.isPending}
+                    onClick={() => addVaultVideo.mutate()}
+                  >
+                    {addVaultVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Publish video"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Vault library (CRM)</CardTitle>
+                    <CardDescription>Stored in `tutorial_videos` — delete to remove from Pro vault.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="icon" onClick={() => void refetchVault()} disabled={vaultLoading}>
+                    <RefreshCw className={cn("h-4 w-4", vaultLoading && "animate-spin")} />
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {vaultLoading ? (
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  ) : (
+                    <ScrollArea className="h-[min(50vh,420px)]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Title</TableHead>
+                            <TableHead>Section</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {vaultVideos.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={3} className="text-muted-foreground text-sm">
+                                No CRM videos yet — only curated seeds show in the vault until you publish.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            vaultVideos.map((v) => (
+                              <TableRow key={v.id}>
+                                <TableCell className="max-w-[200px]">
+                                  <div className="font-medium text-sm line-clamp-2">{v.title}</div>
+                                  <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                    {v.youtubeId ? `yt:${v.youtubeId}` : v.videoPath || "—"}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {v.academySection
+                                    ? VAULT_SECTION_META.find((m) => m.id === v.academySection)?.label ?? v.academySection
+                                    : v.category}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="text-destructive"
+                                    disabled={deleteVaultVideo.isPending}
+                                    onClick={() => {
+                                      if (confirm(`Remove “${v.title}” from the vault?`)) {
+                                        deleteVaultVideo.mutate(v.id);
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           )}
         </div>
       </div>

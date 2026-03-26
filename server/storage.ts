@@ -408,6 +408,7 @@ export class MemStorage implements IStorage {
       youtubeId: video.youtubeId ?? null,
       videoPath: video.videoPath ?? null,
       thumbnailPath: video.thumbnailPath ?? null,
+      academySection: video.academySection ?? null,
       createdAt: new Date(),
     };
     if (!db) {
@@ -424,6 +425,7 @@ export class MemStorage implements IStorage {
         youtubeId: video.youtubeId || null,
         videoPath: video.videoPath || null,
         thumbnailPath: video.thumbnailPath || null,
+        academySection: video.academySection ?? null,
       })
       .returning();
     return newVideo;

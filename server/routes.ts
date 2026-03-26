@@ -446,7 +446,7 @@ export async function registerRoutes(
     }
   });
 
-  // Create video - admin only
+  // Create video - admin only (accept `videoUrl` for YouTube / Vimeo / direct MP4)
   app.post("/api/videos", async (req: Request, res: Response) => {
     try {
       const { insertVideoSchema } = await import("@shared/schema");
@@ -455,8 +455,21 @@ export async function registerRoutes(
       if (!isAppAdminWallet(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
+
+      const body = { ...(req.body && typeof req.body === "object" ? req.body : {}) } as Record<string, unknown>;
+      const hasYt = typeof body.youtubeId === "string" && body.youtubeId.trim().length > 0;
+      const hasVp = typeof body.videoPath === "string" && body.videoPath.trim().length > 0;
+      if (!hasYt && !hasVp && typeof body.videoUrl === "string" && body.videoUrl.trim()) {
+        const url = body.videoUrl.trim();
+        const m = url.match(
+          /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/i,
+        );
+        if (m) body.youtubeId = m[1];
+        else body.videoPath = url;
+      }
+      delete body.videoUrl;
       
-      const validated = insertVideoSchema.safeParse(req.body);
+      const validated = insertVideoSchema.safeParse(body);
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
       }
