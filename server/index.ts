@@ -209,5 +209,18 @@ async function initStripe() {
     if (!d.configured && d.message) {
       log(d.message, "db");
     }
+    const tok = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    const chat = process.env.TELEGRAM_CHAT_ID?.trim();
+    if (tok && chat) {
+      log("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set — user support messages will push to Telegram.", "telegram");
+    } else if (tok && !chat) {
+      log("TELEGRAM_BOT_TOKEN set but TELEGRAM_CHAT_ID missing — configure chat id for alerts.", "telegram");
+    } else {
+      log("TELEGRAM_BOT_TOKEN not set — support tickets still save to DB without phone push.", "telegram");
+    }
+    const mongoAlias = process.env.MONGODB_URI?.trim();
+    if (mongoAlias && !process.env.DATABASE_URL?.trim()) {
+      log("MONGODB_URI is used as the Postgres connection string (this stack is PostgreSQL, not MongoDB).", "db");
+    }
   });
 })();

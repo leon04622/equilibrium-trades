@@ -1,10 +1,5 @@
-import { AdminGuard } from "@/components/admin-guard";
-import AdminDashboard from "@/pages/admin-dashboard";
+import { Redirect } from "wouter";
 
 export default function Admin() {
-  return (
-    <AdminGuard>
-      <AdminDashboard />
-    </AdminGuard>
-  );
+  return <Redirect to="/admin-equilibrium" />;
 }

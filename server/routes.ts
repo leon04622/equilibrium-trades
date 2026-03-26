@@ -1057,6 +1057,13 @@ export async function registerRoutes(
     return handleSupportSendRequest(req, res);
   });
 
+  /** Alias of POST /api/support (persist + Telegram). */
+  app.post("/api/messages", async (req: Request, res: Response) => {
+    const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    req.body = { ...b };
+    return handleSupportSendRequest(req, res);
+  });
+
   /** SSE: push new messages to the trading UI when admin replies (or self echo). */
   app.get("/api/support/stream/:conversationId", async (req: Request, res: Response) => {
     try {
@@ -1217,9 +1224,12 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/command-center/users/:walletAddress/subscription", async (req: Request, res: Response) => {
+  const handleMasterWalletSubscriptionPatch = async (req: Request, res: Response): Promise<void> => {
     const auth = requireMasterAdminWallet(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!auth.ok) {
+      res.status(auth.status).json({ error: auth.error });
+      return;
+    }
     try {
       const { updateSubscriptionSchema } = await import("@shared/schema");
       const paramWallet = decodeURIComponent(req.params.walletAddress);
@@ -1237,7 +1247,8 @@ export async function registerRoutes(
       delete raw.isMentee;
       const validated = updateSubscriptionSchema.safeParse(raw);
       if (!validated.success) {
-        return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+        res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+        return;
       }
       const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
         validated.data;
@@ -1263,6 +1274,31 @@ export async function registerRoutes(
     } catch (error) {
       console.error("command-center subscription:", error);
       res.status(500).json({ error: "Failed to update user" });
+    }
+  };
+
+  app.patch("/api/command-center/users/:walletAddress/subscription", handleMasterWalletSubscriptionPatch);
+  app.patch("/api/users/:walletAddress/subscription", handleMasterWalletSubscriptionPatch);
+
+  // ── Short REST paths for AdminDashboard (same master-wallet auth) ──
+  app.get("/api/users", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      res.json(await storage.getAllWalletUsers());
+    } catch {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/messages", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 2000);
+      res.json(await storage.getAllSupportMessages(limit));
+    } catch {
+      res.status(500).json({ error: "Failed to fetch messages" });
     }
   });
 

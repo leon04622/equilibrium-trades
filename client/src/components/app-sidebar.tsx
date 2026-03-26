@@ -259,10 +259,10 @@ export function AppSidebar() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      isActive={location === "/admin"}
+                      isActive={location === "/admin-equilibrium" || location === "/admin"}
                       data-testid="nav-admin"
                     >
-                      <Link href="/admin">
+                      <Link href="/admin-equilibrium">
                         <Shield className="h-4 w-4" />
                         <span>Command Center</span>
                         <Badge 

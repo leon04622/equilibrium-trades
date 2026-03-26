@@ -97,6 +97,7 @@ export interface IStorage {
   
   // Support Messages
   getMessages(conversationId: string): Promise<SupportMessage[]>;
+  getAllSupportMessages(limit?: number): Promise<SupportMessage[]>;
   getAllConversations(): Promise<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]>;
   createMessage(message: InsertSupportMessage): Promise<SupportMessage>;
   markMessagesAsRead(conversationId: string): Promise<void>;
@@ -731,6 +732,19 @@ export class MemStorage implements IStorage {
         .where(eq(supportTickets.conversationId, conversationId.toLowerCase()))
         .orderBy(supportTickets.createdAt);
       return messages;
+    } catch {
+      return [];
+    }
+  }
+
+  async getAllSupportMessages(limit = 500): Promise<SupportMessage[]> {
+    if (!db) return [];
+    try {
+      return await db
+        .select()
+        .from(supportTickets)
+        .orderBy(desc(supportTickets.createdAt))
+        .limit(Math.min(Math.max(limit, 1), 2000));
     } catch {
       return [];
     }

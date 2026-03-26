@@ -6,20 +6,25 @@ import { useWallet } from "@/lib/wallet-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 
 /**
- * Restricts children to the configured master admin wallet (`ADMIN_EQUILIBRIUM_MASTER_WALLET`).
- * Non-master connected wallets are redirected to the home page.
+ * Master access: server `ADMIN_EQUILIBRIUM_MASTER_WALLET` (via /api/command-center/status).
+ * Optional client double-check: set `VITE_ADMIN_MASTER_WALLET=0x...` at build time so only that address
+ * can render the panel even if the API were misconfigured (does not replace server-side checks on APIs).
  */
 export function AdminGuard({ children }: { children: ReactNode }) {
   const { address } = useWallet();
   const { isMasterAdmin, masterConfigured, isLoading } = useIsMasterAdmin();
   const [, setLocation] = useLocation();
+  const clientExpected = (import.meta.env.VITE_ADMIN_MASTER_WALLET as string | undefined)?.trim().toLowerCase();
+
+  const clientWalletOk =
+    !clientExpected || (address?.trim().toLowerCase() === clientExpected);
 
   useEffect(() => {
     if (isLoading || !address || !masterConfigured) return;
-    if (!isMasterAdmin) {
+    if (!isMasterAdmin || !clientWalletOk) {
       setLocation("/");
     }
-  }, [isLoading, address, masterConfigured, isMasterAdmin, setLocation]);
+  }, [isLoading, address, masterConfigured, isMasterAdmin, clientWalletOk, setLocation]);
 
   if (!address) {
     return (
@@ -60,7 +65,7 @@ export function AdminGuard({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isMasterAdmin) {
+  if (!isMasterAdmin || !clientWalletOk) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[30vh] text-muted-foreground gap-2">
         <Loader2 className="h-6 w-6 animate-spin" />
