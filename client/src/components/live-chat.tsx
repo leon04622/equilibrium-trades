@@ -179,6 +179,41 @@ export function LiveChat() {
     return () => ac.abort();
   }, [conversationId, isOpen, isMinimized, buildHeaders]);
 
+  /** WebSocket fan-out (same payload as SSE) — instant admin replies in the chat bubble. */
+  useEffect(() => {
+    if (!conversationId || !isOpen || isMinimized) return;
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(`${proto}//${window.location.host}/ws/support-chat`);
+      ws.onopen = () => {
+        ws?.send(
+          JSON.stringify({
+            type: "subscribe",
+            conversationId,
+            walletAddress: address || undefined,
+            sessionId: !address && guestId ? guestId : undefined,
+          }),
+        );
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as { type?: string; message?: { id?: string } };
+          if (data?.type === "support_message" && data?.message?.id) {
+            void queryClient.invalidateQueries({ queryKey: ["/api/support/messages", conversationId] });
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      ws?.close();
+    };
+  }, [conversationId, isOpen, isMinimized, address, guestId]);
+
   const { data: conversations = [], refetch: refetchConversations } = useQuery<Conversation[]>({
     queryKey: ["/api/support/conversations"],
     queryFn: async () => {

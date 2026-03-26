@@ -5,6 +5,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { heatmapWSManager } from "./heatmap-ws";
 import { attachCommandCenterDebugWs } from "./admin-debug-ws";
+import { attachSupportChatWs } from "./support-chat-ws";
 import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
@@ -177,6 +178,7 @@ async function initStripe() {
   await registerRoutes(httpServer, app);
 
   attachCommandCenterDebugWs(httpServer);
+  attachSupportChatWs(httpServer);
   heatmapWSManager.initialize(httpServer);
 
   // ── Global error handler ──

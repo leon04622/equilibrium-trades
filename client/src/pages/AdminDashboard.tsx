@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -6,13 +6,9 @@ import {
   Users,
   Shield,
   MessageSquare,
-  BarChart3,
   Loader2,
   RefreshCw,
   Search,
-  Zap,
-  Crown,
-  Sparkles,
   MessageCircle,
   ExternalLink,
   Video,
@@ -20,7 +16,7 @@ import {
   Plus,
   Eye,
 } from "lucide-react";
-import type { AcademySection, WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
+import type { WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,20 +35,11 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
-import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useToast } from "@/hooks/use-toast";
-import { TIER_PRO, TIER_MENTOR } from "@/lib/subscription-pricing";
+import { TIER_PRO } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
-import { VAULT_SECTION_META } from "@/lib/video-vault";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
-type TabKey = "users" | "support" | "analytics" | "videos";
+type TabKey = "users" | "support" | "videos";
 
 function useAdminApi(address: string | undefined): AxiosInstance {
   return useMemo(() => {
@@ -71,11 +58,17 @@ function useAdminApi(address: string | undefined): AxiosInstance {
   }, [address]);
 }
 
+function displaySubTier(tier: string | undefined): string {
+  const t = (tier || "free").toLowerCase();
+  if (t === "mentoring" || t === "elite") return "Mentor";
+  if (t === "pro") return "Pro";
+  return "Free";
+}
+
 export default function AdminDashboard() {
   const { address } = useWallet();
   const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
-  const { isAdmin: isAppAdmin, isLoading: appAdminLoading } = useIsAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useAdminApi(address ?? undefined);
@@ -85,17 +78,14 @@ export default function AdminDashboard() {
   const [replyText, setReplyText] = useState("");
   const [vaultTitle, setVaultTitle] = useState("");
   const [vaultDescription, setVaultDescription] = useState("");
+  const [vaultCategory, setVaultCategory] = useState("");
   const [vaultUrl, setVaultUrl] = useState("");
   const [vaultThumb, setVaultThumb] = useState("");
-  const [vaultSection, setVaultSection] = useState<AcademySection>("beginner_patterns");
   const [vaultSearch, setVaultSearch] = useState("");
 
-  const canAccessCommandCenter =
-    !!address && masterConfigured && (isMasterAdmin || isAppAdmin);
-  const showCrmTabs = isMasterAdmin;
-  const canManageVideos = isMasterAdmin || isAppAdmin;
-  const accessGateLoading =
-    adminCheckLoading || (!!address && !isMasterAdmin && appAdminLoading);
+  /** Server checks `x-wallet-address` against `ADMIN_EQUILIBRIUM_MASTER_WALLET` — same as “YOUR_MASTER_WALLET_ADDRESS” in env. */
+  const canAccessCommandCenter = !!address && masterConfigured && isMasterAdmin;
+  const accessGateLoading = adminCheckLoading;
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
     queryKey: ["admin-rest", "users", address],
@@ -111,9 +101,9 @@ export default function AdminDashboard() {
   const { data: messages = [], isLoading: msgLoading, refetch: refetchMessages } = useQuery({
     queryKey: ["admin-rest", "messages", address],
     enabled: !!address && isMasterAdmin && tab === "support",
-    refetchInterval: tab === "support" ? 8_000 : false,
+    refetchInterval: tab === "support" ? 2500 : false,
     queryFn: async () => {
-      const { data, status } = await api.get<SupportMessage[]>("/api/messages", { params: { limit: 800 } });
+      const { data, status } = await api.get<SupportMessage[]>("/api/support", { params: { limit: 800 } });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status !== 200) throw new Error("Failed to load messages");
       return Array.isArray(data) ? data : [];
@@ -122,7 +112,7 @@ export default function AdminDashboard() {
 
   const { data: vaultVideos = [], isLoading: vaultLoading, refetch: refetchVault } = useQuery({
     queryKey: ["admin-rest", "vault-videos", address],
-    enabled: !!address && canManageVideos && tab === "videos",
+    enabled: !!address && isMasterAdmin && tab === "videos",
     queryFn: async () => {
       const { data, status } = await api.get<TutorialVideo[]>("/api/videos");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
@@ -131,20 +121,39 @@ export default function AdminDashboard() {
     },
   });
 
-  const { data: l1, isLoading: l1Loading, refetch: refetchL1 } = useQuery({
-    queryKey: ["admin-rest", "l1", address],
-    enabled: !!address && isMasterAdmin && tab === "analytics",
-    queryFn: async () => {
-      const { data, status } = await api.get("/api/command-center/analytics/hyperliquid");
-      if (status === 401 || status === 403) throw new Error("Unauthorized");
-      if (status !== 200) throw new Error("Failed to load L1 analytics");
-      return data as {
-        hyperliquid?: { totalDayNotionalVolumeUsd?: number; totalOpenInterestUsd?: number };
-        sovereignCohort?: { instantTradingHandshakeComplete?: number; builderCodeApproved?: number };
-        note?: string;
+  useEffect(() => {
+    if (!address || !isMasterAdmin || tab !== "support") return;
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(`${proto}//${window.location.host}/ws/support-chat`);
+      ws.onopen = () => {
+        ws?.send(
+          JSON.stringify({
+            type: "subscribe",
+            scope: "admin_inbox",
+            walletAddress: address,
+          }),
+        );
       };
-    },
-  });
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as { type?: string; message?: { id?: string } };
+          if (data?.type === "support_message" && data?.message?.id) {
+            void queryClient.invalidateQueries({ queryKey: ["admin-rest", "messages", address] });
+            void queryClient.invalidateQueries({ queryKey: ["/api/support/conversations"] });
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      ws?.close();
+    };
+  }, [address, isMasterAdmin, tab, queryClient]);
 
   const conversations = useMemo(() => {
     const map = new Map<string, SupportMessage[]>();
@@ -174,12 +183,6 @@ export default function AdminDashboard() {
     return messages.filter((m) => m.conversationId.toLowerCase() === replyConv.toLowerCase());
   }, [messages, replyConv]);
 
-  useLayoutEffect(() => {
-    if (!showCrmTabs) {
-      setTab("videos");
-    }
-  }, [showCrmTabs]);
-
   const filteredVaultVideos = useMemo(() => {
     const q = vaultSearch.trim().toLowerCase();
     if (!q) return vaultVideos;
@@ -188,7 +191,8 @@ export default function AdminDashboard() {
         v.title.toLowerCase().includes(q) ||
         (v.description && v.description.toLowerCase().includes(q)) ||
         (v.youtubeId && v.youtubeId.toLowerCase().includes(q)) ||
-        (v.videoPath && v.videoPath.toLowerCase().includes(q)),
+        (v.videoPath && v.videoPath.toLowerCase().includes(q)) ||
+        (v.category && v.category.toLowerCase().includes(q)),
     );
   }, [vaultVideos, vaultSearch]);
 
@@ -201,33 +205,48 @@ export default function AdminDashboard() {
     );
   }, [users, search]);
 
-  const overrideMutation = useMutation({
-    mutationFn: async ({ wallet, mode }: { wallet: string; mode: "pro" | "mentoring" }) => {
+  const grantProMutation = useMutation({
+    mutationFn: async (wallet: string) => {
       const enc = encodeURIComponent(wallet);
-      const body = mode === "mentoring" ? { isMentee: true } : { isSubscribed: true };
-      const { data, status } = await api.patch(`/api/users/${enc}/subscription`, body);
+      const { data, status } = await api.patch(`/api/users/${enc}/subscription`, { isSubscribed: true });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) throw new Error((data as { error?: string })?.error || "Update failed");
       return data;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "users"] });
-      toast({ title: "Override applied" });
+      toast({ title: "Pro granted" });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const removeProMutation = useMutation({
+    mutationFn: async (wallet: string) => {
+      const enc = encodeURIComponent(wallet);
+      const { data, status } = await api.patch(`/api/users/${enc}/subscription`, { removePro: true });
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) throw new Error((data as { error?: string })?.error || "Update failed");
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "users"] });
+      toast({ title: "Pro removed", description: "User set to Free (manual override cleared)." });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const addVaultVideo = useMutation({
     mutationFn: async () => {
-      if (!vaultTitle.trim() || !vaultDescription.trim() || !vaultUrl.trim()) {
-        throw new Error("Title, description, and video URL are required");
+      if (!vaultTitle.trim() || !vaultUrl.trim() || !vaultCategory.trim()) {
+        throw new Error("Title, category, and video URL are required");
       }
+      const desc = vaultDescription.trim() || vaultTitle.trim();
       const { data, status } = await api.post("/api/videos", {
         title: vaultTitle.trim(),
-        description: vaultDescription.trim(),
+        description: desc,
         videoUrl: vaultUrl.trim(),
         thumbnailPath: vaultThumb.trim() || undefined,
-        academySection: vaultSection,
+        category: vaultCategory.trim(),
       });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) {
@@ -238,12 +257,12 @@ export default function AdminDashboard() {
     onSuccess: () => {
       setVaultTitle("");
       setVaultDescription("");
+      setVaultCategory("");
       setVaultUrl("");
       setVaultThumb("");
-      setVaultSection("beginner_patterns");
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
-      toast({ title: "Video published", description: "Visible in Educational Vault for Pro users." });
+      toast({ title: "Video published", description: "Stored in the database video library." });
       void refetchVault();
     },
     onError: (e: Error) => toast({ title: "Add failed", description: e.message, variant: "destructive" }),
@@ -283,7 +302,10 @@ export default function AdminDashboard() {
       void refetchMessages();
       void queryClient.invalidateQueries({ queryKey: ["/api/support/conversations"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/support/messages"] });
-      toast({ title: "Reply sent", description: "Customer sees this in Live Support and via real-time sync." });
+      toast({
+        title: "Reply sent",
+        description: "Delivered over WebSockets + SSE to the user’s chat bubble.",
+      });
     },
     onError: (e: Error) => toast({ title: "Reply failed", description: e.message, variant: "destructive" }),
   });
@@ -315,10 +337,11 @@ export default function AdminDashboard() {
   if (!masterConfigured) {
     return (
       <div className="p-8 max-w-lg">
-        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin - System Online</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin — not configured</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Command Center is not configured: set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> on
-          the server.
+          Set <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code> to your master
+          wallet (the value that replaces <code className="text-xs bg-muted px-1 rounded">YOUR_MASTER_WALLET_ADDRESS</code> in
+          production).
         </p>
       </div>
     );
@@ -327,8 +350,8 @@ export default function AdminDashboard() {
   if (!address) {
     return (
       <div className="p-8 max-w-lg">
-        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin - System Online</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Connect your master admin wallet to open the CRM and support tools.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Command Center</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Connect your wallet to continue. Only the master admin address can open this panel.</p>
       </div>
     );
   }
@@ -336,12 +359,11 @@ export default function AdminDashboard() {
   if (!canAccessCommandCenter) {
     return (
       <div className="p-8 max-w-lg">
-        <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin - System Online</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Access denied</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Connect an authorized admin wallet. Full CRM (users, tickets, analytics) requires the{" "}
-          <strong>master</strong> wallet from <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>.
-          Video publishing is also available to built-in admins and addresses listed in{" "}
-          <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>.
+          This route is restricted to the wallet configured in{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>. Connect with that
+          address to manage users, support, and videos.
         </p>
       </div>
     );
@@ -353,21 +375,17 @@ export default function AdminDashboard() {
         <div className="flex items-center gap-2">
           <Shield className="h-7 w-7 text-primary" />
           <div>
-            <h1 className="text-xl font-bold">Equilibrium Command Center</h1>
+            <h1 className="text-xl font-bold">Command Center</h1>
             <p className="text-xs text-muted-foreground">
-              {showCrmTabs
-                ? `CRM + tickets · Live Support pipeline · Pro $${TIER_PRO} / Mentoring $${TIER_MENTOR}`
-                : "Video library — publish and remove lessons for the Educational Vault (Pro subscribers)."}
+              Users · Support · Video library · Manual Pro ${TIER_PRO}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {showCrmTabs && (
-            <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
-              <MessageCircle className="h-4 w-4" />
-              Open support inbox
-            </Button>
-          )}
+          <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
+            <MessageCircle className="h-4 w-4" />
+            Open support inbox
+          </Button>
           <Button variant="outline" size="sm" className="shrink-0 gap-2" asChild>
             <Link to="/videos" target="_blank" rel="noreferrer">
               <Eye className="h-4 w-4" />
@@ -379,14 +397,9 @@ export default function AdminDashboard() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <aside className="w-full md:w-52 shrink-0 space-y-1 rounded-xl border bg-card p-2">
-          {showCrmTabs && (
-            <>
-              {nav("users", "CRM & users", <Users className="h-4 w-4" />)}
-              {nav("support", "Support tickets", <MessageSquare className="h-4 w-4" />)}
-              {nav("analytics", "L1 analytics", <BarChart3 className="h-4 w-4" />)}
-            </>
-          )}
-          {nav("videos", "Videos — add / remove", <Video className="h-4 w-4" />)}
+          {nav("users", "Users & subs", <Users className="h-4 w-4" />)}
+          {nav("support", "Support inbox", <MessageSquare className="h-4 w-4" />)}
+          {nav("videos", "Videos", <Video className="h-4 w-4" />)}
         </aside>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -394,13 +407,13 @@ export default function AdminDashboard() {
             <Card>
               <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <CardTitle>Wallet users</CardTitle>
-                  <CardDescription>Wallet, email, tier — manual Pro / Mentoring overrides</CardDescription>
+                  <CardTitle>User CRM</CardTitle>
+                  <CardDescription>Wallet users from PostgreSQL — tier reflects Stripe + manual override</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <div className="relative flex-1 min-w-[180px]">
                     <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-8 h-9" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                    <Input className="pl-8 h-9" placeholder="Search wallet or email…" value={search} onChange={(e) => setSearch(e.target.value)} />
                   </div>
                   <Button variant="outline" size="icon" onClick={() => void refetchUsers()} disabled={usersLoading}>
                     <RefreshCw className={cn("h-4 w-4", usersLoading && "animate-spin")} />
@@ -417,9 +430,9 @@ export default function AdminDashboard() {
                         <TableRow>
                           <TableHead>Wallet</TableHead>
                           <TableHead>Email</TableHead>
-                          <TableHead>Joined</TableHead>
-                          <TableHead>Tier</TableHead>
-                          <TableHead className="text-right">Overrides</TableHead>
+                          <TableHead>Join date</TableHead>
+                          <TableHead>Sub tier</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -431,8 +444,8 @@ export default function AdminDashboard() {
                               {u.createdAt ? new Date(u.createdAt as unknown as string).toLocaleDateString() : "—"}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline" className="capitalize text-xs">
-                                {u.subscriptionTier}
+                              <Badge variant="outline" className="text-xs">
+                                {displaySubTier(u.subscriptionTier ?? undefined)}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right space-x-1">
@@ -440,7 +453,7 @@ export default function AdminDashboard() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-8 w-8 p-0"
-                                title="Chat with this wallet"
+                                title="Open thread"
                                 onClick={() => openSupportInbox(u.walletAddress.toLowerCase())}
                               >
                                 <MessageCircle className="h-4 w-4" />
@@ -449,21 +462,19 @@ export default function AdminDashboard() {
                                 size="sm"
                                 variant="secondary"
                                 className="h-8 text-[10px]"
-                                disabled={overrideMutation.isPending}
-                                onClick={() => overrideMutation.mutate({ wallet: u.walletAddress, mode: "pro" })}
+                                disabled={grantProMutation.isPending || removeProMutation.isPending}
+                                onClick={() => grantProMutation.mutate(u.walletAddress)}
                               >
-                                <Sparkles className="h-3 w-3 mr-1" />
-                                Grant Pro ${TIER_PRO}
+                                Grant Pro
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="h-8 text-[10px]"
-                                disabled={overrideMutation.isPending}
-                                onClick={() => overrideMutation.mutate({ wallet: u.walletAddress, mode: "mentoring" })}
+                                disabled={grantProMutation.isPending || removeProMutation.isPending}
+                                onClick={() => removeProMutation.mutate(u.walletAddress)}
                               >
-                                <Crown className="h-3 w-3 mr-1" />
-                                Mentoring ${TIER_MENTOR}
+                                Remove Pro
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -481,9 +492,11 @@ export default function AdminDashboard() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Tickets</CardTitle>
+                    <CardTitle>Support inbox</CardTitle>
                     <CardDescription>
-                      Newest threads first. User messages hit Telegram when <code className="text-[10px]">TELEGRAM_*</code> env is set.
+                      Messages from the chat bubble are stored in <code className="text-[10px]">support_tickets</code>{" "}
+                      and trigger Telegram when <code className="text-[10px]">TELEGRAM_BOT_TOKEN</code> +{" "}
+                      <code className="text-[10px]">TELEGRAM_CHAT_ID</code> are set. Live updates: WebSocket + poll.
                     </CardDescription>
                   </div>
                   <Button variant="outline" size="icon" onClick={() => void refetchMessages()} disabled={msgLoading}>
@@ -529,8 +542,10 @@ export default function AdminDashboard() {
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>Thread & reply</CardTitle>
-                  <CardDescription>Uses the same endpoint as Live Support — customers receive via SSE + polling.</CardDescription>
+                  <CardTitle>Reply</CardTitle>
+                  <CardDescription>
+                    Replies are persisted and pushed to the user via <strong>WebSocket</strong> (<code className="text-[10px]">/ws/support-chat</code>) and SSE.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-1">
@@ -552,7 +567,7 @@ export default function AdminDashboard() {
                   </ScrollArea>
                   <Textarea
                     rows={4}
-                    placeholder="Admin reply…"
+                    placeholder="Type a reply…"
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
                   />
@@ -564,61 +579,14 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {tab === "analytics" && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>L1 performance</CardTitle>
-                  <CardDescription>Hyperliquid Info API (via server)</CardDescription>
-                </div>
-                <Button variant="outline" size="icon" onClick={() => void refetchL1()} disabled={l1Loading}>
-                  <RefreshCw className={cn("h-4 w-4", l1Loading && "animate-spin")} />
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {l1Loading ? (
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                ) : (
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div className="rounded-lg border p-4">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Zap className="h-3 w-3" /> 24h perp notional (USD)
-                      </div>
-                      <p className="text-xl font-bold mt-1">
-                        $
-                        {Number(l1?.hyperliquid?.totalDayNotionalVolumeUsd || 0).toLocaleString(undefined, {
-                          maximumFractionDigits: 0,
-                        })}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border p-4">
-                      <div className="text-xs text-muted-foreground">Open interest (est.)</div>
-                      <p className="text-xl font-bold mt-1">
-                        $
-                        {Number(l1?.hyperliquid?.totalOpenInterestUsd || 0).toLocaleString(undefined, {
-                          maximumFractionDigits: 0,
-                        })}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border p-4 sm:col-span-2">
-                      <div className="text-xs text-muted-foreground">Handshake complete (DB)</div>
-                      <p className="text-xl font-bold mt-1">{l1?.sovereignCohort?.instantTradingHandshakeComplete ?? 0}</p>
-                    </div>
-                  </div>
-                )}
-                {l1?.note && <p className="text-xs text-muted-foreground mt-4 border-t pt-3">{l1.note}</p>}
-              </CardContent>
-            </Card>
-          )}
-
           {tab === "videos" && (
             <div className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Publish to Educational Vault</CardTitle>
+                  <CardTitle>Add educational video</CardTitle>
                   <CardDescription>
-                    Paste a YouTube, Vimeo, or direct MP4 URL — appears under Videos for active Pro subscribers after
-                    save.
+                    YouTube, Vimeo, or direct MP4 URL. Rows are stored in <code className="text-[10px]">tutorial_videos</code> (your
+                    VIDEO_LIBRARY in the app).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">
@@ -627,12 +595,20 @@ export default function AdminDashboard() {
                     <Input value={vaultTitle} onChange={(e) => setVaultTitle(e.target.value)} placeholder="Lesson title" />
                   </div>
                   <div className="space-y-1">
-                    <Label>Description</Label>
+                    <Label>Category</Label>
+                    <Input
+                      value={vaultCategory}
+                      onChange={(e) => setVaultCategory(e.target.value)}
+                      placeholder="e.g. SMA Strategy"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Description (optional)</Label>
                     <Textarea
-                      rows={3}
+                      rows={2}
                       value={vaultDescription}
                       onChange={(e) => setVaultDescription(e.target.value)}
-                      placeholder="Short summary for the vault card"
+                      placeholder="Short summary — defaults to title if empty"
                     />
                   </div>
                   <div className="space-y-1">
@@ -640,7 +616,7 @@ export default function AdminDashboard() {
                     <Input
                       value={vaultUrl}
                       onChange={(e) => setVaultUrl(e.target.value)}
-                      placeholder="https://youtube.com/... or https://vimeo.com/... or .mp4"
+                      placeholder="https://youtube.com/… or vimeo or .mp4"
                       className="font-mono text-xs"
                     />
                   </div>
@@ -649,60 +625,29 @@ export default function AdminDashboard() {
                     <Input
                       value={vaultThumb}
                       onChange={(e) => setVaultThumb(e.target.value)}
-                      placeholder="https://..."
+                      placeholder="https://…"
                       className="font-mono text-xs"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label>Academy section</Label>
-                    <Select
-                      value={vaultSection}
-                      onValueChange={(v) => setVaultSection(v as AcademySection)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {VAULT_SECTION_META.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      className="gap-2"
-                      disabled={addVaultVideo.isPending}
-                      onClick={() => addVaultVideo.mutate()}
-                    >
-                      {addVaultVideo.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Plus className="h-4 w-4" />
-                      )}
-                      Add video to vault
-                    </Button>
-                  </div>
+                  <Button className="gap-2" disabled={addVaultVideo.isPending} onClick={() => addVaultVideo.mutate()}>
+                    {addVaultVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Add video
+                  </Button>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <CardTitle>Vault library</CardTitle>
-                    <CardDescription>
-                      Rows below are stored in the database — <strong>Remove</strong> deletes them from the Educational
-                      Vault for all Pro users (seed videos in code are unchanged).
-                    </CardDescription>
+                    <CardTitle>Library</CardTitle>
+                    <CardDescription>Delete removes the row from the database immediately for all clients.</CardDescription>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative flex-1 min-w-[160px] max-w-xs">
                       <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         className="pl-8 h-9"
-                        placeholder="Search title or URL…"
+                        placeholder="Search…"
                         value={vaultSearch}
                         onChange={(e) => setVaultSearch(e.target.value)}
                       />
@@ -721,16 +666,15 @@ export default function AdminDashboard() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>Title</TableHead>
-                            <TableHead>Section</TableHead>
-                            <TableHead className="text-right w-[100px]">Remove</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead className="text-right w-[100px]">Delete</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {vaultVideos.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={3} className="text-muted-foreground text-sm">
-                                No database videos yet — use the form above to add YouTube, Vimeo, or MP4 links. Curated
-                                seed lessons still show in the vault until you replace them.
+                                No rows yet — add a video above.
                               </TableCell>
                             </TableRow>
                           ) : filteredVaultVideos.length === 0 ? (
@@ -748,11 +692,7 @@ export default function AdminDashboard() {
                                     {v.youtubeId ? `youtube:${v.youtubeId}` : v.videoPath || "—"}
                                   </div>
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {v.academySection
-                                    ? VAULT_SECTION_META.find((m) => m.id === v.academySection)?.label ?? v.academySection
-                                    : v.category}
-                                </TableCell>
+                                <TableCell className="text-xs">{v.category}</TableCell>
                                 <TableCell className="text-right">
                                   <Button
                                     size="sm"
@@ -760,17 +700,13 @@ export default function AdminDashboard() {
                                     className="gap-1 h-8"
                                     disabled={deleteVaultVideo.isPending}
                                     onClick={() => {
-                                      if (
-                                        confirm(
-                                          `Remove “${v.title}” from the vault?\n\nThis cannot be undone. Pro users will no longer see this lesson.`,
-                                        )
-                                      ) {
+                                      if (confirm(`Remove “${v.title}” from the library?`)) {
                                         deleteVaultVideo.mutate(v.id);
                                       }
                                     }}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
-                                    Remove
+                                    Delete
                                   </Button>
                                 </TableCell>
                               </TableRow>

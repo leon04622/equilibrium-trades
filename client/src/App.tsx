@@ -121,7 +121,8 @@ function TradingLayout() {
               <Route path="/subscribe" element={<Pricing />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/hyperliquid" element={<Hyperliquid />} />
-              <Route path="/admin-equilibrium" element={<AdminDashboard />} />
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin-equilibrium" element={<Navigate to="/admin" replace />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </main>

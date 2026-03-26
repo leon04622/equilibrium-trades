@@ -16,7 +16,7 @@ export function MobileBottomNav() {
   const { isMasterAdmin } = useIsMasterAdmin();
 
   const navItems = isMasterAdmin
-    ? [...baseItems, { to: "/admin-equilibrium", icon: Shield, label: "Admin" }]
+    ? [...baseItems, { to: "/admin", icon: Shield, label: "Admin" }]
     : baseItems;
 
   return (

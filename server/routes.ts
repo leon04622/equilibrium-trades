@@ -451,12 +451,17 @@ export async function registerRoutes(
     try {
       const { insertVideoSchema } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      if (!isAppAdminWallet(walletAddress)) {
+
+      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
       const body = { ...(req.body && typeof req.body === "object" ? req.body : {}) } as Record<string, unknown>;
+      const customCategory =
+        typeof body.category === "string" && body.category.trim().length > 0
+          ? body.category.trim().slice(0, 200)
+          : "";
+      delete body.category;
       const hasYt = typeof body.youtubeId === "string" && body.youtubeId.trim().length > 0;
       const hasVp = typeof body.videoPath === "string" && body.videoPath.trim().length > 0;
       if (!hasYt && !hasVp && typeof body.videoUrl === "string" && body.videoUrl.trim()) {
@@ -468,12 +473,13 @@ export async function registerRoutes(
         else body.videoPath = url;
       }
       delete body.videoUrl;
-      
+
       const validated = insertVideoSchema.safeParse(body);
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
       }
-      const video = await storage.createVideo(validated.data);
+      const row = customCategory ? { ...validated.data, category: customCategory } : validated.data;
+      const video = await storage.createVideo(row);
       res.json(video);
     } catch (error) {
       console.error("Error creating video:", error);
@@ -487,8 +493,8 @@ export async function registerRoutes(
   app.delete("/api/videos/:id", async (req: Request, res: Response) => {
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      if (!isAppAdminWallet(walletAddress)) {
+
+      if (!isAppAdminWallet(walletAddress) && !isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -889,6 +895,20 @@ export async function registerRoutes(
     }
   });
 
+  /** Master admin: full support inbox (same rows as `support_tickets` / legacy name support_messages). */
+  app.get("/api/support", async (req: Request, res: Response) => {
+    try {
+      const auth = requireMasterAdminWallet(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 2000);
+      const messages = await storage.getAllSupportMessages(limit);
+      res.json(messages);
+    } catch (err) {
+      console.error("GET /api/support:", err);
+      res.status(500).json({ error: "Failed to fetch support messages" });
+    }
+  });
+
   // Send a message — end-users / guests, or master admin (support replies from bubble)
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
@@ -1241,7 +1261,11 @@ export async function registerRoutes(
       const { updateSubscriptionSchema } = await import("@shared/schema");
       const paramWallet = decodeURIComponent(req.params.walletAddress);
       const raw = { walletAddress: paramWallet, ...req.body } as Record<string, unknown>;
-      if (raw.isMentee === true) {
+      if (raw.removePro === true) {
+        raw.subscriptionTier = "free";
+        raw.subscriptionActive = false;
+        raw.manualProOverride = false;
+      } else if (raw.isMentee === true) {
         raw.subscriptionTier = "mentoring";
         raw.subscriptionActive = true;
         raw.manualProOverride = true;
@@ -1252,6 +1276,7 @@ export async function registerRoutes(
       }
       delete raw.isSubscribed;
       delete raw.isMentee;
+      delete raw.removePro;
       const validated = updateSubscriptionSchema.safeParse(raw);
       if (!validated.success) {
         res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });

@@ -262,10 +262,10 @@ export function AppSidebar() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       asChild
-                      isActive={pathMatches(pathname, "/admin-equilibrium")}
+                      isActive={pathMatches(pathname, "/admin")}
                       data-testid="nav-admin"
                     >
-                      <Link to="/admin-equilibrium">
+                      <Link to="/admin">
                         <Shield className="h-4 w-4" />
                         <span>Admin Panel</span>
                         <Badge variant="destructive" className="ml-auto text-[10px] px-1.5 py-0">
