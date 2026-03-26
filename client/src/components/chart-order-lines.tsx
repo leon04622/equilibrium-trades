@@ -315,6 +315,7 @@ export function ChartOrderLines({
       if ("preventDefault" in e && e.cancelable) e.preventDefault();
       const y = readY(e);
       if (y === null) return;
+      console.debug("[TP/SL] onMove", { kind: draggingRef.current, y });
       applyDragFromY(y);
     };
 
@@ -361,8 +362,12 @@ export function ChartOrderLines({
         console.debug("[chart SL drag] end", finalPrice ?? "(cancelled)");
       }
 
-      if (!finalDragging || finalPrice === null || finalPrice <= 0 || !pos) return;
+      if (!finalDragging || finalPrice === null || finalPrice <= 0 || !pos) {
+        console.debug("[TP/SL] onUp aborted", { finalDragging, finalPrice, pos });
+        return;
+      }
 
+      console.debug("[TP/SL] onUp", { kind: finalDragging, finalPrice, pos });
       const fromGhost = dragFromGhostRef.current;
       dragFromGhostRef.current = false;
       const startP = dragStartPriceRef.current;
@@ -472,6 +477,7 @@ export function ChartOrderLines({
 
   const beginTpslDrag = useCallback(
     (e: React.PointerEvent, line: { price: number; isGhost?: boolean; editType?: "tp" | "sl" }) => {
+      console.debug("[TP/SL] beginTpslDrag", { kind: line.editType, price: line.price, isGhost: line.isGhost, target: (e.target as HTMLElement).tagName });
       if (e.button !== 0 && e.pointerType === "mouse") return;
       if ((e.target as HTMLElement).closest("[data-tpsl-chip]")) return;
       e.preventDefault();

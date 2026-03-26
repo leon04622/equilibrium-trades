@@ -173,8 +173,8 @@ function PatternChartComponent({
     ghostTp: IPriceLine | null;
     ghostSl: IPriceLine | null;
   }>({ tp: null, sl: null, ghostTp: null, ghostSl: null });
+  /** Only updated from ChartOrderLines `onDraggingChange` — do not mirror React state here (avoids one-frame false before child effect runs). */
   const tpslDraggingRef = useRef(false);
-  tpslDraggingRef.current = tpslDragging;
 
   // Tracking state for smart setData vs update()
   // Key combines coin + interval so any change to either triggers a full reload
@@ -189,9 +189,12 @@ function PatternChartComponent({
   /** Bumps on throttled chart interaction so TP/SL overlay re-reads priceToCoordinate after Y-scale changes. */
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
 
-  // Y must be relative to the candlestick pane (LW v5 multi-pane / volume subplot).
-  // Volume histogram uses the bottom ~20% (priceScaleId "volume", scaleMargins top: 0.8).
-  // Pointer Y in that strip often makes coordinateToPrice return null — breaks SL drag for longs.
+  // Y relative to pane 0. Volume uses bottom ~20% (scaleMargins top: 0.8 on volume scale).
+  //
+  // BUG (SL drag “dead” while TP works): clamping y to min(yRaw, paneH*0.8-1) maps EVERY pointer
+  // position in the volume/SL band to the SAME y → same price on every mousemove → line frozen.
+  // TP sits in the upper pane so y varied. Fix: use raw y first; if LW returns null, extrapolate
+  // from two in-candle samples (same series.coordinateToPrice as TP).
   const coordinateToPrice = useCallback((clientY: number): number | null => {
     try {
       const series = candleSeriesRef.current;
@@ -202,10 +205,31 @@ function PatternChartComponent({
       if (!paneEl) return null;
       const rect = paneEl.getBoundingClientRect();
       const paneH = rect.height;
-      const yRelRaw = clientY - rect.top;
-      const yRel = Math.max(0, Math.min(paneH > 1 ? paneH * 0.8 - 1 : paneH, yRelRaw));
-      const price = series.coordinateToPrice(yRel);
-      return price !== null && price !== undefined ? Number(price) : null;
+      if (paneH <= 1) return null;
+
+      const yRelRaw = Math.max(0, Math.min(paneH, clientY - rect.top));
+
+      const direct = series.coordinateToPrice(yRelRaw);
+      if (direct !== null && direct !== undefined && Number.isFinite(Number(direct))) {
+        return Number(direct);
+      }
+
+      const candleMaxY = paneH * 0.8 - 1;
+      const yHi = Math.max(2, paneH * 0.08);
+      const yLo = Math.min(Math.max(yHi + 4, candleMaxY - 2), paneH * 0.72);
+      const pHi = series.coordinateToPrice(yHi);
+      const pLo = series.coordinateToPrice(yLo);
+      if (pHi === null || pLo === null || pHi === undefined || pLo === undefined || yLo <= yHi + 1) {
+        const yFb = Math.max(0, Math.min(candleMaxY, yRelRaw));
+        const fb = series.coordinateToPrice(yFb);
+        return fb !== null && fb !== undefined ? Number(fb) : null;
+      }
+      const nh = Number(pHi);
+      const nl = Number(pLo);
+      if (!Number.isFinite(nh) || !Number.isFinite(nl)) return null;
+      if (Math.abs(nh - nl) < 1e-20) return nh;
+      const price = nh + ((yRelRaw - yHi) / (yLo - yHi)) * (nl - nh);
+      return Number.isFinite(price) ? price : null;
     } catch {
       return null;
     }
@@ -227,6 +251,7 @@ function PatternChartComponent({
 
   const onTpslDragVisual = useCallback((kind: "tp" | "sl", price: number) => {
     const r = tpslLineRefs.current;
+    console.debug("[TP/SL] onTpslDragVisual", { kind, price, hasTp: !!r.tp, hasSl: !!r.sl, hasGhostTp: !!r.ghostTp, hasGhostSl: !!r.ghostSl });
     if (kind === "tp") {
       if (r.tp) r.tp.applyOptions({ price });
       else r.ghostTp?.applyOptions({ price });
