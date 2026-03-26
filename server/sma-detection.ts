@@ -61,12 +61,12 @@ export interface CrossoverSignal {
   patternType?: string;
 }
 
-// Timeframe-specific thresholds
+// Timeframe-specific thresholds (minMovePercent = minimum pole size vs price; slightly looser on 1m–5m for real flags)
 function getThresholds(timeframe: string) {
   const thresholds: Record<string, { minMovePercent: number; minBreakoutPercent: number; lookback: number }> = {
-    "1m":  { minMovePercent: 0.15, minBreakoutPercent: 0.05, lookback: 30 },
-    "3m":  { minMovePercent: 0.20, minBreakoutPercent: 0.06, lookback: 32 },
-    "5m":  { minMovePercent: 0.25, minBreakoutPercent: 0.08, lookback: 35 },
+    "1m":  { minMovePercent: 0.10, minBreakoutPercent: 0.04, lookback: 30 },
+    "3m":  { minMovePercent: 0.14, minBreakoutPercent: 0.05, lookback: 32 },
+    "5m":  { minMovePercent: 0.18, minBreakoutPercent: 0.06, lookback: 35 },
     "15m": { minMovePercent: 0.4,  minBreakoutPercent: 0.10, lookback: 40 },
     "30m": { minMovePercent: 0.5,  minBreakoutPercent: 0.12, lookback: 45 },
     "1h":  { minMovePercent: 0.6,  minBreakoutPercent: 0.15, lookback: 50 },
@@ -75,6 +75,24 @@ function getThresholds(timeframe: string) {
     "1d":  { minMovePercent: 2.0,  minBreakoutPercent: 0.30, lookback: 50 },
   };
   return thresholds[timeframe] || thresholds["1h"];
+}
+
+const SHORT_SCAN_TFS = new Set(["1m", "3m", "5m"]);
+
+/** Breakouts / pending formations rank above “forming only”; then higher confidence. */
+function sortPatternCandidatesByActionability(patterns: DetectedPattern[]): void {
+  patterns.sort((a, b) => {
+    const tier = (p: DetectedPattern) =>
+      p.status === "breakout_confirmed" ? 3 : p.status === "breakout_pending" ? 2 : 1;
+    const d = tier(b) - tier(a);
+    if (d !== 0) return d;
+    return b.confidence - a.confidence;
+  });
+}
+
+function flagPatternScore(p: DetectedPattern): number {
+  const tier = p.status === "breakout_confirmed" ? 300 : p.status === "breakout_pending" ? 200 : 100;
+  return tier + p.confidence;
 }
 
 // SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
@@ -134,19 +152,28 @@ function findSwingPoints(candles: HyperliquidCandle[], lookback: number = 5): { 
   return { highs, lows };
 }
 
-// Detect Bull/Bear Flag patterns
-// Window: 60 candles total
-//   Candles  0-25: look for the POLE (sharp impulse move)
-//   Candles 25-50: FLAG consolidation (must slope counter to the pole)
-//   Candles 50-59: BREAKOUT check (current price vs flag boundary)
-function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+// Detect Bull/Bear Flag patterns on a fixed 60-candle window
+//   Candles  0-25: POLE (sharp impulse)
+//   Candles 25-50: FLAG consolidation (counter-slope to pole)
+//   Candles 50-59: breakout zone vs flag boundary
+function detectFlagPatternInFixedWindow(
+  window: HyperliquidCandle[],
+  isBullish: boolean,
+  timeframe: string,
+): DetectedPattern | null {
   const thresholds = getThresholds(timeframe);
-  if (candles.length < 60) return null;
+  if (window.length < 60) return null;
 
-  const window = candles.slice(-60);
-  const poleCandles  = window.slice(0, 25);
-  const flagCandles  = window.slice(25, 50);  // the consolidation channel
-  const recentCandles = window.slice(50);     // last 10 — breakout zone
+  const shortTf = SHORT_SCAN_TFS.has(timeframe);
+  const maxFlagToPoleRatio = shortTf ? 0.78 : 0.65;
+  const maxPoleRetraceRatio = shortTf ? 0.68 : 0.6;
+  const poleMinMult = shortTf ? 0.82 : 1;
+  const bullFlagMaxUpSlope = shortTf ? 0.42 : 0.3;
+  const bearFlagMinSlope = shortTf ? -0.48 : -0.3;
+
+  const poleCandles = window.slice(0, 25);
+  const flagCandles = window.slice(25, 50);
+  const recentCandles = window.slice(50);
 
   const currentPrice = parseFloat(window[window.length - 1].c);
 
@@ -159,8 +186,7 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const poleHeight     = poleTop - poleBottom;
     const poleHeightPct  = (poleHeight / poleBottom) * 100;
 
-    // Pole must meet minimum move threshold
-    if (poleHeightPct < thresholds.minMovePercent) return null;
+    if (poleHeightPct < thresholds.minMovePercent * poleMinMult) return null;
     // Pole must end ABOVE where it started (genuinely bullish impulse)
     if (poleTop <= poleBottom) return null;
 
@@ -171,12 +197,10 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const flagLowerBound = Math.min(...flagLows);
     const flagRange = flagUpperBound - flagLowerBound;
 
-    // Flag must be tighter than 65% of the pole height
-    if (flagRange / poleHeight > 0.65) return null;
+    if (flagRange / poleHeight > maxFlagToPoleRatio) return null;
 
-    // Flag must not retrace more than 60% of the pole
     const retraceFromTop = poleTop - flagLowerBound;
-    if (retraceFromTop / poleHeight > 0.6) return null;
+    if (retraceFromTop / poleHeight > maxPoleRetraceRatio) return null;
 
     // Flag must stay ABOVE the pole's base (not give back the whole move)
     if (flagLowerBound < poleBottom) return null;
@@ -186,7 +210,7 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const lastFlagClose  = parseFloat(flagCandles[flagCandles.length - 1].c);
     // Allow neutral flags (flat) too, but reject upward-sloping flags
     const flagSlopePct = ((lastFlagClose - firstFlagClose) / firstFlagClose) * 100;
-    if (flagSlopePct > 0.3) return null; // Flag sloping up too much — not a bull flag
+    if (flagSlopePct > bullFlagMaxUpSlope) return null;
 
     // ── BREAKOUT: current price vs flag upper boundary ────────────────────────
     let status: DetectedPattern["status"] = "forming";
@@ -223,7 +247,7 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const poleHeight     = poleTop - poleBottom;
     const poleHeightPct  = (poleHeight / poleTop) * 100;
 
-    if (poleHeightPct < thresholds.minMovePercent) return null;
+    if (poleHeightPct < thresholds.minMovePercent * poleMinMult) return null;
     if (poleBottom >= poleTop) return null;
 
     // ── FLAG: tight upward-sloping consolidation after the pole ──────────────
@@ -233,11 +257,10 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const flagLowerBound = Math.min(...flagLows);
     const flagRange = flagUpperBound - flagLowerBound;
 
-    if (flagRange / poleHeight > 0.65) return null;
+    if (flagRange / poleHeight > maxFlagToPoleRatio) return null;
 
-    // Flag must not retrace more than 60% of the pole
     const retraceFromBottom = flagUpperBound - poleBottom;
-    if (retraceFromBottom / poleHeight > 0.6) return null;
+    if (retraceFromBottom / poleHeight > maxPoleRetraceRatio) return null;
 
     // Flag must stay BELOW the pole's peak
     if (flagUpperBound > poleTop) return null;
@@ -246,7 +269,7 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
     const firstFlagClose = parseFloat(flagCandles[0].c);
     const lastFlagClose  = parseFloat(flagCandles[flagCandles.length - 1].c);
     const flagSlopePct = ((lastFlagClose - firstFlagClose) / firstFlagClose) * 100;
-    if (flagSlopePct < -0.3) return null; // Flag sloping down too much — not a bear flag
+    if (flagSlopePct < bearFlagMinSlope) return null;
 
     // ── BREAKOUT: current price vs flag lower boundary ────────────────────────
     let status: DetectedPattern["status"] = "forming";
@@ -274,6 +297,29 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
       confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 52,
     };
   }
+}
+
+/**
+ * Try several alignments of the 60-bar template. A fixed slice(-60) often misses when the pole
+ * ended a few bars earlier on 1m–5m charts.
+ */
+function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  if (candles.length < 60) return null;
+  const offsets = [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 36, 42];
+  let best: DetectedPattern | null = null;
+  let bestScore = -1;
+  for (const o of offsets) {
+    if (candles.length < 60 + o) continue;
+    const window = candles.slice(candles.length - 60 - o, candles.length - o);
+    const p = detectFlagPatternInFixedWindow(window, isBullish, timeframe);
+    if (!p) continue;
+    const sc = flagPatternScore(p);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = p;
+    }
+  }
+  return best;
 }
 
 // Detect Triangle patterns (Ascending, Descending, Symmetrical)
@@ -752,11 +798,53 @@ export async function analyzeCoinForSignals(
     const currentSMA = calculateSMAFromCandles(candles);
     if (!currentSMA) return null;
 
-    // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);
     const previousSMA = calculateSMAFromCandles(previousCandles);
     const crossover = detectCrossover(currentSMA, previousSMA);
-    
+
+    const patterns = collectPatternCandidates(candles, timeframe);
+    sortPatternCandidatesByActionability(patterns);
+    const bestPattern =
+      patterns.find((p) => getPatternStructuralBias(p) !== "neutral") ?? null;
+
+    if (bestPattern) {
+      const structuralBias = getPatternStructuralBias(bestPattern);
+      const risk = Math.abs(bestPattern.entryPrice - bestPattern.stopLoss);
+      const reward = Math.abs(bestPattern.takeProfit - bestPattern.entryPrice);
+      const rrRatio = risk > 0 ? (reward / risk).toFixed(1) : "0";
+
+      let description: string;
+      let status: CrossoverSignal["status"];
+
+      if (bestPattern.status === "breakout_confirmed") {
+        status = "breakout";
+        description = `${bestPattern.displayName} BREAKOUT on ${timeframe}! Entry $${bestPattern.entryPrice.toFixed(2)}, SL $${bestPattern.stopLoss.toFixed(2)}, TP $${bestPattern.takeProfit.toFixed(2)}. R:R ${rrRatio}:1`;
+      } else {
+        status = "forming";
+        description = `${bestPattern.displayName} FORMING on ${timeframe}. Breakout level: $${bestPattern.breakoutLevel.toFixed(2)}. WAIT for confirmation! Potential R:R ${rrRatio}:1`;
+      }
+
+      return {
+        id: `${coin}-${timeframe}-${Date.now()}`,
+        coin,
+        type: structuralBias === "bullish" ? "bullish_setup" : "bearish_setup",
+        status,
+        timeframe,
+        sma21: currentSMA.sma21,
+        sma200: currentSMA.sma200,
+        currentPrice: currentSMA.price,
+        entryPrice: bestPattern.entryPrice,
+        suggestedSL: bestPattern.stopLoss,
+        suggestedTP: bestPattern.takeProfit,
+        confidence: bestPattern.confidence,
+        detectedAt: new Date(),
+        description,
+        patternType: bestPattern.status === "breakout_confirmed"
+          ? `${bestPattern.displayName} - ENTRY NOW`
+          : `${bestPattern.displayName} - WAIT`,
+      };
+    }
+
     if (crossover) {
       return {
         id: `${coin}-${timeframe}-${Date.now()}`,
@@ -777,52 +865,7 @@ export async function analyzeCoinForSignals(
       };
     }
 
-    const patterns = collectPatternCandidates(candles, timeframe);
-    if (patterns.length === 0) return null;
-
-    patterns.sort((a, b) => {
-      if (a.status === "breakout_confirmed" && b.status !== "breakout_confirmed") return -1;
-      if (b.status === "breakout_confirmed" && a.status !== "breakout_confirmed") return 1;
-      return b.confidence - a.confidence;
-    });
-
-    const bestPattern = patterns[0];
-    const structuralBias = getPatternStructuralBias(bestPattern);
-    if (structuralBias === "neutral") return null;
-    const risk = Math.abs(bestPattern.entryPrice - bestPattern.stopLoss);
-    const reward = Math.abs(bestPattern.takeProfit - bestPattern.entryPrice);
-    const rrRatio = risk > 0 ? (reward / risk).toFixed(1) : "0";
-    
-    let description: string;
-    let status: CrossoverSignal["status"];
-    
-    if (bestPattern.status === "breakout_confirmed") {
-      status = "breakout";
-      description = `${bestPattern.displayName} BREAKOUT on ${timeframe}! Entry $${bestPattern.entryPrice.toFixed(2)}, SL $${bestPattern.stopLoss.toFixed(2)}, TP $${bestPattern.takeProfit.toFixed(2)}. R:R ${rrRatio}:1`;
-    } else {
-      status = "forming";
-      description = `${bestPattern.displayName} FORMING on ${timeframe}. Breakout level: $${bestPattern.breakoutLevel.toFixed(2)}. WAIT for confirmation! Potential R:R ${rrRatio}:1`;
-    }
-    
-    return {
-      id: `${coin}-${timeframe}-${Date.now()}`,
-      coin,
-      type: structuralBias === "bullish" ? "bullish_setup" : "bearish_setup",
-      status,
-      timeframe,
-      sma21: currentSMA.sma21,
-      sma200: currentSMA.sma200,
-      currentPrice: currentSMA.price,
-      entryPrice: bestPattern.entryPrice,
-      suggestedSL: bestPattern.stopLoss,
-      suggestedTP: bestPattern.takeProfit,
-      confidence: bestPattern.confidence,
-      detectedAt: new Date(),
-      description,
-      patternType: bestPattern.status === "breakout_confirmed"
-        ? `${bestPattern.displayName} - ENTRY NOW`
-        : `${bestPattern.displayName} - WAIT`,
-    };
+    return null;
   } catch (error) {
     console.error(`Error analyzing ${coin} for signals:`, error);
     return null;
@@ -950,12 +993,15 @@ export async function analyzeForEducationalPatterns(
     const currentSMA = calculateSMAFromCandles(candles);
     if (!currentSMA) return null;
 
-    // Check for SMA crossover first
     const previousCandles = candles.slice(0, -5);
     const previousSMA = calculateSMAFromCandles(previousCandles);
     const crossover = detectCrossover(currentSMA, previousSMA);
-    
-    if (crossover) {
+
+    const candidates = collectPatternCandidates(candles, timeframe);
+    sortPatternCandidatesByActionability(candidates);
+
+    if (candidates.length === 0) {
+      if (!crossover) return null;
       const crossBias = crossover === "bullish_crossover" ? "bullish" : "bearish";
       const { educationalNote, whatToWatch, patternStatus } = getEducationalContent(
         "SMA Crossover",
@@ -965,7 +1011,7 @@ export async function analyzeForEducationalPatterns(
         currentSMA.sma200,
         currentSMA.price
       );
-      
+
       const crossoverPrice = currentSMA.price;
       const crossoverTradeable = crossover === "bullish_crossover"
         ? crossoverPrice > currentSMA.sma21 && crossoverPrice > currentSMA.sma200
@@ -991,10 +1037,6 @@ export async function analyzeForEducationalPatterns(
       };
     }
 
-    const candidates = collectPatternCandidates(candles, timeframe);
-    if (candidates.length === 0) return null;
-
-    candidates.sort((a, b) => b.confidence - a.confidence);
     const bestPattern = candidates[0];
     // Pattern direction from OHLC geometry only (not from MA alignment).
     const bias = getPatternStructuralBias(bestPattern);

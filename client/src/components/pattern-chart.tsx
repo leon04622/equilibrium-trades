@@ -278,8 +278,8 @@ function PatternChartComponent({
   });
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
-    queryKey: [`/api/signals/patterns?timeframes=${interval}`],
-    refetchInterval: 60_000,
+    queryKey: [`/api/signals/patterns?timeframes=${encodeURIComponent(interval)}&coins=${encodeURIComponent(coin)}`],
+    refetchInterval: 45_000,
     enabled: patternScanEnabled,
   });
 
