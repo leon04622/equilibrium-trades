@@ -84,13 +84,13 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
-/** Educational Vault — content from `tutorial_videos` (PostgreSQL), grouped by admin category → academy section. */
+/** Educational Vault — lessons loaded from the API (`tutorial_videos` in PostgreSQL), grouped by category → academy section. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
-  /** Same `tutorial_videos` rows as Admin → Video Manager; keep fresh for all visitors (playback stays Pro). */
+  /** Same database rows as Admin Command Center; refetched for all visitors (playback stays Pro). */
   const {
     data: apiVideos = [],
     isLoading: listLoading,
@@ -138,7 +138,7 @@ export default function VideoVault() {
   const canPlayVideos = isConnected && !subLoading && isSubscribed;
 
   return (
-    <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto">
+    <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto min-h-[60vh] bg-background">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-primary mb-1">
@@ -147,7 +147,7 @@ export default function VideoVault() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Pro-only library from the same list as Command Center → Video Manager (uploads and links). Grouped by Beginner
+            Pro-only library synced from the server database (same entries as the Command Center). Grouped by Beginner
             Patterns, SMA Masterclass, and Live Sessions.
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">

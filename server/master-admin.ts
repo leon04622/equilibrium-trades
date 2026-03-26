@@ -1,7 +1,7 @@
 import { getMasterAdminWallet } from "./admin-equilibrium-auth";
 
 /**
- * Same wallet as `ADMIN_EQUILIBRIUM_MASTER_WALLET` (Equilibrium Command Center + CRM gate).
+ * Sovereign Command Center wallet — see `server/fortress-admin.ts` (hardcoded).
  */
 export function getMasterAdminAddress(): string | null {
   return getMasterAdminWallet();

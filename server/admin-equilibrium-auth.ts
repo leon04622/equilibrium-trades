@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { verifyMessage, getAddress } from "ethers";
-import { isAdminAddress } from "./admin-access";
+import { getFortressSovereignWallet } from "./fortress-admin";
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -21,12 +21,10 @@ function cleanupMaps(): void {
   }
 }
 
-/** If set, only this wallet may obtain a CRM session after signing. Otherwise any `isAdminAddress` wallet works. */
+/** Sovereign Command Center wallet (hardcoded fortress). */
 export function getMasterAdminWallet(): string | null {
-  const w = process.env.ADMIN_EQUILIBRIUM_MASTER_WALLET?.trim();
-  if (!w || !w.startsWith("0x")) return null;
   try {
-    return getAddress(w);
+    return getFortressSovereignWallet();
   } catch {
     return null;
   }
@@ -70,12 +68,8 @@ export function verifyAdminEquilibriumSignature(
   }
 
   const master = getMasterAdminWallet();
-  if (master) {
-    if (recovered.toLowerCase() !== master.toLowerCase()) {
-      return { ok: false, error: "Signer is not the configured master admin wallet." };
-    }
-  } else if (!isAdminAddress(recovered)) {
-    return { ok: false, error: "Signer is not an authorized admin wallet." };
+  if (!master || recovered.toLowerCase() !== master.toLowerCase()) {
+    return { ok: false, error: "Signer is not the sovereign admin wallet." };
   }
 
   challenges.delete(nonce);

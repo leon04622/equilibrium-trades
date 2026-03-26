@@ -35,7 +35,8 @@ import Portfolio from "@/pages/portfolio";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
 import Hyperliquid from "@/pages/hyperliquid";
-import AdminDashboard from "@/pages/AdminDashboard";
+import { AdminGuard } from "@/components/admin-guard";
+import AdminCommandCenter from "@/pages/AdminCommandCenter";
 import NotFound from "@/pages/not-found";
 
 function App() {
@@ -123,7 +124,14 @@ function TradingLayout() {
               <Route path="/subscribe" element={<Pricing />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/hyperliquid" element={<Hyperliquid />} />
-              <Route path="/admin" element={<AdminDashboard />} />
+              <Route
+                path="/admin"
+                element={
+                  <AdminGuard>
+                    <AdminCommandCenter />
+                  </AdminGuard>
+                }
+              />
               <Route path="/admin-equilibrium" element={<Navigate to="/admin" replace />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

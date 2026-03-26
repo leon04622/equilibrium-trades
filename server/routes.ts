@@ -37,6 +37,7 @@ import {
   getMasterAdminWallet,
 } from "./admin-equilibrium-auth";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
+import { isFortressSovereignAddress } from "./fortress-admin";
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -69,21 +70,15 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   return list;
 }
 
-/** Built-in / env admins plus Equilibrium master wallet (non-Command Center features). */
-function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
-  if (!walletAddress) return false;
-  return isAdminAddress(walletAddress) || isMasterAdminAddress(walletAddress);
-}
-
-/** POST /api/videos and POST /api/admin/videos — same body; master or `ADMIN_WALLET_ADDRESSES` (`x-wallet-address` or Bearer wallet). */
+/** POST /api/videos and POST /api/admin/videos — sovereign wallet only (`x-wallet-address` or Bearer wallet). */
 async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
   const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
     return;
   }
-  if (!isAppAdminWallet(walletAddress)) {
-    res.status(403).json({ error: "Admin access required" });
+  if (!isFortressSovereignAddress(walletAddress)) {
+    res.status(403).json({ error: "Sovereign admin wallet required" });
     return;
   }
   try {
@@ -123,8 +118,8 @@ async function deleteCommandCenterVideo(req: Request, res: Response): Promise<vo
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
     return;
   }
-  if (!isAppAdminWallet(walletAddress)) {
-    res.status(403).json({ error: "Admin access required" });
+  if (!isFortressSovereignAddress(walletAddress)) {
+    res.status(403).json({ error: "Sovereign admin wallet required" });
     return;
   }
   try {
@@ -144,7 +139,7 @@ export async function registerRoutes(
   app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
     const walletAddress = req.headers["x-wallet-address"] as string | undefined;
     res.json({
-      isAdmin: isAppAdminWallet(walletAddress),
+      isAdmin: isFortressSovereignAddress(walletAddress),
     });
   });
 
@@ -408,14 +403,6 @@ export async function registerRoutes(
         : [...SCAN_ALL_TIMEFRAMES];
 
       const patterns = await scanForEducationalPatterns(coins, timeframes);
-      try {
-        const { notifyTelegramApexHighProbability } = await import("./telegram-notify");
-        for (const s of patterns) {
-          void notifyTelegramApexHighProbability(s);
-        }
-      } catch {
-        /* non-fatal */
-      }
       res.json(patterns);
     } catch (error) {
       console.error("Error scanning for educational patterns:", error);
@@ -558,6 +545,31 @@ export async function registerRoutes(
   app.delete("/api/admin/videos/:id", deleteCommandCenterVideo);
 
   app.delete("/api/videos/:id", deleteCommandCenterVideo);
+
+  /** CRM projection for Command Center — sovereign wallet only. */
+  app.get("/api/crm/users", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      const rows = await storage.getAllWalletUsers();
+      res.json(
+        rows.map((u) => ({
+          wallet: u.walletAddress,
+          email: u.email ?? null,
+          joinDate:
+            u.createdAt instanceof Date
+              ? u.createdAt.toISOString()
+              : u.createdAt != null
+                ? String(u.createdAt)
+                : null,
+          subTier: u.subscriptionTier ?? "free",
+        })),
+      );
+    } catch (e) {
+      console.error("GET /api/crm/users:", e);
+      res.status(500).json({ error: "Failed to fetch CRM users" });
+    }
+  });
 
   // ============ WALLET USER / HYPERLIQUID ONBOARDING ============
 
@@ -749,23 +761,6 @@ export async function registerRoutes(
     }
   });
 
-  // Admin: Get all wallet users
-  app.get("/api/admin/users", async (req: Request, res: Response) => {
-    try {
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-      
-      if (!walletAddress || !isAdminAddress(walletAddress)) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-      
-      const users = await storage.getAllWalletUsers();
-      res.json(users);
-    } catch (error) {
-      console.error("Error fetching all users:", error);
-      res.status(500).json({ error: "Failed to fetch users" });
-    }
-  });
-
   // Get subscription status for a wallet
   app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
     try {
@@ -822,14 +817,14 @@ export async function registerRoutes(
     }
   });
 
-  // Admin: Update user subscription
+  // Admin: Update user subscription (sovereign wallet)
   app.patch("/api/admin/users/:walletAddress/subscription", async (req: Request, res: Response) => {
     try {
-      const adminWallet = req.headers["x-wallet-address"] as string | undefined;
+      const adminWallet = resolveWalletAddressFromRequest(req);
       const { updateSubscriptionSchema } = await import("@shared/schema");
-      
-      if (!adminWallet || !isAdminAddress(adminWallet)) {
-        return res.status(403).json({ error: "Admin access required" });
+
+      if (!isFortressSovereignAddress(adminWallet)) {
+        return res.status(403).json({ error: "Sovereign admin wallet required" });
       }
       
       const validated = updateSubscriptionSchema.safeParse({
@@ -902,12 +897,12 @@ export async function registerRoutes(
     }
   });
 
-  // Get all leads - admin only
+  // Get all leads — sovereign admin only
   app.get("/api/leads", async (req: Request, res: Response) => {
     try {
-      const adminWallet = req.headers["x-wallet-address"] as string | undefined;
-      if (!adminWallet || !isAdminAddress(adminWallet)) {
-        return res.status(403).json({ error: "Admin access required" });
+      const adminWallet = resolveWalletAddressFromRequest(req);
+      if (!isFortressSovereignAddress(adminWallet)) {
+        return res.status(403).json({ error: "Sovereign admin wallet required" });
       }
       const allLeads = await storage.getAllLeads();
       res.json(allLeads);
@@ -1010,13 +1005,6 @@ export async function registerRoutes(
       const message = await storage.createMessage(validated.data);
       const { emitSupportMessage } = await import("./support-events");
       emitSupportMessage(message);
-      if (!asAdmin) {
-        const { notifyTelegramUserSupportMessage, isTelegramConfigured } = await import("./telegram-notify");
-        if (isTelegramConfigured()) {
-          const w = (walletAddress || sessionId || conversationId).toLowerCase();
-          void notifyTelegramUserSupportMessage(w, String(validated.data.message || ""));
-        }
-      }
       res.json(message);
     } catch (error) {
       console.error("Error creating message:", error);
@@ -1024,7 +1012,7 @@ export async function registerRoutes(
     }
   });
 
-  /** Preferred user support path: wallet + timestamp + body → support_tickets + Telegram. */
+  /** Preferred user support path: wallet + timestamp + body → support_tickets. */
   async function handleSupportSendRequest(req: Request, res: Response): Promise<void> {
     try {
       const { supportSendBodySchema, insertSupportMessageSchema } = await import("@shared/schema");
@@ -1110,19 +1098,6 @@ export async function registerRoutes(
       const { emitSupportMessage } = await import("./support-events");
       emitSupportMessage(message);
 
-      if (!asAdmin) {
-        const { notifyTelegramUserSupportMessage, isTelegramConfigured } = await import("./telegram-notify");
-        if (isTelegramConfigured()) {
-          void notifyTelegramUserSupportMessage(bodyWallet.toLowerCase(), parsed.data.message);
-        } else {
-          pushAdminLog({
-            channel: "telegram",
-            level: "warn",
-            message: "User message saved but Telegram is not configured (no phone alert)",
-          });
-        }
-      }
-
       res.json(message);
     } catch (error) {
       console.error("support/send:", error);
@@ -1133,22 +1108,29 @@ export async function registerRoutes(
 
   app.post("/api/support/send", handleSupportSendRequest);
 
-  /** Canonical support ingest: persists to `support_tickets` and notifies Telegram (same as /api/support/send). */
+  /** Canonical support ingest: persists to `support_tickets` (same as /api/support/send). */
   app.post("/api/support", async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
   });
 
-  /** Alias for clients that POST `walletAddress` + `messageContent` (JSON). Same persistence + Telegram as /api/support/send. */
+  /** Alias for clients that POST `walletAddress` + `messageContent` (JSON). Same persistence as /api/support/send. */
   app.post("/api/support/message", async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
   });
 
-  /** Alias of POST /api/support (persist + Telegram). */
+  /** Alias of POST /api/support. */
   app.post("/api/messages", async (req: Request, res: Response) => {
+    const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    req.body = { ...b };
+    return handleSupportSendRequest(req, res);
+  });
+
+  /** Public support ingest alias — same validation and `support_tickets` row as /api/support/send. */
+  app.post("/api/support/chat", async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
@@ -1217,7 +1199,7 @@ export async function registerRoutes(
   // Check if wallet is admin
   app.get("/api/admin/check/:walletAddress", async (req: Request, res: Response) => {
     try {
-      const isAdmin = isAdminAddress(req.params.walletAddress);
+      const isAdmin = isFortressSovereignAddress(req.params.walletAddress);
       res.json({ isAdmin });
     } catch (error) {
       console.error("Error checking admin status:", error);
