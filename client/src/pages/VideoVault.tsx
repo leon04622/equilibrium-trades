@@ -86,8 +86,13 @@ export default function VideoVault() {
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
+  /** Same `tutorial_videos` rows as Admin → Video Manager; keep fresh so new uploads show for Pro subscribers. */
   const { data: apiVideos = [], isLoading: listLoading } = useQuery<TutorialVideo[]>({
     queryKey: ["/api/videos"],
+    staleTime: 30_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const items = useMemo(() => mapApiToVaultItems(apiVideos), [apiVideos]);
@@ -116,8 +121,8 @@ export default function VideoVault() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Lessons from the database — grouped by Beginner Patterns, SMA Masterclass, and Live Sessions from the
-            Command Center.
+            Pro-only library from the same list as Command Center → Video Manager (uploads and links). Grouped by Beginner
+            Patterns, SMA Masterclass, and Live Sessions.
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}

@@ -784,7 +784,9 @@ export default function AdminDashboard() {
                   <CardTitle>Add video</CardTitle>
                   <CardDescription>
                     Upload an MP4/WebM/MOV to the server (<code className="text-[10px]">/api/uploads</code>) or paste a URL, then{" "}
-                    <code className="text-[10px]">POST /api/admin/videos</code>. Vault sections match the Educational Vault.
+                    <code className="text-[10px]">POST /api/admin/videos</code>. Entries appear on{" "}
+                    <strong>Videos</strong> (<Link to="/videos" className="text-primary underline-offset-2 hover:underline">Pro Educational Vault</Link>
+                    ) for paying subscribers.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">

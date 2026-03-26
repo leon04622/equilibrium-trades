@@ -22,7 +22,13 @@ export function tutorialToPlayUrl(v: Pick<TutorialVideo, "youtubeId" | "videoPat
   if (v.youtubeId?.trim()) {
     return `https://www.youtube.com/watch?v=${v.youtubeId.trim()}`;
   }
-  return (v.videoPath || "").trim();
+  const p = (v.videoPath || "").trim();
+  if (!p) return "";
+  if (p.startsWith("http://") || p.startsWith("https://")) return p;
+  if (typeof window !== "undefined" && p.startsWith("/")) {
+    return `${window.location.origin}${p}`;
+  }
+  return p;
 }
 
 const SECTION_LABEL_MATCH: { id: AcademySection; needles: string[] }[] = [
