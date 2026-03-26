@@ -60,6 +60,8 @@ const HL_TP = "#0ecb81";
 const HL_SL = "#f6465d";
 const HL_GUTTER_PX = 72;
 const HL_TAG_BG = "rgba(19, 23, 34, 0.96)";
+/** Tall grab zone so clicks hit the overlay (root is pointer-events: none; gaps fall through to the chart). */
+const TPSL_DRAG_BAND_HALF_PX = 56;
 
 function snapOrderPrice(price: number, refPrice: number): number {
   if (!Number.isFinite(price) || price <= 0) return price;
@@ -97,8 +99,6 @@ function clampTpslDragPrice(
   entry: number,
   mark: number,
   refPrice: number,
-  visMin: number | null,
-  visMax: number | null,
 ): number {
   let p = snapOrderPrice(price, refPrice);
   const tick = tickSize(refPrice || entry || mark);
@@ -124,10 +124,8 @@ function clampTpslDragPrice(
     }
   }
 
-  if (visMin != null && visMax != null && visMax > visMin) {
-    p = Math.min(visMax, Math.max(visMin, p));
-    p = snapOrderPrice(p, refPrice);
-  }
+  // Do not clamp TP/SL to the chart's visible price range: SL often sits at the edge or
+  // just outside what autoscale shows, which pinned the line and made SL drag appear broken.
 
   return p;
 }
@@ -199,8 +197,6 @@ export function ChartOrderLines({
   coordinateToPriceRef.current = coordinateToPrice;
   const activePointerElementRef = useRef<HTMLElement | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
-  const visibleRangeRef = useRef(visiblePriceRange);
-  visibleRangeRef.current = visiblePriceRange;
   const currentPriceRef = useRef(currentPrice);
   currentPriceRef.current = currentPrice;
   const coinRef = useRef(coin);
@@ -263,15 +259,12 @@ export function ChartOrderLines({
       const coordFn = coordinateToPriceRef.current;
       const pos = positionRef.current;
       const refPx = currentPriceRef.current;
-      const vr = visibleRangeRef.current;
       const kind = draggingRef.current;
       if (!coordFn || !pos || !kind) return;
       const raw = coordFn(clientY);
       if (raw === null || raw <= 0) return;
       const snapped = snapOrderPrice(raw, refPx);
       const mark = pos.markPrice || refPx;
-      const vmin = vr?.min ?? null;
-      const vmax = vr?.max ?? null;
       const clamped = clampTpslDragPrice(
         kind,
         snapped,
@@ -279,8 +272,6 @@ export function ChartOrderLines({
         pos.entryPrice,
         mark,
         refPx,
-        vmin,
-        vmax,
       );
       dragPriceRef.current = clamped;
       setDragPrice(clamped);
@@ -301,8 +292,6 @@ export function ChartOrderLines({
       const pos = positionsRef.current.find((p) => p.coin === coinRef.current);
       const refPx = currentPriceRef.current;
       const coordFn = coordinateToPriceRef.current;
-      const vr = visibleRangeRef.current;
-
       // Release pointer capture, if set
       if (activePointerElementRef.current && activePointerIdRef.current !== null) {
         try {
@@ -329,8 +318,6 @@ export function ChartOrderLines({
               pos.entryPrice,
               pos.markPrice || refPx,
               refPx,
-              vr?.min ?? null,
-              vr?.max ?? null,
             )
           : null;
 
@@ -421,8 +408,6 @@ export function ChartOrderLines({
       return;
     }
     const mark = position.markPrice || currentPrice;
-    const vmin = visiblePriceRange?.min ?? null;
-    const vmax = visiblePriceRange?.max ?? null;
     const newPrice = clampTpslDragPrice(
       editMode,
       parsed,
@@ -430,8 +415,6 @@ export function ChartOrderLines({
       position.entryPrice,
       mark,
       currentPrice,
-      vmin,
-      vmax,
     );
     setIsSubmitting(true);
     try {
@@ -449,7 +432,7 @@ export function ChartOrderLines({
     } finally {
       setIsSubmitting(false);
     }
-  }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast, currentPrice, visiblePriceRange]);
+  }, [editMode, editInput, position, coin, tpPrice, slPrice, placeTPSL, toast, currentPrice]);
 
   const beginTpslDrag = useCallback(
     (e: React.PointerEvent, line: { price: number; isGhost?: boolean; editType?: "tp" | "sl" }) => {
@@ -613,7 +596,7 @@ export function ChartOrderLines({
       editType: "sl",
       labelSide: "right",
       isGhost: true,
-      rowZ: 40,
+      rowZ: 44,
       canvasLine: nativeTpslLines,
     });
   }
@@ -632,7 +615,7 @@ export function ChartOrderLines({
       cancelType: "sl",
       editType: "sl",
       labelSide: "right",
-      rowZ: 42,
+      rowZ: 46,
       canvasLine: nativeTpslLines,
     });
   }
@@ -657,7 +640,7 @@ export function ChartOrderLines({
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 z-[15] overflow-hidden"
+      className="absolute inset-0 z-[17] overflow-hidden"
       style={{ pointerEvents: "none", height: containerHeight || undefined }}
       data-testid="chart-order-lines"
     >
@@ -722,7 +705,10 @@ export function ChartOrderLines({
         const tpslHot = useDragBand && (line.editType === "tp" || line.editType === "sl");
         const tpslActive = tpslHot && dragging === line.editType;
 
-        const bandStyle = rowStyleFromLayout(layout, 22);
+        const bandStyle = rowStyleFromLayout(
+          layout,
+          useDragBand ? TPSL_DRAG_BAND_HALF_PX : 22,
+        );
         const centerStyle = centerStyleFromLayout(layout);
         const outerStyle: CSSProperties = useDragBand
           ? { ...bandStyle, zIndex: z }

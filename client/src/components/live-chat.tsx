@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { MessageCircle, X, Send, Shield, User, Minimize2, Loader2, ArrowLeft } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
+import { useSidebar } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { SupportMessage } from "@shared/schema";
@@ -55,9 +56,14 @@ function playNotificationSound() {
   }
 }
 
+/** Matches App.tsx SidebarProvider --sidebar-width / --sidebar-width-icon for docked panel position. */
+const SIDEBAR_W = "16rem";
+const SIDEBAR_ICON_W = "3.5rem";
+
 export function LiveChat() {
-  const { isOpen, openChat, closeChat, pendingMessage, clearPendingMessage } = useChat();
+  const { isOpen, closeChat, pendingMessage, clearPendingMessage } = useChat();
   const { toast } = useToast();
+  const { state, isMobile } = useSidebar();
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -184,34 +190,29 @@ export function LiveChat() {
     sendMutation.mutate(content.trim());
   };
 
-  const chatContent = !isOpen ? (
-    <button
-      onClick={() => openChat()}
-      className="fixed bottom-24 right-4 md:bottom-6 md:right-6 flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 h-12 rounded-full shadow-2xl transition-all duration-200 hover:scale-105 active:scale-95"
-      style={{ zIndex: 100000 }}
-      data-testid="button-open-chat"
-    >
-      <MessageCircle className="h-5 w-5 shrink-0" />
-      <span className="font-semibold text-sm whitespace-nowrap">Chat Support</span>
-      {isAdmin && totalUnread > 0 && (
-        <span className="flex items-center justify-center h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold">
-          {totalUnread}
-        </span>
-      )}
-      {!isAdmin && (
-        <span className="relative flex h-2 w-2 shrink-0">
-          <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-green-400 opacity-75" />
-          <span className="relative h-2 w-2 rounded-full bg-green-500" />
-        </span>
-      )}
-    </button>
-  ) : (
+  const dockedLeft =
+    isMobile
+      ? undefined
+      : state === "expanded"
+        ? `calc(${SIDEBAR_W} + 0.75rem)`
+        : `calc(${SIDEBAR_ICON_W} + 0.75rem)`;
+
+  const positionStyle: CSSProperties = {
+    zIndex: 100000,
+    ...(dockedLeft != null ? { left: dockedLeft, right: "auto" } : {}),
+  };
+
+  const positionClassName = cn(
+    "fixed flex flex-col bg-background border rounded-xl shadow-2xl transition-all duration-200",
+    isMobile && "left-3 right-3 bottom-24 max-w-none",
+    !isMobile && "bottom-6",
+    isMinimized ? "w-72 h-14" : "w-[340px] sm:w-96 h-[480px] max-h-[80vh]",
+  );
+
+  const chatContent = !isOpen ? null : (
     <div
-      className={cn(
-        "fixed bottom-24 right-4 md:bottom-6 md:right-6 flex flex-col bg-background border rounded-xl shadow-2xl transition-all duration-200",
-        isMinimized ? "w-72 h-14" : "w-[340px] sm:w-96 h-[480px] max-h-[80vh]"
-      )}
-      style={{ zIndex: 100000 }}
+      className={positionClassName}
+      style={positionStyle}
       data-testid="live-chat-widget"
     >
       <div className="flex items-center justify-between px-4 py-3 border-b bg-primary text-primary-foreground rounded-t-xl">
@@ -426,5 +427,6 @@ export function LiveChat() {
     </div>
   );
 
+  if (!isOpen) return null;
   return createPortal(chatContent, document.body);
 }

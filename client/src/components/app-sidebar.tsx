@@ -13,6 +13,7 @@ import {
   Play,
   CandlestickChart,
   Shield,
+  MessageCircle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -30,6 +31,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/lib/wallet-context";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { useChat } from "@/lib/chat-context";
+import { useQuery } from "@tanstack/react-query";
 
 const mainNavItems = [
   {
@@ -107,6 +110,27 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { address } = useWallet();
   const { isAdmin } = useIsAdmin();
+  const { openChat } = useChat();
+
+  const { data: supportConversations = [] } = useQuery<
+    { conversationId: string; lastMessage: { message: string }; unreadCount: number }[]
+  >({
+    queryKey: ["/api/support/conversations"],
+    queryFn: async () => {
+      if (!address) return [];
+      const res = await fetch("/api/support/conversations", {
+        headers: { "x-wallet-address": address },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: isAdmin && !!address,
+    refetchInterval: 30_000,
+  });
+
+  const supportUnread = isAdmin
+    ? supportConversations.reduce((sum, c) => sum + c.unreadCount, 0)
+    : 0;
 
   return (
     <Sidebar>
@@ -202,6 +226,25 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  type="button"
+                  onClick={() => openChat()}
+                  tooltip="Chat Support"
+                  data-testid="nav-chat-support"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span>Chat Support</span>
+                  {supportUnread > 0 && (
+                    <Badge
+                      variant="destructive"
+                      className="ml-auto text-[10px] px-1.5 py-0"
+                    >
+                      {supportUnread}
+                    </Badge>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

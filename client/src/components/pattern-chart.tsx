@@ -190,6 +190,8 @@ function PatternChartComponent({
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
 
   // Y must be relative to the candlestick pane (LW v5 multi-pane / volume subplot).
+  // Volume histogram uses the bottom ~20% (priceScaleId "volume", scaleMargins top: 0.8).
+  // Pointer Y in that strip often makes coordinateToPrice return null — breaks SL drag for longs.
   const coordinateToPrice = useCallback((clientY: number): number | null => {
     try {
       const series = candleSeriesRef.current;
@@ -198,7 +200,10 @@ function PatternChartComponent({
       const pane0 = chart.panes()[0];
       const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
       if (!paneEl) return null;
-      const yRel = clientY - paneEl.getBoundingClientRect().top;
+      const rect = paneEl.getBoundingClientRect();
+      const paneH = rect.height;
+      const yRelRaw = clientY - rect.top;
+      const yRel = Math.max(0, Math.min(paneH > 1 ? paneH * 0.8 - 1 : paneH, yRelRaw));
       const price = series.coordinateToPrice(yRel);
       return price !== null && price !== undefined ? Number(price) : null;
     } catch {

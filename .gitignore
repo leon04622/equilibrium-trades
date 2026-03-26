@@ -1,5 +1,6 @@
 node_modules
 dist
+uploads/
 
 # Secrets — never push these to GitHub (set vars in Railway instead)
 .env

@@ -18,6 +18,24 @@ interface UseUploadOptions {
   onError?: (error: Error) => void;
 }
 
+async function parseUploadJsonResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("Empty response from upload server");
+  }
+  if (trimmed.startsWith("<")) {
+    throw new Error(
+      "Upload API returned HTML instead of JSON. Open the app via the same dev server as the API (one PORT), or enable USE_REPLIT_OBJECT_STORAGE=1 for cloud uploads.",
+    );
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new Error(trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed);
+  }
+}
+
 /**
  * React hook for handling file uploads with presigned URLs.
  *
@@ -74,12 +92,32 @@ export function useUpload(options: UseUploadOptions = {}) {
         }),
       });
 
+      const data = (await parseUploadJsonResponse(response)) as {
+        error?: string;
+        uploadURL?: string;
+        objectPath?: string;
+        metadata?: UploadMetadata;
+      };
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get upload URL");
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Failed to get upload URL",
+        );
       }
 
-      return response.json();
+      if (!data.uploadURL || !data.objectPath) {
+        throw new Error("Invalid upload URL response from server");
+      }
+
+      return {
+        uploadURL: data.uploadURL,
+        objectPath: data.objectPath,
+        metadata: data.metadata ?? {
+          name: file.name,
+          size: file.size,
+          contentType: file.type || "application/octet-stream",
+        },
+      };
     },
     []
   );
@@ -174,11 +212,21 @@ export function useUpload(options: UseUploadOptions = {}) {
         }),
       });
 
+      const data = (await parseUploadJsonResponse(response)) as {
+        uploadURL?: string;
+        error?: string;
+      };
+
       if (!response.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Failed to get upload URL",
+        );
+      }
+
+      if (!data.uploadURL) {
         throw new Error("Failed to get upload URL");
       }
 
-      const data = await response.json();
       return {
         method: "PUT",
         url: data.uploadURL,
