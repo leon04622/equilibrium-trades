@@ -821,7 +821,8 @@ export function ChartOrderLines({
           <div
             key={line.key}
             className={cn("absolute left-0 right-0", tpslHot && "group/tpsl")}
-            style={outerStyle}
+            style={line.canEdit && line.editType ? { ...outerStyle, pointerEvents: "auto" } : outerStyle}
+            onPointerDown={line.canEdit && line.editType ? (e) => beginTpslDrag(e, { price: line.price, isGhost: line.isGhost, editType: line.editType }) : undefined}
           >
             {!line.canvasLine && (
               <div
