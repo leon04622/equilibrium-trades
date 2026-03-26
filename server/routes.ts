@@ -55,33 +55,53 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   return ["BTC", "ETH", "SOL"];
 }
 
+function useReplitObjectStorageEnabled(): boolean {
+  const v = process.env.USE_REPLIT_OBJECT_STORAGE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** Replit GCS when env is valid; otherwise local `uploads/videos` (same `/api/uploads/*` API as useUpload). */
+async function registerVideoUploadRoutes(app: Express): Promise<void> {
+  if (!useReplitObjectStorageEnabled()) {
+    registerLocalUploadRoutes(app);
+    return;
+  }
+  try {
+    const { ObjectStorageService } = await import(
+      "./replit_integrations/object_storage/objectStorage"
+    );
+    new ObjectStorageService().getPrivateObjectDir();
+    registerObjectStorageRoutes(app);
+  } catch (error) {
+    console.warn(
+      "USE_REPLIT_OBJECT_STORAGE is set but Replit object storage is not usable (PRIVATE_OBJECT_DIR / bucket / non-Replit host). Using local disk uploads instead:",
+      error,
+    );
+    registerLocalUploadRoutes(app);
+  }
+}
+
+/** Built-in / env admins plus Equilibrium master wallet (video CRUD, etc.). */
+function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
+  if (!walletAddress) return false;
+  return isAdminAddress(walletAddress) || isMasterAdminAddress(walletAddress);
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
     const walletAddress = req.headers["x-wallet-address"] as string | undefined;
-    res.json({ isAdmin: isAdminAddress(walletAddress) });
+    res.json({
+      isAdmin: isAppAdminWallet(walletAddress),
+    });
   });
 
   // Register OpenAI chat routes
   registerChatRoutes(app);
 
-  // Replit GCS presigned URLs when enabled; otherwise local disk (same API shape as useUpload).
-  const useReplitObjectStorage = process.env.USE_REPLIT_OBJECT_STORAGE === "1";
-  if (useReplitObjectStorage) {
-    try {
-      registerObjectStorageRoutes(app);
-    } catch (error) {
-      console.warn(
-        "Failed to initialize Replit object storage routes, falling back to local uploads:",
-        error,
-      );
-      registerLocalUploadRoutes(app);
-    }
-  } else {
-    registerLocalUploadRoutes(app);
-  }
+  await registerVideoUploadRoutes(app);
 
   // Get all subscription tiers
   app.get("/api/subscriptions", async (req: Request, res: Response) => {
@@ -458,7 +478,7 @@ export async function registerRoutes(
       const { insertVideoSchema } = await import("@shared/schema");
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       
-      if (!walletAddress || !isAdminAddress(walletAddress)) {
+      if (!isAppAdminWallet(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       
@@ -481,7 +501,7 @@ export async function registerRoutes(
     try {
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       
-      if (!walletAddress || !isAdminAddress(walletAddress)) {
+      if (!isAppAdminWallet(walletAddress)) {
         return res.status(403).json({ error: "Admin access required" });
       }
       

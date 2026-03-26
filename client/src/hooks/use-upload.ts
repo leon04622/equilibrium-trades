@@ -139,7 +139,13 @@ export function useUpload(options: UseUploadOptions = {}) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to upload file to storage");
+        const corsHint =
+          uploadURL.startsWith("http") && !uploadURL.startsWith(window.location.origin)
+            ? " If this is cloud storage, confirm bucket CORS allows browser PUT from your domain."
+            : "";
+        throw new Error(
+          `Upload failed (${response.status} ${response.statusText || ""}).${corsHint}`.trim(),
+        );
       }
     },
     []

@@ -28,6 +28,13 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { ProSubscriptionRoute } from "@/components/protected-route";
 import type { TutorialVideo } from "@shared/schema";
 
+const VIDEO_FILE_RE = /\.(mp4|webm|ogg|ogv|mov|m4v|mkv|avi|wmv|3gp|ts)$/i;
+
+function isLikelyVideoFile(file: File): boolean {
+  if (file.type.startsWith("video/")) return true;
+  return VIDEO_FILE_RE.test(file.name);
+}
+
 interface VideoPlayerProps {
   video: TutorialVideo | null;
   open: boolean;
@@ -313,7 +320,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith("video/")) {
+    if (file && isLikelyVideoFile(file)) {
       uploadFile(file);
     } else {
       toast({ title: "Please drop a video file", variant: "destructive" });
@@ -322,9 +329,12 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (file && isLikelyVideoFile(file)) {
       uploadFile(file);
+    } else if (file) {
+      toast({ title: "Please choose a video file", variant: "destructive" });
     }
+    e.target.value = "";
   };
 
   return (
@@ -394,7 +404,7 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
               </p>
               <input
                 type="file"
-                accept="video/*"
+                accept="video/*,.mp4,.webm,.mov,.m4v,.mkv,.avi,.ogg,.ogv"
                 className="hidden"
                 id="video-upload"
                 onChange={handleFileSelect}
