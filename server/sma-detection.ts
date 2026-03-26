@@ -63,7 +63,7 @@ export interface CrossoverSignal {
 }
 
 // Timeframe-specific thresholds (minMovePercent = minimum pole size vs price; slightly looser on 1m–5m for real flags)
-function getThresholds(timeframe: string) {
+export function getThresholds(timeframe: string) {
   const thresholds: Record<string, { minMovePercent: number; minBreakoutPercent: number; lookback: number }> = {
     "1m":  { minMovePercent: 0.10, minBreakoutPercent: 0.04, lookback: 30 },
     "3m":  { minMovePercent: 0.14, minBreakoutPercent: 0.05, lookback: 32 },
@@ -737,7 +737,8 @@ export function getPatternStructuralBias(p: DetectedPattern): "bullish" | "beari
 /** Run all geometry-based detectors without using MA bias to gate which runs. */
 export function collectPatternCandidates(
   candles: HyperliquidCandle[],
-  timeframe: string
+  timeframe: string,
+  options?: { skipFlags?: boolean },
 ): DetectedPattern[] {
   const candidates: DetectedPattern[] = [];
   const add = (p: DetectedPattern | null) => {
@@ -745,8 +746,10 @@ export function collectPatternCandidates(
     if (candidates.some((c) => patternsLooselyEqual(c, p))) return;
     candidates.push(p);
   };
-  add(detectFlagPattern(candles, true, timeframe));
-  add(detectFlagPattern(candles, false, timeframe));
+  if (!options?.skipFlags) {
+    add(detectFlagPattern(candles, true, timeframe));
+    add(detectFlagPattern(candles, false, timeframe));
+  }
   add(detectTrianglePattern(candles, true, timeframe));
   add(detectTrianglePattern(candles, false, timeframe));
   add(detectDoublePattern(candles, true, timeframe));

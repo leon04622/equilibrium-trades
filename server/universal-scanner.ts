@@ -13,6 +13,11 @@ import {
   getPatternStructuralBias,
   type DetectedPattern,
 } from "./sma-detection";
+import {
+  runApexGeometricFlagScan,
+  is15mTrendBullish,
+  is15mTrendBearish,
+} from "./ApexDetectionEngine";
 
 export const UNIVERSAL_SCAN_TIMEFRAMES = [
   "1m",
@@ -62,6 +67,10 @@ export interface EducationalPatternSignal {
   volumeConfirmed?: boolean;
   /** Human-readable trend-first context */
   marketBiasLabel?: string;
+  /** Apex geometric engine (pole + pivot flag) */
+  apexEngineNote?: string;
+  apexScanState?: "no_pattern" | "ranging" | "bull_flag" | "bear_flag";
+  apexTier?: "high_probability_trend_aligned" | "standard" | "no_pattern_apex";
 }
 
 function vol(c: HyperliquidCandle): number {
@@ -413,10 +422,13 @@ export async function analyzeEducationalUniversal(
   coin: string,
   timeframe: string,
   candles: HyperliquidCandle[],
+  mtfBundle?: Record<string, HyperliquidCandle[]>,
 ): Promise<EducationalPatternSignal | null> {
   if (candles.length < 200) return null;
   const currentSMA = calculateSMAFromCandles(candles);
   if (!currentSMA) return null;
+
+  const apexResult = runApexGeometricFlagScan(candles, timeframe);
 
   const { bias: marketBias, label: marketBiasLabel } = inferMarketBias(candles);
   const prev = candles.slice(0, -5);
@@ -424,14 +436,13 @@ export async function analyzeEducationalUniversal(
   const crossover = detectCrossover(currentSMA, prevSma);
 
   const candMap = new Map<string, { p: DetectedPattern; volumeOk: boolean }>();
-  const base = collectPatternCandidates(candles, timeframe);
+  const base = collectPatternCandidates(candles, timeframe, { skipFlags: true });
   sortPatternCandidatesByActionability(base);
   for (const p of base) upsertByScore(candMap, { p, volumeOk: false }, marketBias);
 
-  const sb = detectStrictFlagWithVolume(candles, true);
-  const ss = detectStrictFlagWithVolume(candles, false);
-  if (sb) upsertByScore(candMap, { p: sb.pattern, volumeOk: sb.volumeOk }, marketBias);
-  if (ss) upsertByScore(candMap, { p: ss.pattern, volumeOk: ss.volumeOk }, marketBias);
+  if (apexResult.pattern) {
+    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: true }, marketBias);
+  }
 
   const hs = detectHeadAndShoulders(candles);
   const ihs = detectInverseHeadAndShoulders(candles);
@@ -482,6 +493,9 @@ export async function analyzeEducationalUniversal(
         ? "Price confirms the crossover side of both SMMAs."
         : "Crossover printed; wait for price to hold the directional side of 21/200.",
       marketBiasLabel,
+      apexEngineNote: apexResult.note,
+      apexScanState: apexResult.scanState,
+      apexTier: "no_pattern_apex",
     };
   }
 
@@ -536,6 +550,32 @@ export async function analyzeEducationalUniversal(
 
   const smaRelationship = `${marketBiasLabel} Pattern: ${best.p.displayName}.`;
 
+  let apexTier: EducationalPatternSignal["apexTier"] = apexResult.pattern ? "standard" : "no_pattern_apex";
+  if (apexResult.pattern?.name === "bull_flag") {
+    if (timeframe === "1m" && mtfBundle && is15mTrendBullish(mtfBundle)) {
+      apexTier = "high_probability_trend_aligned";
+    } else if (
+      (timeframe === "1h" || timeframe === "4h") &&
+      currentSMA.sma21 > currentSMA.sma200 * 1.0001
+    ) {
+      apexTier = "high_probability_trend_aligned";
+    }
+  } else if (apexResult.pattern?.name === "bear_flag") {
+    if (timeframe === "1m" && mtfBundle && is15mTrendBearish(mtfBundle)) {
+      apexTier = "high_probability_trend_aligned";
+    } else if (
+      (timeframe === "1h" || timeframe === "4h") &&
+      currentSMA.sma21 < currentSMA.sma200 * 0.9999
+    ) {
+      apexTier = "high_probability_trend_aligned";
+    }
+  }
+
+  const apexPrefix =
+    apexTier === "high_probability_trend_aligned"
+      ? "High Probability — Trend Aligned (1m flag × 15m SMMA). "
+      : "";
+
   return {
     id: `${coin}-${timeframe}-${Date.now()}`,
     coin,
@@ -546,8 +586,10 @@ export async function analyzeEducationalUniversal(
     sma21: s21,
     sma200: s200,
     currentPrice: price,
-    smaRelationship,
-    educationalNote,
+    smaRelationship: apexPrefix + smaRelationship,
+    educationalNote: apexResult.pattern
+      ? `${apexPrefix}${apexResult.note} ${educationalNote}`
+      : educationalNote,
     whatToWatch,
     detectedAt: new Date(),
     tradeable,
@@ -555,6 +597,9 @@ export async function analyzeEducationalUniversal(
     counterTrend,
     volumeConfirmed: best.volumeOk,
     marketBiasLabel,
+    apexEngineNote: apexResult.note,
+    apexScanState: apexResult.scanState,
+    apexTier,
   };
 }
 
@@ -567,7 +612,7 @@ async function scanOneCoinMtf(
   const tasks = timeframes.map(
     (tf) => () =>
       bundle[tf] && bundle[tf]!.length >= 200
-        ? analyzeEducationalUniversal(coin, tf, bundle[tf]!)
+        ? analyzeEducationalUniversal(coin, tf, bundle[tf]!, bundle)
         : Promise.resolve(null),
   );
   const results = await Promise.all(tasks.map((fn) => tfLimit(fn)));

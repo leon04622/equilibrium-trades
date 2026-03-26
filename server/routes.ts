@@ -331,6 +331,14 @@ export async function registerRoutes(
         : [...SCAN_ALL_TIMEFRAMES];
 
       const patterns = await scanForEducationalPatterns(coins, timeframes);
+      try {
+        const { notifyTelegramApexHighProbability } = await import("./telegram-notify");
+        for (const s of patterns) {
+          void notifyTelegramApexHighProbability(s);
+        }
+      } catch {
+        /* non-fatal */
+      }
       res.json(patterns);
     } catch (error) {
       console.error("Error scanning for educational patterns:", error);
