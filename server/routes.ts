@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import { registerLocalUploadRoutes } from "./local-upload-routes";
 import { analyzePatterns, getMarketCondition } from "./pattern-detection";
 import { 
   getAvailableCoins, 
@@ -54,9 +55,11 @@ export async function registerRoutes(
   // Register OpenAI chat routes
   registerChatRoutes(app);
 
-  // Replit Object Storage sidecar only — off by default for self-hosted (Railway, Render, VPS).
+  // Replit GCS presigned URLs when enabled; otherwise local disk (same API shape as useUpload).
   if (process.env.USE_REPLIT_OBJECT_STORAGE === "1") {
     registerObjectStorageRoutes(app);
+  } else {
+    registerLocalUploadRoutes(app);
   }
 
   // Get all subscription tiers
@@ -446,7 +449,9 @@ export async function registerRoutes(
       res.json(video);
     } catch (error) {
       console.error("Error creating video:", error);
-      res.status(500).json({ error: "Failed to create video" });
+      const message =
+        error instanceof Error ? error.message : "Failed to create video";
+      res.status(500).json({ error: message });
     }
   });
 

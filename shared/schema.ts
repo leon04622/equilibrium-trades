@@ -108,17 +108,28 @@ export const insertTutorialVideoSchema = createInsertSchema(tutorialVideos).omit
 export type InsertTutorialVideo = z.infer<typeof insertTutorialVideoSchema>;
 export type TutorialVideo = typeof tutorialVideos.$inferSelect;
 
-export const insertVideoSchema = z.object({
-  title: z.string().min(1, "Title is required"),
-  description: z.string().min(1, "Description is required"),
-  duration: z.string().optional().default(""),
-  category: z.enum(["strategy", "platform", "tips"]),
-  youtubeId: z.string().optional(),
-  videoPath: z.string().optional(),
-  thumbnailPath: z.string().optional(),
-}).refine(data => data.youtubeId || data.videoPath, {
-  message: "Either YouTube ID or uploaded video is required"
-});
+const optionalTrimmed = z
+  .string()
+  .optional()
+  .transform((s) => {
+    if (s == null || s === "") return undefined;
+    const t = s.trim();
+    return t === "" ? undefined : t;
+  });
+
+export const insertVideoSchema = z
+  .object({
+    title: z.string().trim().min(1, "Title is required"),
+    description: z.string().trim().min(1, "Description is required"),
+    duration: z.string().optional().default(""),
+    category: z.enum(["strategy", "platform", "tips"]),
+    youtubeId: optionalTrimmed,
+    videoPath: optionalTrimmed,
+    thumbnailPath: optionalTrimmed,
+  })
+  .refine((data) => !!(data.youtubeId || data.videoPath), {
+    message: "Either YouTube ID or uploaded video is required",
+  });
 
 // Wallet Users - Database table for persistent storage
 export const walletUsers = pgTable("wallet_users", {

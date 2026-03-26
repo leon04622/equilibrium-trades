@@ -238,8 +238,23 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
         },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to create video");
-      return res.json();
+      const text = await res.text();
+      if (!res.ok) {
+        let message = "Failed to create video";
+        try {
+          const j = JSON.parse(text) as {
+            error?: string;
+            details?: { message?: string }[];
+          };
+          if (typeof j.error === "string") message = j.error;
+          const first = j.details?.[0];
+          if (first && typeof first.message === "string") message = first.message;
+        } catch {
+          if (text) message = text.slice(0, 200);
+        }
+        throw new Error(message);
+      }
+      return text ? JSON.parse(text) : {};
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
@@ -247,8 +262,12 @@ function AddVideoForm({ onSuccess }: { onSuccess: () => void }) {
       resetForm();
       onSuccess();
     },
-    onError: () => {
-      toast({ title: "Failed to add video", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({
+        title: "Failed to add video",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 

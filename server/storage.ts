@@ -99,6 +99,8 @@ export class MemStorage implements IStorage {
   private subscriptionTiers: Map<string, SubscriptionTier>;
   private tradeGrades: Map<string, TradeGrade>;
   private walletUsersCache: Map<string, WalletUser>;
+  /** In-memory tutorial videos when DATABASE_URL is unset (dev / no DB). */
+  private tutorialVideosMem: TutorialVideo[] = [];
 
   constructor() {
     this.users = new Map();
@@ -351,9 +353,13 @@ export class MemStorage implements IStorage {
     };
   }
 
-  // Tutorial Videos - Now using database for persistence
+  // Tutorial Videos - database when configured; otherwise in-memory (same process lifetime)
   async getAllVideos(): Promise<TutorialVideo[]> {
-    if (!db) return [];
+    if (!db) {
+      return [...this.tutorialVideosMem].sort(
+        (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0),
+      );
+    }
     try {
       const videos = await db.select().from(tutorialVideos).orderBy(desc(tutorialVideos.createdAt));
       return videos;
@@ -363,7 +369,9 @@ export class MemStorage implements IStorage {
   }
 
   async getVideo(id: string): Promise<TutorialVideo | undefined> {
-    if (!db) return undefined;
+    if (!db) {
+      return this.tutorialVideosMem.find((v) => v.id === id);
+    }
     try {
       const [video] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
       return video;
@@ -373,7 +381,7 @@ export class MemStorage implements IStorage {
   }
 
   async createVideo(video: InsertTutorialVideo): Promise<TutorialVideo> {
-    const fallback: TutorialVideo = {
+    const row: TutorialVideo = {
       id: randomUUID(),
       title: video.title,
       description: video.description,
@@ -384,9 +392,13 @@ export class MemStorage implements IStorage {
       thumbnailPath: video.thumbnailPath ?? null,
       createdAt: new Date(),
     };
-    if (!db) return fallback;
-    try {
-      const [newVideo] = await db.insert(tutorialVideos).values({
+    if (!db) {
+      this.tutorialVideosMem.unshift(row);
+      return row;
+    }
+    const [newVideo] = await db
+      .insert(tutorialVideos)
+      .values({
         title: video.title,
         description: video.description,
         duration: video.duration || "",
@@ -394,15 +406,20 @@ export class MemStorage implements IStorage {
         youtubeId: video.youtubeId || null,
         videoPath: video.videoPath || null,
         thumbnailPath: video.thumbnailPath || null,
-      }).returning();
-      return newVideo;
-    } catch {
-      return fallback;
-    }
+      })
+      .returning();
+    return newVideo;
   }
 
   async deleteVideo(id: string): Promise<boolean> {
-    if (!db) return false;
+    if (!db) {
+      const i = this.tutorialVideosMem.findIndex((v) => v.id === id);
+      if (i >= 0) {
+        this.tutorialVideosMem.splice(i, 1);
+        return true;
+      }
+      return false;
+    }
     try {
       const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
       return result.length > 0;
