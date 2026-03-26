@@ -88,7 +88,7 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { address } = useWallet();
   const { isMasterAdmin } = useIsMasterAdmin();
-  const { openChat } = useChat();
+  const { openChat, openSupportInbox } = useChat();
 
   const { data: supportConversations = [] } = useQuery<
     { conversationId: string; lastMessage: { message: string }; unreadCount: number }[]
@@ -230,7 +230,7 @@ export function AppSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   type="button"
-                  onClick={() => openChat()}
+                  onClick={() => (isMasterAdmin ? openSupportInbox() : openChat())}
                   tooltip="Chat Support"
                   data-testid="nav-chat-support"
                 >

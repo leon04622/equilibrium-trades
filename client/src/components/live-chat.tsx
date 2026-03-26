@@ -62,7 +62,15 @@ const SIDEBAR_W = "16rem";
 const SIDEBAR_ICON_W = "3.5rem";
 
 export function LiveChat() {
-  const { isOpen, closeChat, pendingMessage, clearPendingMessage } = useChat();
+  const {
+    isOpen,
+    closeChat,
+    pendingMessage,
+    clearPendingMessage,
+    pendingSupportConversationId,
+    clearPendingSupportConversation,
+    supportInboxListKey,
+  } = useChat();
   const { toast } = useToast();
   const { state, isMobile } = useSidebar();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -84,6 +92,29 @@ export function LiveChat() {
 
   const { isMasterAdmin } = useIsMasterAdmin();
   const conversationId = isMasterAdmin ? selectedConversation : conversationOwnerId;
+
+  useEffect(() => {
+    if (!isOpen || !isMasterAdmin) return;
+    if (pendingSupportConversationId) {
+      setSelectedConversation(pendingSupportConversationId.toLowerCase());
+      clearPendingSupportConversation();
+    }
+  }, [isOpen, isMasterAdmin, pendingSupportConversationId, clearPendingSupportConversation]);
+
+  useEffect(() => {
+    if (!isMasterAdmin || supportInboxListKey === 0) return;
+    setSelectedConversation(null);
+  }, [supportInboxListKey, isMasterAdmin]);
+
+  useEffect(() => {
+    if (!isOpen || !isMasterAdmin || !selectedConversation || !address) return;
+    void fetch(`/api/support/messages/${encodeURIComponent(selectedConversation)}/read`, {
+      method: "POST",
+      headers: { "x-wallet-address": address },
+    }).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["/api/support/conversations"] });
+    });
+  }, [isOpen, isMasterAdmin, selectedConversation, address]);
 
   const buildHeaders = useCallback(() => {
     const h: Record<string, string> = {};

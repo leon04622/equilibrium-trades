@@ -12,6 +12,8 @@ import {
   Zap,
   Crown,
   Sparkles,
+  MessageCircle,
+  ExternalLink,
 } from "lucide-react";
 import type { WalletUser, SupportMessage } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -30,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useWallet } from "@/lib/wallet-context";
+import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO, TIER_MENTOR } from "@/lib/subscription-pricing";
@@ -56,6 +59,7 @@ function useAdminApi(address: string | undefined): AxiosInstance {
 
 export default function AdminDashboard() {
   const { address } = useWallet();
+  const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -159,9 +163,10 @@ export default function AdminDashboard() {
   const sendReply = useMutation({
     mutationFn: async () => {
       if (!replyConv.trim() || !replyText.trim()) throw new Error("Pick a conversation and enter a message");
-      const { data, status } = await api.post("/api/command-center/support/reply", {
+      const { data, status } = await api.post("/api/support/messages", {
         conversationId: replyConv.trim().toLowerCase(),
         message: replyText.trim(),
+        senderName: "Support Team",
       });
       if (status < 200 || status >= 300) throw new Error((data as { error?: string })?.error || "Send failed");
       return data;
@@ -169,7 +174,9 @@ export default function AdminDashboard() {
     onSuccess: () => {
       setReplyText("");
       void refetchMessages();
-      toast({ title: "Reply sent" });
+      void queryClient.invalidateQueries({ queryKey: ["/api/support/conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/support/messages"] });
+      toast({ title: "Reply sent", description: "Customer sees this in Live Support and via real-time sync." });
     },
     onError: (e: Error) => toast({ title: "Reply failed", description: e.message, variant: "destructive" }),
   });
@@ -230,15 +237,20 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
-      <div className="flex items-center gap-2">
-        <Shield className="h-7 w-7 text-primary" />
-        <div>
-          <h1 className="text-xl font-bold">Equilibrium Command Center</h1>
-          <p className="text-xs text-muted-foreground">
-            <code className="text-[10px]">/api/users</code> · <code className="text-[10px]">/api/messages</code> · Pro ${TIER_PRO} /
-            Mentoring ${TIER_MENTOR}
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-7 w-7 text-primary" />
+          <div>
+            <h1 className="text-xl font-bold">Equilibrium Command Center</h1>
+            <p className="text-xs text-muted-foreground">
+              CRM + tickets · same pipeline as Live Support · Pro ${TIER_PRO} / Mentoring ${TIER_MENTOR}
+            </p>
+          </div>
         </div>
+        <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
+          <MessageCircle className="h-4 w-4" />
+          Open support inbox
+        </Button>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
@@ -297,6 +309,15 @@ export default function AdminDashboard() {
                             <TableCell className="text-right space-x-1">
                               <Button
                                 size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                title="Chat with this wallet"
+                                onClick={() => openSupportInbox(u.walletAddress.toLowerCase())}
+                              >
+                                <MessageCircle className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
                                 variant="secondary"
                                 className="h-8 text-[10px]"
                                 disabled={overrideMutation.isPending}
@@ -332,7 +353,9 @@ export default function AdminDashboard() {
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
                     <CardTitle>Tickets</CardTitle>
-                    <CardDescription>User messages (newest threads first). Telegram alerts use server webhook config.</CardDescription>
+                    <CardDescription>
+                      Newest threads first. User messages hit Telegram when <code className="text-[10px]">TELEGRAM_*</code> env is set.
+                    </CardDescription>
                   </div>
                   <Button variant="outline" size="icon" onClick={() => void refetchMessages()} disabled={msgLoading}>
                     <RefreshCw className={cn("h-4 w-4", msgLoading && "animate-spin")} />
@@ -344,18 +367,32 @@ export default function AdminDashboard() {
                   ) : (
                     <ScrollArea className="h-[360px] space-y-2">
                       {conversations.map(([cid, msgs]) => (
-                        <button
+                        <div
                           key={cid}
-                          type="button"
-                          onClick={() => setReplyConv(cid)}
                           className={cn(
-                            "w-full text-left rounded-lg border p-2 mb-2 text-xs",
+                            "rounded-lg border p-2 mb-2 text-xs flex gap-2 items-start",
                             replyConv === cid ? "border-primary bg-primary/5" : "hover:bg-muted/50",
                           )}
                         >
-                          <div className="font-mono truncate">{cid}</div>
-                          <div className="text-muted-foreground line-clamp-2 mt-1">{msgs[msgs.length - 1]?.message}</div>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyConv(cid)}
+                            className="flex-1 min-w-0 text-left"
+                          >
+                            <div className="font-mono truncate">{cid}</div>
+                            <div className="text-muted-foreground line-clamp-2 mt-1">{msgs[msgs.length - 1]?.message}</div>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            title="Open in floating chat"
+                            onClick={() => openSupportInbox(cid)}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       ))}
                     </ScrollArea>
                   )}
@@ -364,7 +401,7 @@ export default function AdminDashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle>Thread & reply</CardTitle>
-                  <CardDescription>POST /api/command-center/support/reply</CardDescription>
+                  <CardDescription>Uses the same endpoint as Live Support — customers receive via SSE + polling.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-1">
