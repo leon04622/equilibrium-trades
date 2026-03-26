@@ -18,6 +18,7 @@ import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import "@/chart-tpsl/stable-contract";
 import { ChartOrderLines } from "@/components/chart-order-lines";
 import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
@@ -739,8 +740,10 @@ function PatternChartComponent({
     }
   }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
 
+  // STABLE TP/SL IMPLEMENTATION — DO NOT MODIFY WITHOUT FULL TESTING
   // Entry / Liq: HTML overlay in ChartOrderLines (labels + PnL). TP / SL: native createPriceLine
   // on the candlestick series (HL-style horizontal rules) + overlay for drag / tags only.
+  // @see chart-tpsl/stable-contract.ts
 
   useEffect(() => {
     const series = candleSeriesRef.current;
@@ -834,6 +837,7 @@ function PatternChartComponent({
         data-chart-layout-tick={chartLayoutTick}
       >
         <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
+        {/* STABLE TP/SL — props must stay in sync with chart-order-lines + stable-contract */}
         <ChartOrderLines
           coin={coin}
           currentPrice={currentPrice ?? 0}

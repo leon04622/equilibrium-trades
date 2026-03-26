@@ -1,9 +1,15 @@
 /**
+ * STABLE TP/SL IMPLEMENTATION — DO NOT MODIFY WITHOUT FULL TESTING
+ *
+ * Hyperliquid-style overlay for TP/SL drag, tags, entry/PnL/liq. Canvas lines: `pattern-chart.tsx`.
+ * @see ../chart-tpsl/stable-contract.ts
+ *
  * TP/SL interaction layer over lightweight-charts v5.
  * Horizontal rules use series.createPriceLine() on the candlestick series (pattern-chart);
  * this overlay provides drag bands, right-side tags (HL-style), and uses coordinateToPrice /
  * priceToCoordinate for pixel-accurate mapping — no linear price↔Y approximation when the chart API is available.
  */
+import "../chart-tpsl/stable-contract";
 import { useState, useMemo, useCallback, useEffect, useRef, type CSSProperties } from "react";
 import { useTrading } from "@/lib/trading-context";
 import { useToast } from "@/hooks/use-toast";
