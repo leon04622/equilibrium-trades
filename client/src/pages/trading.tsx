@@ -84,7 +84,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isResolvingCoin, setIsResolvingCoin] = useState(false);
   const { toast } = useToast();
-  const { updatePrices } = useTrading();
+  const { updatePrices, refreshAccount, connected: tradingConnected } = useTrading();
   const { openPaywall } = usePaywall();
   const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
   const {
@@ -113,6 +113,11 @@ export default function Trading({ visible = true }: TradingProps) {
       setCoin(coinParam);
     }
   }, [location]);
+
+  useEffect(() => {
+    if (!tradingConnected) return;
+    void refreshAccount();
+  }, [coin, tradingConnected, refreshAccount]);
 
   useEffect(() => {
     try {

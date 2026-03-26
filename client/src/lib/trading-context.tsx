@@ -198,6 +198,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
   const [isClosingPosition, setIsClosingPosition] = useState(false);
   const isPlacingTPSLRef = useRef(false);
+  /** Latest mids for mark display — avoids tying refreshAccount to currentPrices identity (prevents interval churn). */
+  const currentPricesRef = useRef<Record<string, number>>({});
 
   const connected = walletConnected;
   const address = walletAddress || "";
@@ -205,6 +207,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Persist state changes to localStorage
   useEffect(() => { saveToStorage(STORAGE_KEYS.tradeHistory, tradeHistory); }, [tradeHistory]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.indicators, indicators); }, [indicators]);
+  useEffect(() => {
+    currentPricesRef.current = currentPrices;
+  }, [currentPrices]);
 
   // Fetch account data from Hyperliquid when wallet connects
   const refreshAccount = useCallback(async () => {
@@ -228,6 +233,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setWithdrawable(withdrawableVal > 0 ? withdrawableVal : Math.max(0, accValue - margUsed));
       }
 
+      const mids = currentPricesRef.current;
+
       // Convert Hyperliquid positions to our format
       const convertedPositions: Position[] = hlPositions.map((pos, idx) => ({
         id: `hl-${pos.coin}-${idx}`,
@@ -235,7 +242,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         side: pos.side,
         size: pos.size,
         entryPrice: pos.entryPrice,
-        markPrice: currentPrices[pos.coin] || pos.entryPrice,
+        markPrice: mids[pos.coin] || pos.entryPrice,
         leverage: pos.leverage,
         margin: pos.marginUsed,
         unrealizedPnl: pos.unrealizedPnl,
@@ -259,13 +266,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         // Use Hyperliquid's orderType string first (most reliable)
         const ot = (ord.orderType || "").toLowerCase();
         const tc = (ord.triggerCondition || ord.tpsl || "").toLowerCase();
-        if (ot.includes("take profit")) {
+        if (ord.isStopLoss === true) {
+          orderType = "stop_loss";
+        } else if (ord.tpsl === "sl" || tc === "sl") {
+          orderType = "stop_loss";
+        } else if (ord.tpsl === "tp" || tc === "tp") {
+          orderType = "take_profit";
+        } else if (ot.includes("take profit")) {
           orderType = "take_profit";
         } else if (ot.includes("stop")) {
           orderType = "stop_loss";
-        } else if (tc === "tp" || tc.includes("above")) {
+        } else if (tc.includes("above")) {
           orderType = "take_profit";
-        } else if (tc === "sl" || tc.includes("below")) {
+        } else if (tc.includes("below")) {
           orderType = "stop_loss";
         }
         return {
@@ -280,6 +293,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           triggerPx: ord.triggerPx,
         };
       });
+      // Replace entirely — Hyperliquid is source of truth (no merge with previous openOrders).
       setOpenOrders(convertedOrders);
 
     } catch (error) {
@@ -287,7 +301,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoadingAccount(false);
     }
-  }, [walletAddress, currentPrices]);
+  }, [walletAddress]);
 
   // Refresh account when wallet connects
   useEffect(() => {
@@ -295,6 +309,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       refreshAccount();
     } else {
       setPositions([]);
+      setOpenOrders([]);
       setBalance(0);
       setWithdrawable(0);
       setAccountValue(0);
@@ -302,12 +317,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [walletConnected, walletAddress]);
 
-  // Periodically refresh positions (every 10 seconds)
+  // Poll Hyperliquid open orders + positions; also refresh when tab becomes visible (catch external cancels).
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
-    
-    const interval = setInterval(refreshAccount, 10000);
-    return () => clearInterval(interval);
+
+    const interval = setInterval(refreshAccount, 5000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAccount();
+    };
+    const onFocus = () => refreshAccount();
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [walletConnected, walletAddress, refreshAccount]);
 
   // Connection is now handled by wallet context
@@ -319,6 +347,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     // Wallet disconnection is handled by WalletContext
     setPositions([]);
+    setOpenOrders([]);
   }, []);
 
   const closePosition = useCallback(async (positionId: string): Promise<{ success: boolean; error?: string }> => {
@@ -491,7 +520,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
       // Cancel only the specific trigger order types that are being replaced.
       // If updating only TP, the existing SL is preserved (and vice-versa).
-      const existingOrders = openOrders.filter(o => o.coin === coin && o.triggerPx);
+      const existingOrders = openOrders.filter(
+        (o) =>
+          o.coin === coin &&
+          (o.triggerPx ||
+            o.orderType === "stop_loss" ||
+            o.orderType === "take_profit"),
+      );
       const cancelRef = pos?.entryPrice || currentPrices[coin] || 0;
       for (const order of existingOrders) {
         const orderType = (() => {

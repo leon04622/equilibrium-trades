@@ -48,6 +48,14 @@ export function ghostTpslPrices(
   return { ghostTp, ghostSl };
 }
 
+function isHyperliquidTpslCandidate(o: HLOpenOrder): boolean {
+  const ot = (o.orderType || "").toLowerCase();
+  if (ot.includes("take profit") || ot === "take_profit") return true;
+  if (ot.includes("stop") && !ot.includes("take")) return true;
+  const trig = parseFloat(o.triggerPx || "");
+  return Number.isFinite(trig) && trig > 0;
+}
+
 export function selectTpSlOrders(
   coin: string,
   position: Position | undefined,
@@ -57,7 +65,7 @@ export function selectTpSlOrders(
     return { tpPrice: null, slPrice: null };
   }
   const markPx = position.markPrice || position.entryPrice;
-  const coinOrders = openOrders.filter((o) => o.coin === coin);
+  const coinOrders = openOrders.filter((o) => o.coin === coin && isHyperliquidTpslCandidate(o));
   let tpOrder: HLOpenOrder | undefined;
   let slOrder: HLOpenOrder | undefined;
   for (const o of coinOrders) {

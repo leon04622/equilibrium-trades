@@ -383,6 +383,9 @@ function PatternChartComponent({
     setTpslPendingLines((prev) => {
       if (prev.tp == null && prev.sl == null) return prev;
       const next = { ...prev };
+      // Hyperliquid removed TP/SL externally → drop pending immediately (was only matching when server still had a price).
+      if (prev.tp != null && tpPrice == null) delete next.tp;
+      if (prev.sl != null && slPrice == null) delete next.sl;
       if (prev.tp != null && tpPrice != null && ticksCloseTpsl(prev.tp, tpPrice, markPx)) {
         delete next.tp;
       }
