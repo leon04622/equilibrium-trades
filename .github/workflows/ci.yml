@@ -12,12 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Align with local dev: same major as .nvmrc + package.json engines (Node 20)
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: ".nvmrc"
           cache: npm
+          cache-dependency-path: package-lock.json
 
-      - run: npm ci
+      - name: Install dependencies (strict lockfile)
+        run: |
+          node -v
+          npm -v
+          npm ci --no-audit --no-fund
 
       - run: npm run check
 
@@ -25,3 +31,7 @@ jobs:
 
       - name: Smoke test production bundle
         run: node script/verify.mjs
+
+# --- Temporary workaround (peer-deps only): replace the install step with ---
+#   - run: npm ci --legacy-peer-deps --no-audit --no-fund
+# Or add `legacy-peer-deps=true` to repo `.npmrc` (also affects Docker `npm ci`).
