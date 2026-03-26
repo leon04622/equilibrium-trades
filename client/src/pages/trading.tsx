@@ -161,7 +161,7 @@ export default function Trading({ visible = true }: TradingProps) {
     setShowAIChart(checked);
   };
 
-  const { data: tickers = [] } = useQuery<any[]>({
+  const { data: tickers = [], dataUpdatedAt, isFetching } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
     refetchInterval: visible ? 3000 : false,
     enabled: visible,
@@ -216,6 +216,14 @@ export default function Trading({ visible = true }: TradingProps) {
   const volume24h = currentTicker ? parseFloat(currentTicker.dayNtlVlm) : 0;
   const openInterest = currentTicker ? parseFloat(currentTicker.openInterest || "0") : 0;
   const fundingRate = currentTicker ? parseFloat(currentTicker.funding || "0") : 0;
+
+  /** Mark + header stats stream from ticker poll; surface as live text (label + a11y). */
+  const markIsLive =
+    visible &&
+    !!currentTicker &&
+    price > 0 &&
+    dataUpdatedAt > 0 &&
+    Date.now() - dataUpdatedAt < 15_000;
 
   useEffect(() => {
     if (tickers.length > 0) {
@@ -319,24 +327,49 @@ export default function Trading({ visible = true }: TradingProps) {
         
         <Separator orientation="vertical" className="h-6 hidden sm:block" />
         
-        {/* Price and stats */}
-        <div className="flex items-center gap-3 md:gap-6 text-xs overflow-x-auto flex-1">
+        {/* Price and stats — role="status" + aria-live so mark/change announce as tickers update */}
+        <div
+          className="flex items-center gap-3 md:gap-6 text-xs overflow-x-auto flex-1"
+          role="status"
+          aria-live="polite"
+          aria-atomic="false"
+          aria-relevant="text"
+        >
           <div className="shrink-0">
-            <span className="text-muted-foreground text-[10px] md:text-xs">Mark</span>
-            <p className={cn(
-              "font-mono font-bold text-sm md:text-base",
-              priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
-            )}>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-muted-foreground text-[10px] md:text-xs">Mark</span>
+              {markIsLive && (
+                <span
+                  className={cn(
+                    "text-[9px] font-semibold uppercase tracking-wide tabular-nums text-emerald-500/90",
+                    isFetching && "opacity-70 animate-pulse",
+                  )}
+                  title="Mark from live ticker feed (refreshes every few seconds)"
+                >
+                  Live
+                </span>
+              )}
+            </div>
+            <p
+              className={cn(
+                "font-mono font-bold text-sm md:text-base",
+                priceChangePercent >= 0 ? "text-bullish" : "text-bearish",
+              )}
+              aria-label={`Mark price ${formatPrice(price)}`}
+            >
               {formatPrice(price)}
             </p>
           </div>
           
           <div className="shrink-0">
             <span className="text-muted-foreground text-[10px] md:text-xs">24h Change</span>
-            <p className={cn(
-              "font-mono font-semibold text-[11px] md:text-xs",
-              priceChangePercent >= 0 ? "text-bullish" : "text-bearish"
-            )}>
+            <p
+              className={cn(
+                "font-mono font-semibold text-[11px] md:text-xs",
+                priceChangePercent >= 0 ? "text-bullish" : "text-bearish",
+              )}
+              aria-label={`24 hour change ${priceChangePercent >= 0 ? "plus" : ""}${priceChangePercent.toFixed(2)} percent`}
+            >
               {priceChangePercent >= 0 ? "+" : ""}{priceChangePercent.toFixed(2)}%
             </p>
           </div>
