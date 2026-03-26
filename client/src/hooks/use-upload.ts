@@ -26,7 +26,7 @@ async function parseUploadJsonResponse(response: Response): Promise<unknown> {
   }
   if (trimmed.startsWith("<")) {
     throw new Error(
-      "Upload API returned HTML instead of JSON. Open the app via the same dev server as the API (one PORT), or enable USE_REPLIT_OBJECT_STORAGE=1 for cloud uploads.",
+      "Upload API returned HTML instead of JSON. Open the app through your app URL (same host as the API), not a separate Vite port.",
     );
   }
   try {
@@ -103,7 +103,7 @@ export function useUpload(options: UseUploadOptions = {}) {
         const serverMsg = typeof data.error === "string" ? data.error : "Failed to get upload URL";
         const isUnavailable = response.status === 503 || response.status === 504;
         const fallback = isUnavailable
-          ? "Upload service unavailable (503/504). Check object storage mode and set USE_REPLIT_OBJECT_STORAGE=0 for local uploads."
+          ? "Upload service unavailable (503/504). Confirm the server is running and /api/uploads/request-url is reachable."
           : "";
         throw new Error(`${serverMsg}${fallback ? ` ${fallback}` : ""}`);
       }

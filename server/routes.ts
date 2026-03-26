@@ -2,7 +2,6 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { registerChatRoutes } from "./replit_integrations/chat";
-import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { registerLocalUploadRoutes } from "./local-upload-routes";
 import { analyzePatterns, getMarketCondition } from "./pattern-detection";
 import { 
@@ -55,32 +54,6 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   return ["BTC", "ETH", "SOL"];
 }
 
-function useReplitObjectStorageEnabled(): boolean {
-  const v = process.env.USE_REPLIT_OBJECT_STORAGE?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
-
-/** Replit GCS when env is valid; otherwise local `uploads/videos` (same `/api/uploads/*` API as useUpload). */
-async function registerVideoUploadRoutes(app: Express): Promise<void> {
-  if (!useReplitObjectStorageEnabled()) {
-    registerLocalUploadRoutes(app);
-    return;
-  }
-  try {
-    const { ObjectStorageService } = await import(
-      "./replit_integrations/object_storage/objectStorage"
-    );
-    new ObjectStorageService().getPrivateObjectDir();
-    registerObjectStorageRoutes(app);
-  } catch (error) {
-    console.warn(
-      "USE_REPLIT_OBJECT_STORAGE is set but Replit object storage is not usable (PRIVATE_OBJECT_DIR / bucket / non-Replit host). Using local disk uploads instead:",
-      error,
-    );
-    registerLocalUploadRoutes(app);
-  }
-}
-
 /** Built-in / env admins plus Equilibrium master wallet (video CRUD, etc.). */
 function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
   if (!walletAddress) return false;
@@ -101,7 +74,8 @@ export async function registerRoutes(
   // Register OpenAI chat routes
   registerChatRoutes(app);
 
-  await registerVideoUploadRoutes(app);
+  // Video/file uploads: always same-origin `uploads/videos` (avoids Replit GCS + browser CORS/sidecar issues).
+  registerLocalUploadRoutes(app);
 
   // Get all subscription tiers
   app.get("/api/subscriptions", async (req: Request, res: Response) => {

@@ -100,7 +100,7 @@ Good if you want full control and a fixed **IPv4** for GoDaddy.
 
 The codebase no longer depends on Replit domains, Stripe connectors, or Replit-only Vite plugins. Deploy on **Railway**, **Render**, or a **VPS** (Option A or B above), set **`PUBLIC_APP_URL`**, **`DATABASE_URL`**, **`STRIPE_SECRET_KEY`**, **`STRIPE_PUBLISHABLE_KEY`**, then point **GoDaddy DNS** at that host’s instructions.
 
-**Object uploads** (`/api/uploads/*`) used Replit’s Object Storage sidecar. They stay **disabled** unless you set **`USE_REPLIT_OBJECT_STORAGE=1`** (legacy). For GCS on your own infra, you’d extend `server/replit_integrations/object_storage/` with standard service-account credentials.
+**Video uploads** (`/api/uploads/*`) use **local disk** under `uploads/videos` (same-origin PUT/GET, no Replit Object Storage). On **Replit Autoscale**, files live on one instance’s disk only—use a **single VM / Reserved VM** or attach external storage if uploads must survive scaling. Self-hosted: ensure that directory exists and is writable (or on a mounted volume).
 
 ---
 

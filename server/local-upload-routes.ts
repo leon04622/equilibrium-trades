@@ -33,6 +33,8 @@ async function resolveUploadedFile(id: string): Promise<string | null> {
 }
 
 export function registerLocalUploadRoutes(app: Express): void {
+  void fs.mkdir(UPLOAD_VIDEOS_DIR, { recursive: true }).catch(() => {});
+
   app.post("/api/uploads/request-url", async (req: Request, res: Response) => {
     sweepPending();
     const { name, size, contentType } = req.body ?? {};
