@@ -30,6 +30,8 @@ interface ChartOrderLinesProps {
   tpslRenderedExternally?: boolean;
   /** When true, entry line + PnL are drawn in Apex Sovereign; keep liq + overlay hit targets only. */
   entryRenderedExternally?: boolean;
+  /** When true, liquidation rule is native on the candle series (Apex); skip duplicate liq row. */
+  liqRenderedExternally?: boolean;
   /** Live-update native IPriceLine while dragging. */
   onTpslDragVisual?: (kind: "tp" | "sl", price: number) => void;
   onDraggingChange?: (dragging: boolean) => void;
@@ -198,6 +200,7 @@ export function ChartOrderLines({
   nativeTpslLines = false,
   tpslRenderedExternally = false,
   entryRenderedExternally = false,
+  liqRenderedExternally = false,
   onTpslDragVisual,
   onDraggingChange,
   onTpslPendingCommit,
@@ -715,6 +718,7 @@ export function ChartOrderLines({
   const lineRows = lines.filter((l) => {
     if (tpslRenderedExternally && ["tp", "sl", "ghost-tp", "ghost-sl"].includes(l.key)) return false;
     if (entryRenderedExternally && l.key === "entry") return false;
+    if (liqRenderedExternally && l.key === "liq") return false;
     return true;
   });
 

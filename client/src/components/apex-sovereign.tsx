@@ -1,9 +1,9 @@
 /**
  * Apex Sovereign — Order Layer Orchestrator (TP/SL)
  *
- * SVG portal over the lightweight-charts pane. Horizontal rules use
- * series.priceToCoordinate / coordinateToPrice (pane-local Y), never linear % mapping.
- * Drag: DOM attribute updates only while pointer is down; React state commits on pointerup.
+ * Native `createPriceLine` rules (TP/SL dashed, entry solid + PnL title, liq orange + LIQ)
+ * stay pinned to the price scale. SVG is pointer-events: none except narrow TP/SL strips
+ * and right tags so the chart can pan. Drag uses priceToCoordinate / coordinateToPrice.
  */
 import {
   useCallback,
@@ -15,7 +15,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import type { ISeriesApi } from "lightweight-charts";
+import { LineStyle, type IPriceLine, type ISeriesApi } from "lightweight-charts";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
@@ -28,8 +28,11 @@ import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders"
 
 const HL_TP = "#0ecb81";
 const HL_SL = "#f6465d";
-const HL_ENTRY = "#60a5fa";
+const HL_ENTRY = "#22d3ee";
+const HL_LIQ = "#ff8900";
 const HL_GUTTER = 72;
+/** Vertical hit band (px) for TP/SL line drag — narrow so chart panning works elsewhere. */
+const TPSL_STRIP_HALF_PX = 14;
 const TAG_BG = "rgba(19, 23, 34, 0.96)";
 /** Cap drag-time coordinate→price visual updates (~10/s matches HL refill guidance). */
 const DRAG_VISUAL_MIN_MS = 100;
@@ -192,25 +195,17 @@ export function ApexSovereign({
   const modifyBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const l1PendingKindsRef = useRef<Set<TpslSide>>(new Set());
 
-  const tpLineRef = useRef<SVGLineElement | null>(null);
-  const slLineRef = useRef<SVGLineElement | null>(null);
-  const tpGhostRef = useRef<SVGLineElement | null>(null);
-  const slGhostRef = useRef<SVGLineElement | null>(null);
+  const nativeTpRef = useRef<IPriceLine | null>(null);
+  const nativeSlRef = useRef<IPriceLine | null>(null);
+  const nativeEntryRef = useRef<IPriceLine | null>(null);
+  const nativeLiqRef = useRef<IPriceLine | null>(null);
+
   const tpDiscRef = useRef<SVGCircleElement | null>(null);
   const slDiscRef = useRef<SVGCircleElement | null>(null);
-  const tpTagRef = useRef<SVGGElement | null>(null);
-  const slTagRef = useRef<SVGGElement | null>(null);
+  const tpBundleRef = useRef<SVGGElement | null>(null);
+  const slBundleRef = useRef<SVGGElement | null>(null);
   const tpPriceTextRef = useRef<SVGTextElement | null>(null);
   const slPriceTextRef = useRef<SVGTextElement | null>(null);
-  const entryGroupRef = useRef<SVGGElement | null>(null);
-  const entryLineRef = useRef<SVGLineElement | null>(null);
-  const entryPnlTextRef = useRef<SVGTextElement | null>(null);
-  const entryPriceTextRef = useRef<SVGTextElement | null>(null);
-  /** Last rendered band centers for nearest-line hit testing (pane-local Y). */
-  const hitStateRef = useRef<{
-    tp: { y: number; ghost: boolean } | null;
-    sl: { y: number; ghost: boolean } | null;
-  }>({ tp: null, sl: null });
 
   const position = useMemo(() => positions.find((p) => p.coin === coin), [positions, coin]);
   const { tpOrder, slOrder, tpPrice, slPrice } = useMemo(
@@ -321,63 +316,103 @@ export function ApexSovereign({
     return () => ro.disconnect();
   }, [chartPaneRef, chartVersion]);
 
+  /** Native horizontal rules — pinned to the series price scale (pan/zoom). */
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    nativeTpRef.current = series.createPriceLine({
+      price: 0,
+      color: HL_TP,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      lineVisible: false,
+      axisLabelVisible: false,
+      title: "",
+    });
+    nativeSlRef.current = series.createPriceLine({
+      price: 0,
+      color: HL_SL,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      lineVisible: false,
+      axisLabelVisible: false,
+      title: "",
+    });
+    nativeEntryRef.current = series.createPriceLine({
+      price: 0,
+      color: HL_ENTRY,
+      lineWidth: 1,
+      lineStyle: LineStyle.Solid,
+      lineVisible: false,
+      axisLabelVisible: true,
+      title: "",
+    });
+    nativeLiqRef.current = series.createPriceLine({
+      price: 0,
+      color: HL_LIQ,
+      lineWidth: 1,
+      lineStyle: LineStyle.Solid,
+      lineVisible: false,
+      axisLabelVisible: true,
+      title: "LIQ",
+    });
+
+    return () => {
+      for (const r of [nativeTpRef, nativeSlRef, nativeEntryRef, nativeLiqRef]) {
+        const pl = r.current;
+        if (pl) {
+          try {
+            series.removePriceLine(pl);
+          } catch {
+            /* series disposed */
+          }
+          r.current = null;
+        }
+      }
+    };
+  }, [chartVersion, portalEl]);
+
   const applyLineVisual = useCallback(
     (
       kind: TpslSide,
       localY: number,
       priceForLabel: number,
-      solid: boolean,
+      _solid: boolean,
       ghost: boolean,
     ) => {
       const w = box.w;
       if (w <= 0) return;
       const x2 = Math.max(0, w - HL_GUTTER);
       const color = kind === "tp" ? HL_TP : HL_SL;
-      const lineEl = kind === "tp" ? tpLineRef.current : slLineRef.current;
-      const ghostEl = kind === "tp" ? tpGhostRef.current : slGhostRef.current;
+      const nativePl = kind === "tp" ? nativeTpRef.current : nativeSlRef.current;
+      const ghostColor = kind === "tp" ? "rgba(14, 203, 129, 0.45)" : "rgba(246, 70, 93, 0.45)";
+
+      nativePl?.applyOptions({
+        price: priceForLabel,
+        lineVisible: true,
+        lineStyle: LineStyle.Dashed,
+        lineWidth: 1,
+        color: ghost ? ghostColor : color,
+        axisLabelVisible: false,
+        title: "",
+      });
+
       const discEl = kind === "tp" ? tpDiscRef.current : slDiscRef.current;
-
-      if (kind === "tp") {
-        hitStateRef.current.tp = { y: localY, ghost: !solid };
-      } else {
-        hitStateRef.current.sl = { y: localY, ghost: !solid };
-      }
-
-      if (ghost) {
-        if (ghostEl) {
-          ghostEl.setAttribute("x1", "0");
-          ghostEl.setAttribute("x2", String(x2));
-          ghostEl.setAttribute("y1", String(localY));
-          ghostEl.setAttribute("y2", String(localY));
-          ghostEl.setAttribute("display", "");
-        }
-        if (lineEl) {
-          lineEl.setAttribute("display", "none");
-        }
-      } else {
-        if (ghostEl) ghostEl.setAttribute("display", "none");
-        if (lineEl) {
-          lineEl.setAttribute("display", "");
-          lineEl.setAttribute("x1", "0");
-          lineEl.setAttribute("x2", String(x2));
-          lineEl.setAttribute("y1", String(localY));
-          lineEl.setAttribute("y2", String(localY));
-          lineEl.setAttribute("stroke", color);
-          lineEl.setAttribute("stroke-width", solid ? "2" : "1");
-        }
+      const bundle = kind === "tp" ? tpBundleRef.current : slBundleRef.current;
+      if (bundle) {
+        bundle.setAttribute("transform", `translate(0,${localY})`);
+        bundle.setAttribute("display", "");
+        bundle.removeAttribute("opacity");
       }
       if (discEl) {
-        discEl.setAttribute("display", solid || ghost ? "" : "none");
+        discEl.setAttribute("display", "");
         discEl.setAttribute("cx", String(x2 - 3));
-        discEl.setAttribute("cy", String(localY));
+        discEl.setAttribute("cy", "0");
         discEl.setAttribute("fill", color);
+        discEl.removeAttribute("opacity");
       }
-      const labelG = kind === "tp" ? tpTagRef.current : slTagRef.current;
       const priceNode = kind === "tp" ? tpPriceTextRef.current : slPriceTextRef.current;
-      if (labelG) {
-        labelG.setAttribute("transform", `translate(0,${localY})`);
-        labelG.setAttribute("display", "");
-      }
       if (priceNode) {
         priceNode.textContent = `$${fmt(priceForLabel)}`;
       }
@@ -386,37 +421,37 @@ export function ApexSovereign({
   );
 
   const hideKind = useCallback((kind: TpslSide) => {
-    const line = kind === "tp" ? tpLineRef.current : slLineRef.current;
-    const ghost = kind === "tp" ? tpGhostRef.current : slGhostRef.current;
+    const nativePl = kind === "tp" ? nativeTpRef.current : nativeSlRef.current;
+    nativePl?.applyOptions({ lineVisible: false });
     const disc = kind === "tp" ? tpDiscRef.current : slDiscRef.current;
-    const tag = kind === "tp" ? tpTagRef.current : slTagRef.current;
-    if (kind === "tp") hitStateRef.current.tp = null;
-    else hitStateRef.current.sl = null;
-    line?.setAttribute("display", "none");
-    ghost?.setAttribute("display", "none");
+    const bundle = kind === "tp" ? tpBundleRef.current : slBundleRef.current;
+    bundle?.setAttribute("display", "none");
     disc?.setAttribute("display", "none");
-    tag?.setAttribute("display", "none");
   }, []);
 
   const setLineL1Pending = useCallback((kind: TpslSide, pending: boolean) => {
-    const line = kind === "tp" ? tpLineRef.current : slLineRef.current;
-    const disc = kind === "tp" ? tpDiscRef.current : slDiscRef.current;
-    const tag = kind === "tp" ? tpTagRef.current : slTagRef.current;
-    if (!line || line.getAttribute("display") === "none") return;
+    const nativePl = kind === "tp" ? nativeTpRef.current : nativeSlRef.current;
+    const bundle = kind === "tp" ? tpBundleRef.current : slBundleRef.current;
+    if (!nativePl?.options().lineVisible) return;
+    const color = kind === "tp" ? HL_TP : HL_SL;
     if (pending) {
       l1PendingKindsRef.current.add(kind);
-      line.setAttribute("stroke-dasharray", "6 4");
-      line.setAttribute("stroke-opacity", "0.5");
-      line.removeAttribute("filter");
-      disc?.setAttribute("opacity", "0.5");
-      tag?.setAttribute("opacity", "0.5");
+      nativePl.applyOptions({
+        lineStyle: LineStyle.Dashed,
+        lineWidth: 1,
+        color: kind === "tp" ? "rgba(14, 203, 129, 0.5)" : "rgba(246, 70, 93, 0.5)",
+        axisLabelVisible: false,
+      });
+      bundle?.setAttribute("opacity", "0.55");
     } else {
       l1PendingKindsRef.current.delete(kind);
-      line.removeAttribute("stroke-dasharray");
-      line.removeAttribute("stroke-opacity");
-      line.setAttribute("filter", kind === "tp" ? "url(#sovereign-glow-tp)" : "url(#sovereign-glow-sl)");
-      disc?.removeAttribute("opacity");
-      tag?.removeAttribute("opacity");
+      nativePl.applyOptions({
+        lineStyle: LineStyle.Dashed,
+        lineWidth: 1,
+        color,
+        axisLabelVisible: false,
+      });
+      bundle?.removeAttribute("opacity");
     }
   }, []);
 
@@ -582,52 +617,47 @@ export function ApexSovereign({
     hideKind,
   ]);
 
-  /** Entry price rule + live unrealized PnL badge (mark vs entry). */
+  /** Entry + liq: native price lines; PnL in line title (updates with mark). */
   useLayoutEffect(() => {
+    const entryPl = nativeEntryRef.current;
+    const liqPl = nativeLiqRef.current;
     if (!position || box.w <= 0) {
-      entryGroupRef.current?.setAttribute("display", "none");
+      entryPl?.applyOptions({ lineVisible: false });
+      liqPl?.applyOptions({ lineVisible: false });
       return;
     }
-    const y = priceToCoordinate(position.entryPrice);
-    const g = entryGroupRef.current;
-    const line = entryLineRef.current;
-    if (!g || !line || y === null) {
-      g?.setAttribute("display", "none");
-      return;
-    }
-    const x2e = Math.max(0, box.w - HL_GUTTER);
-    const mark = currentPrice || position.markPrice || position.entryPrice;
+    const entry = position.entryPrice;
+    const mark = currentPrice || position.markPrice || entry;
     const isLong = position.side === "long";
     const uPnl =
       position.unrealizedPnl ??
-      (isLong ? position.size * (mark - position.entryPrice) : position.size * (position.entryPrice - mark));
+      (isLong ? position.size * (mark - entry) : position.size * (entry - mark));
 
-    g.setAttribute("transform", `translate(0,${y})`);
-    g.setAttribute("display", "");
-    line.setAttribute("x1", "0");
-    line.setAttribute("y1", "0");
-    line.setAttribute("x2", String(x2e));
-    line.setAttribute("y2", "0");
-    line.setAttribute("stroke", HL_ENTRY);
+    entryPl?.applyOptions({
+      price: entry,
+      lineVisible: true,
+      lineStyle: LineStyle.Solid,
+      lineWidth: 1,
+      color: HL_ENTRY,
+      axisLabelVisible: true,
+      title: `PNL ${fmtPnl(uPnl)}`,
+    });
 
-    const pnlEl = entryPnlTextRef.current;
-    if (pnlEl) {
-      pnlEl.textContent = `PNL ${fmtPnl(uPnl)}`;
-      pnlEl.setAttribute("fill", uPnl >= 0 ? "#22c55e" : "#ef4444");
+    const liq = position.liquidationPrice;
+    if (liq != null && liq > 0) {
+      liqPl?.applyOptions({
+        price: liq,
+        lineVisible: true,
+        lineStyle: LineStyle.Solid,
+        lineWidth: 1,
+        color: HL_LIQ,
+        axisLabelVisible: true,
+        title: "LIQ",
+      });
+    } else {
+      liqPl?.applyOptions({ lineVisible: false });
     }
-    const ep = entryPriceTextRef.current;
-    if (ep) {
-      ep.textContent = `Entry ${fmt(position.entryPrice)}`;
-      ep.setAttribute("fill", "#e8ecf1");
-    }
-  }, [
-    position,
-    box.w,
-    currentPrice,
-    chartLayoutTick,
-    chartVersion,
-    priceToCoordinate,
-  ]);
+  }, [position, box.w, currentPrice, chartLayoutTick, chartVersion]);
 
   const flushDragFrame = useCallback(() => {
     rafRef.current = null;
@@ -724,31 +754,6 @@ export function ApexSovereign({
     l1PendingKindsRef.current.clear();
   }, [chartVersion, onDraggingChange]);
 
-  const BAND = 56;
-
-  const pickLineAtLocalY = useCallback((localY: number): { kind: TpslSide; ghost: boolean; startPrice: number } | null => {
-    const tp = hitStateRef.current.tp;
-    const sl = hitStateRef.current.sl;
-    const effT = effTpRef.current;
-    const effS = effSlRef.current;
-    const gT = ghostTpRef.current;
-    const gS = ghostSlRef.current;
-    const cand: { kind: TpslSide; dist: number; ghost: boolean; startPrice: number }[] = [];
-    if (tp) {
-      const price = effT && effT > 0 ? effT : gT && gT > 0 ? gT : null;
-      if (price != null) cand.push({ kind: "tp", dist: Math.abs(localY - tp.y), ghost: tp.ghost, startPrice: price });
-    }
-    if (sl) {
-      const price = effS && effS > 0 ? effS : gS && gS > 0 ? gS : null;
-      if (price != null) cand.push({ kind: "sl", dist: Math.abs(localY - sl.y), ghost: sl.ghost, startPrice: price });
-    }
-    if (cand.length === 0) return null;
-    cand.sort((a, b) => a.dist - b.dist);
-    const best = cand[0];
-    if (best.dist > BAND + (best.kind === "sl" ? 24 : 0)) return null;
-    return { kind: best.kind, ghost: best.ghost, startPrice: best.startPrice };
-  }, []);
-
   const beginDrag = useCallback(
     (e: React.PointerEvent, kind: TpslSide, opts: { ghost: boolean; startPrice: number }) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
@@ -834,6 +839,11 @@ export function ApexSovereign({
           if (snapOrderPrice(startP, refPx) === snapOrderPrice(finalPrice, refPx)) return;
         }
 
+        const yFinal = priceToCoordinateRef.current(finalPrice);
+        if (yFinal !== null) {
+          applyLineVisual(finalKind, yFinal, finalPrice, true, false);
+        }
+
         const runModify = modifyOrderRef.current;
         const hlOrder = finalKind === "tp" ? tpOrderRef.current : slOrderRef.current;
         const revertPx =
@@ -903,6 +913,7 @@ export function ApexSovereign({
       window.addEventListener("pointercancel", onUp);
     },
     [
+      applyLineVisual,
       enqueueSdkModifyCommit,
       flushDragFrame,
       onDraggingChange,
@@ -914,22 +925,11 @@ export function ApexSovereign({
     ],
   );
 
-  const onChartPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      const pane = chartPaneRef.current;
-      if (!pane) return;
-      const localY = e.clientY - pane.getBoundingClientRect().top;
-      const picked = pickLineAtLocalY(localY);
-      if (!picked) return;
-      beginDrag(e, picked.kind, { ghost: picked.ghost, startPrice: picked.startPrice });
-    },
-    [beginDrag, chartPaneRef, pickLineAtLocalY],
-  );
-
+  /** Routes × on labels to Hyperliquid exchange cancel for the bound oid. */
   const onCancel = useCallback(
     async (side: TpslSide) => {
       const order = side === "tp" ? tpOrder : slOrder;
-      if (!order) return;
+      if (!order?.oid) return;
       const result = await cancelHLOrder(coin, order.oid);
       toast(
         result.success
@@ -946,6 +946,8 @@ export function ApexSovereign({
   const h = box.h;
   const x2 = Math.max(0, w - HL_GUTTER);
 
+  const stripH = TPSL_STRIP_HALF_PX * 2;
+
   const overlay = (
     <svg
       width={w}
@@ -954,54 +956,32 @@ export function ApexSovereign({
       style={{ zIndex: 50, pointerEvents: "none" }}
       data-testid="apex-sovereign-order-layer"
     >
-      <defs>
-        <filter id="sovereign-glow-tp" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="0" stdDeviation="2" floodColor={HL_TP} floodOpacity="0.35" />
-        </filter>
-        <filter id="sovereign-glow-sl" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="0" stdDeviation="2" floodColor={HL_SL} floodOpacity="0.35" />
-        </filter>
-      </defs>
-
-      <g ref={entryGroupRef} style={{ pointerEvents: "none" }} display="none">
-        <line
-          ref={entryLineRef}
-          strokeWidth={1}
-          strokeDasharray="5 4"
-          opacity={0.85}
-        />
-        <text
-          ref={entryPnlTextRef}
-          x={8}
-          y={-8}
-          fontSize={10}
-          fontWeight={700}
-          fontFamily="ui-monospace, monospace"
-          pointerEvents="none"
-        />
-        <text
-          ref={entryPriceTextRef}
-          x={8}
-          y={6}
-          fontSize={9}
-          fontFamily="ui-monospace, monospace"
-          opacity={0.85}
-          pointerEvents="none"
-        />
-      </g>
-
-      {/* TP — data-order-oid ties SVG to HL order for debugging / reconciliation */}
-      <line ref={tpGhostRef} stroke={HL_TP} strokeWidth={1} strokeDasharray="6 4" opacity={0.55} display="none" />
-      <line ref={tpLineRef} stroke={HL_TP} strokeWidth={2} display="none" filter="url(#sovereign-glow-tp)" />
-      <circle ref={tpDiscRef} r={3} display="none" />
-
+      {/*
+        pointer-events: none on SVG root — only TP/SL bundles (strip + tag + ×) capture events
+        so the chart canvas can pan/scroll on empty areas.
+        Horizontal rules are native createPriceLine on the candle series.
+      */}
       <g
-        ref={tpTagRef}
-        style={{ pointerEvents: "auto" }}
+        ref={tpBundleRef}
         display="none"
+        style={{ pointerEvents: "auto" }}
         data-order-oid={tpOrder?.oid ?? ""}
         data-tpsl-kind="tp"
       >
+        <rect
+          x={0}
+          y={-TPSL_STRIP_HALF_PX}
+          width={x2}
+          height={stripH}
+          fill="transparent"
+          style={{ cursor: "ns-resize", touchAction: "none" }}
+          onPointerDown={(e) => {
+            const price = effTp && effTp > 0 ? effTp : ghostTp && ghostTp > 0 ? ghostTp : null;
+            if (price == null) return;
+            beginDrag(e, "tp", { ghost: !(effTp && effTp > 0), startPrice: price });
+          }}
+        />
+        <circle ref={tpDiscRef} r={3} display="none" style={{ pointerEvents: "none" }} />
         <rect
           x={w - HL_GUTTER}
           y={-11}
@@ -1011,8 +991,17 @@ export function ApexSovereign({
           fill={TAG_BG}
           stroke="rgba(255,255,255,0.08)"
           strokeWidth={1}
+          style={{ pointerEvents: "none" }}
         />
-        <line x1={w - HL_GUTTER} y1={-11} x2={w - HL_GUTTER} y2={11} stroke={HL_TP} strokeWidth={2} />
+        <line
+          x1={w - HL_GUTTER}
+          y1={-11}
+          x2={w - HL_GUTTER}
+          y2={11}
+          stroke={HL_TP}
+          strokeWidth={2}
+          style={{ pointerEvents: "none" }}
+        />
         <rect
           x={w - HL_GUTTER}
           y={-11}
@@ -1026,7 +1015,15 @@ export function ApexSovereign({
             beginDrag(e, "tp", { ghost: !(effTp && effTp > 0), startPrice: price });
           }}
         />
-        <text x={w - HL_GUTTER + 6} y={4} fill={HL_TP} fontSize={10} fontWeight={700} fontFamily="ui-monospace, monospace" pointerEvents="none">
+        <text
+          x={w - HL_GUTTER + 6}
+          y={4}
+          fill={HL_TP}
+          fontSize={10}
+          fontWeight={700}
+          fontFamily="ui-monospace, monospace"
+          style={{ pointerEvents: "none" }}
+        >
           TP
         </text>
         <text
@@ -1036,11 +1033,11 @@ export function ApexSovereign({
           fill="#e8ecf1"
           fontSize={9}
           fontFamily="ui-monospace, monospace"
-          pointerEvents="none"
+          style={{ pointerEvents: "none" }}
         />
         <foreignObject x={w - 20} y={-10} width={18} height={20} style={{ pointerEvents: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-            {(effTp && effTp > 0 && tpOrder) ? (
+            {effTp && effTp > 0 && tpOrder?.oid ? (
               <button
                 type="button"
                 data-sovereign-chip
@@ -1066,18 +1063,27 @@ export function ApexSovereign({
         </foreignObject>
       </g>
 
-      {/* SL */}
-      <line ref={slGhostRef} stroke={HL_SL} strokeWidth={1} strokeDasharray="6 4" opacity={0.55} display="none" />
-      <line ref={slLineRef} stroke={HL_SL} strokeWidth={2} display="none" filter="url(#sovereign-glow-sl)" />
-      <circle ref={slDiscRef} r={3} display="none" />
-
       <g
-        ref={slTagRef}
-        style={{ pointerEvents: "auto" }}
+        ref={slBundleRef}
         display="none"
+        style={{ pointerEvents: "auto" }}
         data-order-oid={slOrder?.oid ?? ""}
         data-tpsl-kind="sl"
       >
+        <rect
+          x={0}
+          y={-TPSL_STRIP_HALF_PX}
+          width={x2}
+          height={stripH}
+          fill="transparent"
+          style={{ cursor: "ns-resize", touchAction: "none" }}
+          onPointerDown={(e) => {
+            const price = effSl && effSl > 0 ? effSl : ghostSl && ghostSl > 0 ? ghostSl : null;
+            if (price == null) return;
+            beginDrag(e, "sl", { ghost: !(effSl && effSl > 0), startPrice: price });
+          }}
+        />
+        <circle ref={slDiscRef} r={3} display="none" style={{ pointerEvents: "none" }} />
         <rect
           x={w - HL_GUTTER}
           y={-11}
@@ -1087,8 +1093,17 @@ export function ApexSovereign({
           fill={TAG_BG}
           stroke="rgba(255,255,255,0.08)"
           strokeWidth={1}
+          style={{ pointerEvents: "none" }}
         />
-        <line x1={w - HL_GUTTER} y1={-11} x2={w - HL_GUTTER} y2={11} stroke={HL_SL} strokeWidth={2} />
+        <line
+          x1={w - HL_GUTTER}
+          y1={-11}
+          x2={w - HL_GUTTER}
+          y2={11}
+          stroke={HL_SL}
+          strokeWidth={2}
+          style={{ pointerEvents: "none" }}
+        />
         <rect
           x={w - HL_GUTTER}
           y={-11}
@@ -1102,7 +1117,15 @@ export function ApexSovereign({
             beginDrag(e, "sl", { ghost: !(effSl && effSl > 0), startPrice: price });
           }}
         />
-        <text x={w - HL_GUTTER + 6} y={4} fill={HL_SL} fontSize={10} fontWeight={700} fontFamily="ui-monospace, monospace" pointerEvents="none">
+        <text
+          x={w - HL_GUTTER + 6}
+          y={4}
+          fill={HL_SL}
+          fontSize={10}
+          fontWeight={700}
+          fontFamily="ui-monospace, monospace"
+          style={{ pointerEvents: "none" }}
+        >
           SL
         </text>
         <text
@@ -1112,11 +1135,11 @@ export function ApexSovereign({
           fill="#e8ecf1"
           fontSize={9}
           fontFamily="ui-monospace, monospace"
-          pointerEvents="none"
+          style={{ pointerEvents: "none" }}
         />
         <foreignObject x={w - 20} y={-10} width={18} height={20} style={{ pointerEvents: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-            {(effSl && effSl > 0 && slOrder) ? (
+            {effSl && effSl > 0 && slOrder?.oid ? (
               <button
                 type="button"
                 data-sovereign-chip
@@ -1141,16 +1164,6 @@ export function ApexSovereign({
           </div>
         </foreignObject>
       </g>
-
-      <rect
-        x={0}
-        y={0}
-        width={x2}
-        height={h}
-        fill="transparent"
-        style={{ pointerEvents: "auto", cursor: "ns-resize", touchAction: "none" }}
-        onPointerDown={onChartPointerDown}
-      />
     </svg>
   );
 

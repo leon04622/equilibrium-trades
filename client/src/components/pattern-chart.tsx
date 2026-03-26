@@ -726,6 +726,7 @@ function PatternChartComponent({
           visiblePriceRange={visiblePriceRange}
           tpslRenderedExternally
           entryRenderedExternally
+          liqRenderedExternally
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
