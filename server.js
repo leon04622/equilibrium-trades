@@ -15,7 +15,7 @@
  *
  * Master wallet: `ADMIN_EQUILIBRIUM_MASTER_WALLET=0xYourAddress`
  * App admins: `ADMIN_WALLET_ADDRESSES` — video CRUD; CRM tabs in UI stay master-only.
- * Command Center client: `/admin` — sends header `x-wallet-address`.
+ * Command Center auth: `x-wallet-address: 0x…` and/or `Authorization: Bearer 0x…` (same master wallet).
  *
  * ── Videos (Vault + Command Center) ──
  * GET    /api/videos              — public list for Educational Vault
@@ -26,6 +26,7 @@
  *
  * ── Users (CRM) ──
  * GET    /api/users               — master only
+ * GET    /api/admin/users         — same as /api/users (Command Center)
  * PATCH  /api/users/:walletAddress/subscription — Grant Pro / Remove Pro
  *
  * ── Support / messages ──

@@ -15,6 +15,7 @@ import {
   Trash2,
   Plus,
   Eye,
+  FileDown,
 } from "lucide-react";
 import type { WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -72,6 +73,7 @@ function useAdminApi(address: string | undefined): AxiosInstance {
     client.interceptors.request.use((config) => {
       if (address) {
         config.headers["x-wallet-address"] = address;
+        config.headers.Authorization = `Bearer ${address}`;
       }
       return config;
     });
@@ -84,6 +86,41 @@ function displaySubTier(tier: string | undefined): string {
   if (t === "mentoring" || t === "elite") return "Mentor";
   if (t === "pro") return "Pro";
   return "Free";
+}
+
+function conversationParticipantWallet(msgs: SupportMessage[]): string {
+  for (const m of msgs) {
+    if (m.senderType === "user") {
+      const w = (m.walletAddress || m.senderWallet || "").trim();
+      if (w) return w;
+    }
+  }
+  const cid = (msgs[0]?.conversationId || "").trim();
+  if (/^0x[a-fA-F0-9]{40}$/i.test(cid)) return cid;
+  return cid || "—";
+}
+
+function exportUsersToCsv(rows: WalletUser[], filename = "equilibrium-crm-export.csv") {
+  const header = ["Wallet", "Email", "Join date", "Sub tier"];
+  const lines = [
+    header.join(","),
+    ...rows.map((u) => {
+      const join =
+        u.createdAt != null
+          ? new Date(u.createdAt as unknown as string).toISOString().slice(0, 10)
+          : "";
+      const tier = displaySubTier(u.subscriptionTier ?? undefined);
+      const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+      return [esc(u.walletAddress), esc(u.email || ""), esc(join), esc(tier)].join(",");
+    }),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function AdminDashboard() {
@@ -125,10 +162,10 @@ export default function AdminDashboard() {
   }, [address, isMasterAdmin]);
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
-    queryKey: ["admin-rest", "users", address],
+    queryKey: ["admin-rest", "admin-users", address],
     enabled: !!address && isMasterAdmin,
     queryFn: async () => {
-      const { data, status } = await api.get<WalletUser[]>("/api/users");
+      const { data, status } = await api.get<WalletUser[]>("/api/admin/users");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status !== 200) throw new Error("Failed to load users");
       return data;
@@ -257,7 +294,7 @@ export default function AdminDashboard() {
       return data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "users"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
       toast({ title: "Pro granted" });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -272,7 +309,7 @@ export default function AdminDashboard() {
       return data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "users"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
       toast({ title: "Pro removed", description: "User set to Free (manual override cleared)." });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -292,7 +329,7 @@ export default function AdminDashboard() {
         throw new Error("Thumbnail must be a valid http(s) URL or left empty");
       }
       const desc = vaultDescription.trim() || vaultTitle.trim();
-      const { data, status } = await api.post("/api/videos", {
+      const { data, status } = await api.post("/api/admin/videos", {
         title: vaultTitle.trim(),
         description: desc,
         videoUrl: url,
@@ -310,7 +347,7 @@ export default function AdminDashboard() {
     onSuccess: () => {
       setVaultTitle("");
       setVaultDescription("");
-      setVaultCategory("");
+      setVaultCategory("SMA Masterclass");
       setVaultUrl("");
       setVaultThumb("");
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
@@ -323,7 +360,7 @@ export default function AdminDashboard() {
 
   const deleteVaultVideo = useMutation({
     mutationFn: async (id: string) => {
-      const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
+      const { data, status } = await api.delete(`/api/admin/videos/${encodeURIComponent(id)}`);
       if (status === 401 || status === 403) {
         throw new Error((data as { error?: string })?.error || "Unauthorized");
       }
@@ -436,8 +473,8 @@ export default function AdminDashboard() {
             <h1 className="text-xl font-bold">Command Center</h1>
             <p className="text-xs text-muted-foreground">
               {showCrmTabs
-                ? `CRM · Messages · Videos · Manual Pro $${TIER_PRO}`
-                : "Video library — add or remove lessons (CRM requires master wallet)."}
+                ? `User CRM · Support Inbox · Video Manager · Manual Pro $${TIER_PRO}`
+                : "Video Manager — add or remove vault lessons (CRM requires master wallet)."}
             </p>
           </div>
         </div>
@@ -461,11 +498,11 @@ export default function AdminDashboard() {
         <aside className="w-full md:w-52 shrink-0 space-y-1 rounded-xl border bg-card p-2">
               {showCrmTabs && (
             <>
-              {nav("users", "User list", <Users className="h-4 w-4" />)}
-              {nav("support", "Messages", <MessageSquare className="h-4 w-4" />)}
+              {nav("users", "User CRM", <Users className="h-4 w-4" />)}
+              {nav("support", "Support Inbox", <MessageSquare className="h-4 w-4" />)}
             </>
           )}
-          {nav("videos", "Videos", <Video className="h-4 w-4" />)}
+          {nav("videos", "Video Manager", <Video className="h-4 w-4" />)}
         </aside>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -479,13 +516,33 @@ export default function AdminDashboard() {
                     manual override
                   </CardDescription>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <div className="relative flex-1 min-w-[180px]">
                     <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input className="pl-8 h-9" placeholder="Search wallet or email…" value={search} onChange={(e) => setSearch(e.target.value)} />
                   </div>
-                  <Button variant="outline" size="icon" onClick={() => void refetchUsers()} disabled={usersLoading}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                    onClick={() => void refetchUsers()}
+                    disabled={usersLoading}
+                  >
                     <RefreshCw className={cn("h-4 w-4", usersLoading && "animate-spin")} />
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                    disabled={filteredUsers.length === 0}
+                    onClick={() => {
+                      exportUsersToCsv(filteredUsers);
+                      toast({ title: "CSV exported", description: `${filteredUsers.length} row(s) in the download.` });
+                    }}
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Export to CSV
                   </Button>
                 </div>
               </CardHeader>
@@ -561,15 +618,22 @@ export default function AdminDashboard() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Messages</CardTitle>
+                    <CardTitle>Support Inbox</CardTitle>
                     <CardDescription>
                       Messages from the chat bubble are stored in <code className="text-[10px]">support_tickets</code>{" "}
                       and trigger Telegram when <code className="text-[10px]">TELEGRAM_BOT_TOKEN</code> +{" "}
                       <code className="text-[10px]">TELEGRAM_CHAT_ID</code> are set. Live updates: WebSocket + poll.
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="icon" onClick={() => void refetchMessages()} disabled={msgLoading}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                    onClick={() => void refetchMessages()}
+                    disabled={msgLoading}
+                  >
                     <RefreshCw className={cn("h-4 w-4", msgLoading && "animate-spin")} />
+                    Refresh
                   </Button>
                 </CardHeader>
                 <CardContent>
@@ -577,7 +641,9 @@ export default function AdminDashboard() {
                     <Loader2 className="h-8 w-8 animate-spin" />
                   ) : (
                     <ScrollArea className="h-[360px] space-y-2">
-                      {conversations.map(([cid, msgs]) => (
+                      {conversations.map(([cid, msgs]) => {
+                        const participant = conversationParticipantWallet(msgs);
+                        return (
                         <div
                           key={cid}
                           className={cn(
@@ -590,7 +656,13 @@ export default function AdminDashboard() {
                             onClick={() => setReplyConv(cid)}
                             className="flex-1 min-w-0 text-left"
                           >
-                            <div className="font-mono truncate">{cid}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">User wallet</div>
+                            <div className="font-mono truncate text-foreground" title={participant}>
+                              {participant}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground font-mono truncate mt-0.5" title={cid}>
+                              Thread: {cid}
+                            </div>
                             <div className="text-muted-foreground line-clamp-2 mt-1">{msgs[msgs.length - 1]?.message}</div>
                           </button>
                           <Button
@@ -604,7 +676,8 @@ export default function AdminDashboard() {
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </ScrollArea>
                   )}
                 </CardContent>
@@ -613,7 +686,8 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <CardTitle>Reply</CardTitle>
                   <CardDescription>
-                    Replies are persisted and pushed to the user via <strong>WebSocket</strong> (<code className="text-[10px]">/ws/support-chat</code>) and SSE.
+                    User messages arrive via Chat Support; ingest uses <code className="text-[10px]">POST /api/support/send</code>{" "}
+                    (Telegram when configured). Replies use WebSocket + SSE.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -634,12 +708,15 @@ export default function AdminDashboard() {
                       </div>
                     ))}
                   </ScrollArea>
-                  <Textarea
-                    rows={4}
-                    placeholder="Type a reply…"
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                  />
+                  <div className="space-y-1">
+                    <Label className="text-xs">Reply</Label>
+                    <Textarea
+                      rows={4}
+                      placeholder="Type a reply to this user…"
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                    />
+                  </div>
                   <Button className="w-full" disabled={sendReply.isPending} onClick={() => sendReply.mutate()}>
                     {sendReply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send reply"}
                   </Button>
@@ -652,10 +729,10 @@ export default function AdminDashboard() {
             <div className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Add educational video</CardTitle>
+                  <CardTitle>Add video</CardTitle>
                   <CardDescription>
-                    POST <code className="text-[10px]">/api/videos</code> — YouTube, Vimeo, or direct MP4. Vault section follows
-                    the category you pick (same labels as the Educational Vault).
+                    <code className="text-[10px]">POST /api/admin/videos</code> — title, category, URL. YouTube, Vimeo, or direct MP4.
+                    Vault sections match the Educational Vault labels.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">
@@ -729,8 +806,15 @@ export default function AdminDashboard() {
                         onChange={(e) => setVaultSearch(e.target.value)}
                       />
                     </div>
-                    <Button variant="outline" size="icon" onClick={() => void refetchVault()} disabled={vaultLoading}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 shrink-0"
+                      onClick={() => void refetchVault()}
+                      disabled={vaultLoading}
+                    >
                       <RefreshCw className={cn("h-4 w-4", vaultLoading && "animate-spin")} />
+                      Refresh
                     </Button>
                   </div>
                 </CardHeader>
@@ -744,32 +828,33 @@ export default function AdminDashboard() {
                           <TableRow>
                             <TableHead>Title</TableHead>
                             <TableHead>Category</TableHead>
+                            <TableHead>URL</TableHead>
                             <TableHead className="text-right w-[100px]">Delete</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {vaultVideos.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={3} className="text-muted-foreground text-sm">
+                              <TableCell colSpan={4} className="text-muted-foreground text-sm">
                                 No rows yet — add a video above.
                               </TableCell>
                             </TableRow>
                           ) : filteredVaultVideos.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={3} className="text-muted-foreground text-sm">
+                              <TableCell colSpan={4} className="text-muted-foreground text-sm">
                                 No videos match your search.
                               </TableCell>
                             </TableRow>
                           ) : (
                             filteredVaultVideos.map((v) => (
                               <TableRow key={v.id}>
-                                <TableCell className="max-w-[220px]">
+                                <TableCell className="max-w-[200px]">
                                   <div className="font-medium text-sm line-clamp-2">{v.title}</div>
-                                  <div className="text-[10px] text-muted-foreground font-mono truncate" title={v.videoPath || v.youtubeId || ""}>
-                                    {v.youtubeId ? `youtube:${v.youtubeId}` : v.videoPath || "—"}
-                                  </div>
                                 </TableCell>
-                                <TableCell className="text-xs">{v.category}</TableCell>
+                                <TableCell className="text-xs max-w-[120px]">{v.category}</TableCell>
+                                <TableCell className="text-[10px] font-mono max-w-[200px] truncate" title={v.videoPath || (v.youtubeId ? `https://youtube.com/watch?v=${v.youtubeId}` : "")}>
+                                  {v.youtubeId ? `youtube:${v.youtubeId}` : v.videoPath || "—"}
+                                </TableCell>
                                 <TableCell className="text-right">
                                   <Button
                                     size="sm"

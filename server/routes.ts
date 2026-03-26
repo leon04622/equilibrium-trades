@@ -21,7 +21,12 @@ import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
 import { getPublicAppBaseUrl } from "./public-url";
 import { isAdminAddress } from "./admin-access";
-import { requireMasterAdminWallet, isMasterAdminAddress, getMasterAdminAddress } from "./master-admin";
+import {
+  requireMasterAdminWallet,
+  isMasterAdminAddress,
+  getMasterAdminAddress,
+  resolveWalletAddressFromRequest,
+} from "./master-admin";
 import { issueCommandCenterWsToken } from "./command-center-ws-token";
 import { pushAdminLog } from "./admin-log-bus";
 import {
@@ -70,11 +75,11 @@ function isAppAdminWallet(walletAddress: string | null | undefined): boolean {
   return isAdminAddress(walletAddress) || isMasterAdminAddress(walletAddress);
 }
 
-/** POST /api/videos and POST /api/admin/videos — same body; master or `ADMIN_WALLET_ADDRESSES` (`x-wallet-address`). */
+/** POST /api/videos and POST /api/admin/videos — same body; master or `ADMIN_WALLET_ADDRESSES` (`x-wallet-address` or Bearer wallet). */
 async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+  const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
-    res.status(401).json({ error: "x-wallet-address header required" });
+    res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
     return;
   }
   if (!isAppAdminWallet(walletAddress)) {
@@ -113,9 +118,9 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
 }
 
 async function deleteCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+  const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
-    res.status(401).json({ error: "x-wallet-address header required" });
+    res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
     return;
   }
   if (!isAppAdminWallet(walletAddress)) {
@@ -922,7 +927,7 @@ export async function registerRoutes(
   // Get all conversations — master admin wallet only (Equilibrium Command Center / inbox)
   app.get("/api/support/conversations", async (req: Request, res: Response) => {
     try {
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const walletAddress = resolveWalletAddressFromRequest(req);
       if (!isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Master admin wallet required" });
       }
@@ -952,7 +957,8 @@ export async function registerRoutes(
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
       const { insertSupportMessageSchema } = await import("@shared/schema");
-      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const walletAddress =
+        resolveWalletAddressFromRequest(req) || (req.headers["x-wallet-address"] as string | undefined);
       const sessionId = req.headers["x-session-id"] as string | undefined;
 
       const asAdmin = isMasterAdminAddress(walletAddress);
@@ -1359,6 +1365,18 @@ export async function registerRoutes(
       res.json(await storage.getAllWalletUsers());
     } catch (err) {
       console.error("GET /api/users:", err);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  /** Admin Command Center — same payload as GET /api/users (master wallet via x-wallet-address or Authorization Bearer). */
+  app.get("/api/admin/users", async (req: Request, res: Response) => {
+    const auth = requireMasterAdminWallet(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    try {
+      res.json(await storage.getAllWalletUsers());
+    } catch (err) {
+      console.error("GET /api/admin/users:", err);
       res.status(500).json({ error: "Failed to fetch users" });
     }
   });
