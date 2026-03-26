@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -16,6 +17,8 @@ import {
   ExternalLink,
   Video,
   Trash2,
+  Plus,
+  Eye,
 } from "lucide-react";
 import type { AcademySection, WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -36,6 +39,7 @@ import {
 import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO, TIER_MENTOR } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
@@ -71,6 +75,7 @@ export default function AdminDashboard() {
   const { address } = useWallet();
   const { openSupportInbox } = useChat();
   const { isMasterAdmin, masterConfigured, isLoading: adminCheckLoading } = useIsMasterAdmin();
+  const { isAdmin: isAppAdmin, isLoading: appAdminLoading } = useIsAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useAdminApi(address ?? undefined);
@@ -83,6 +88,14 @@ export default function AdminDashboard() {
   const [vaultUrl, setVaultUrl] = useState("");
   const [vaultThumb, setVaultThumb] = useState("");
   const [vaultSection, setVaultSection] = useState<AcademySection>("beginner_patterns");
+  const [vaultSearch, setVaultSearch] = useState("");
+
+  const canAccessCommandCenter =
+    !!address && masterConfigured && (isMasterAdmin || isAppAdmin);
+  const showCrmTabs = isMasterAdmin;
+  const canManageVideos = isMasterAdmin || isAppAdmin;
+  const accessGateLoading =
+    adminCheckLoading || (!!address && !isMasterAdmin && appAdminLoading);
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({
     queryKey: ["admin-rest", "users", address],
@@ -109,7 +122,7 @@ export default function AdminDashboard() {
 
   const { data: vaultVideos = [], isLoading: vaultLoading, refetch: refetchVault } = useQuery({
     queryKey: ["admin-rest", "vault-videos", address],
-    enabled: !!address && isMasterAdmin && tab === "videos",
+    enabled: !!address && canManageVideos && tab === "videos",
     queryFn: async () => {
       const { data, status } = await api.get<TutorialVideo[]>("/api/videos");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
@@ -160,6 +173,24 @@ export default function AdminDashboard() {
     if (!replyConv) return [];
     return messages.filter((m) => m.conversationId.toLowerCase() === replyConv.toLowerCase());
   }, [messages, replyConv]);
+
+  useLayoutEffect(() => {
+    if (!showCrmTabs) {
+      setTab("videos");
+    }
+  }, [showCrmTabs]);
+
+  const filteredVaultVideos = useMemo(() => {
+    const q = vaultSearch.trim().toLowerCase();
+    if (!q) return vaultVideos;
+    return vaultVideos.filter(
+      (v) =>
+        v.title.toLowerCase().includes(q) ||
+        (v.description && v.description.toLowerCase().includes(q)) ||
+        (v.youtubeId && v.youtubeId.toLowerCase().includes(q)) ||
+        (v.videoPath && v.videoPath.toLowerCase().includes(q)),
+    );
+  }, [vaultVideos, vaultSearch]);
 
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
@@ -272,7 +303,7 @@ export default function AdminDashboard() {
     [tab],
   );
 
-  if (adminCheckLoading) {
+  if (accessGateLoading) {
     return (
       <div className="p-8 flex items-center gap-2 text-muted-foreground">
         <Loader2 className="h-5 w-5 animate-spin" />
@@ -302,11 +333,16 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!isMasterAdmin) {
+  if (!canAccessCommandCenter) {
     return (
       <div className="p-8 max-w-lg">
         <h1 className="text-2xl font-semibold tracking-tight">Equilibrium Admin - System Online</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Master admin wallet only. The connected address is not authorized for Command Center.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Connect an authorized admin wallet. Full CRM (users, tickets, analytics) requires the{" "}
+          <strong>master</strong> wallet from <code className="text-xs bg-muted px-1 rounded">ADMIN_EQUILIBRIUM_MASTER_WALLET</code>.
+          Video publishing is also available to built-in admins and addresses listed in{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_WALLET_ADDRESSES</code>.
+        </p>
       </div>
     );
   }
@@ -319,22 +355,38 @@ export default function AdminDashboard() {
           <div>
             <h1 className="text-xl font-bold">Equilibrium Command Center</h1>
             <p className="text-xs text-muted-foreground">
-              CRM + tickets · same pipeline as Live Support · Pro ${TIER_PRO} / Mentoring ${TIER_MENTOR}
+              {showCrmTabs
+                ? `CRM + tickets · Live Support pipeline · Pro $${TIER_PRO} / Mentoring $${TIER_MENTOR}`
+                : "Video library — publish and remove lessons for the Educational Vault (Pro subscribers)."}
             </p>
           </div>
         </div>
-        <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
-          <MessageCircle className="h-4 w-4" />
-          Open support inbox
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {showCrmTabs && (
+            <Button variant="default" size="sm" className="shrink-0 gap-2" onClick={() => openSupportInbox()}>
+              <MessageCircle className="h-4 w-4" />
+              Open support inbox
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="shrink-0 gap-2" asChild>
+            <Link to="/videos" target="_blank" rel="noreferrer">
+              <Eye className="h-4 w-4" />
+              Open vault (new tab)
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
         <aside className="w-full md:w-52 shrink-0 space-y-1 rounded-xl border bg-card p-2">
-          {nav("users", "CRM & users", <Users className="h-4 w-4" />)}
-          {nav("support", "Support tickets", <MessageSquare className="h-4 w-4" />)}
-          {nav("analytics", "L1 analytics", <BarChart3 className="h-4 w-4" />)}
-          {nav("videos", "Video management", <Video className="h-4 w-4" />)}
+          {showCrmTabs && (
+            <>
+              {nav("users", "CRM & users", <Users className="h-4 w-4" />)}
+              {nav("support", "Support tickets", <MessageSquare className="h-4 w-4" />)}
+              {nav("analytics", "L1 analytics", <BarChart3 className="h-4 w-4" />)}
+            </>
+          )}
+          {nav("videos", "Videos — add / remove", <Video className="h-4 w-4" />)}
         </aside>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -619,25 +671,46 @@ export default function AdminDashboard() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button
-                    className="w-full sm:w-auto"
-                    disabled={addVaultVideo.isPending}
-                    onClick={() => addVaultVideo.mutate()}
-                  >
-                    {addVaultVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Publish video"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      className="gap-2"
+                      disabled={addVaultVideo.isPending}
+                      onClick={() => addVaultVideo.mutate()}
+                    >
+                      {addVaultVideo.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      Add video to vault
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <CardTitle>Vault library (CRM)</CardTitle>
-                    <CardDescription>Stored in `tutorial_videos` — delete to remove from Pro vault.</CardDescription>
+                    <CardTitle>Vault library</CardTitle>
+                    <CardDescription>
+                      Rows below are stored in the database — <strong>Remove</strong> deletes them from the Educational
+                      Vault for all Pro users (seed videos in code are unchanged).
+                    </CardDescription>
                   </div>
-                  <Button variant="outline" size="icon" onClick={() => void refetchVault()} disabled={vaultLoading}>
-                    <RefreshCw className={cn("h-4 w-4", vaultLoading && "animate-spin")} />
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[160px] max-w-xs">
+                      <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        className="pl-8 h-9"
+                        placeholder="Search title or URL…"
+                        value={vaultSearch}
+                        onChange={(e) => setVaultSearch(e.target.value)}
+                      />
+                    </div>
+                    <Button variant="outline" size="icon" onClick={() => void refetchVault()} disabled={vaultLoading}>
+                      <RefreshCw className={cn("h-4 w-4", vaultLoading && "animate-spin")} />
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {vaultLoading ? (
@@ -649,23 +722,30 @@ export default function AdminDashboard() {
                           <TableRow>
                             <TableHead>Title</TableHead>
                             <TableHead>Section</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            <TableHead className="text-right w-[100px]">Remove</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {vaultVideos.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={3} className="text-muted-foreground text-sm">
-                                No CRM videos yet — only curated seeds show in the vault until you publish.
+                                No database videos yet — use the form above to add YouTube, Vimeo, or MP4 links. Curated
+                                seed lessons still show in the vault until you replace them.
+                              </TableCell>
+                            </TableRow>
+                          ) : filteredVaultVideos.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={3} className="text-muted-foreground text-sm">
+                                No videos match your search.
                               </TableCell>
                             </TableRow>
                           ) : (
-                            vaultVideos.map((v) => (
+                            filteredVaultVideos.map((v) => (
                               <TableRow key={v.id}>
-                                <TableCell className="max-w-[200px]">
+                                <TableCell className="max-w-[220px]">
                                   <div className="font-medium text-sm line-clamp-2">{v.title}</div>
-                                  <div className="text-[10px] text-muted-foreground font-mono truncate">
-                                    {v.youtubeId ? `yt:${v.youtubeId}` : v.videoPath || "—"}
+                                  <div className="text-[10px] text-muted-foreground font-mono truncate" title={v.videoPath || v.youtubeId || ""}>
+                                    {v.youtubeId ? `youtube:${v.youtubeId}` : v.videoPath || "—"}
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-xs">
@@ -675,17 +755,22 @@ export default function AdminDashboard() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="text-destructive"
+                                    size="sm"
+                                    variant="destructive"
+                                    className="gap-1 h-8"
                                     disabled={deleteVaultVideo.isPending}
                                     onClick={() => {
-                                      if (confirm(`Remove “${v.title}” from the vault?`)) {
+                                      if (
+                                        confirm(
+                                          `Remove “${v.title}” from the vault?\n\nThis cannot be undone. Pro users will no longer see this lesson.`,
+                                        )
+                                      ) {
                                         deleteVaultVideo.mutate(v.id);
                                       }
                                     }}
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Remove
                                   </Button>
                                 </TableCell>
                               </TableRow>
