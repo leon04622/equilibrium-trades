@@ -175,6 +175,37 @@ function isValidAbsoluteHttpUrl(s: string): boolean {
   }
 }
 
+const YT_ID_RE = /^[a-zA-Z0-9_-]{6,}$/;
+
+/** Resolve YouTube watch / Shorts / Live / embed / youtu.be → video id; otherwise undefined (caller uses full URL as videoPath). */
+function extractYoutubeVideoIdFromUrl(raw: string): string | undefined {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    const isYoutube =
+      host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com" || host === "youtu.be";
+    if (!isYoutube) return undefined;
+
+    if (host === "youtu.be") {
+      const id = u.pathname.split("/").filter(Boolean)[0];
+      return id && YT_ID_RE.test(id) ? id : undefined;
+    }
+
+    const firstSeg = u.pathname.split("/").filter(Boolean)[0];
+    const second = u.pathname.split("/").filter(Boolean)[1];
+    if (firstSeg === "shorts" && second && YT_ID_RE.test(second)) return second;
+    if (firstSeg === "embed" && second && YT_ID_RE.test(second)) return second;
+    if (firstSeg === "live" && second && YT_ID_RE.test(second)) return second;
+
+    const v = u.searchParams.get("v");
+    if (v && YT_ID_RE.test(v)) return v;
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Admin Command Center / POST /api/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
 export const adminVideoCreateSchema = z
   .object({
@@ -208,13 +239,8 @@ export const adminVideoCreateSchema = z
   })
   .transform((data) => {
     const url = data.videoUrl.trim();
-    let youtubeId: string | undefined;
-    let videoPath: string | undefined;
-    const m = url.match(
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?]+)/i,
-    );
-    if (m?.[1]) youtubeId = m[1];
-    else videoPath = url;
+    const youtubeId = extractYoutubeVideoIdFromUrl(url);
+    const videoPath = youtubeId ? undefined : url;
 
     const rawCat = (data.category || "").trim();
     const catLower = rawCat.toLowerCase();

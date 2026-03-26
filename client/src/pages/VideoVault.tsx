@@ -16,7 +16,6 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { VAULT_SECTION_META, inferAcademySection, tutorialToPlayUrl } from "@/lib/video-vault";
-import { cn } from "@/lib/utils";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 
 const ReactPlayer = lazy(() => import("react-player/lazy"));
@@ -33,23 +32,25 @@ export type VaultItem = {
 const ACADEMY_IDS = new Set<AcademySection>(["beginner_patterns", "sma_masterclass", "live_sessions"]);
 
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
-  return apiVideos.map((v) => {
-    const rawSection = v.academySection as string | null | undefined;
-    const section: AcademySection =
-      rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
-        ? (rawSection as AcademySection)
-        : inferAcademySection(v);
-    return {
-      id: v.id,
-      title: v.title,
-      description: v.description,
-      thumbnailUrl:
-        (v.thumbnailPath && v.thumbnailPath.trim()) ||
-        "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
-      videoUrl: tutorialToPlayUrl(v),
-      academySection: section,
-    };
-  });
+  return apiVideos
+    .map((v) => {
+      const rawSection = v.academySection as string | null | undefined;
+      const section: AcademySection =
+        rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
+          ? (rawSection as AcademySection)
+          : inferAcademySection(v);
+      return {
+        id: v.id,
+        title: v.title,
+        description: v.description,
+        thumbnailUrl:
+          (v.thumbnailPath && v.thumbnailPath.trim()) ||
+          "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
+        videoUrl: tutorialToPlayUrl(v),
+        academySection: section,
+      };
+    })
+    .filter((it) => it.videoUrl.trim().length > 0);
 }
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {
@@ -86,9 +87,23 @@ export default function VideoVault() {
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
-  /** Same `tutorial_videos` rows as Admin → Video Manager; keep fresh so new uploads show for Pro subscribers. */
-  const { data: apiVideos = [], isLoading: listLoading } = useQuery<TutorialVideo[]>({
+  /** Same `tutorial_videos` rows as Admin → Video Manager; keep fresh for all visitors (playback stays Pro). */
+  const {
+    data: apiVideos = [],
+    isLoading: listLoading,
+    isError: listError,
+    error: listErrorObj,
+    refetch: refetchVideos,
+  } = useQuery<TutorialVideo[]>({
     queryKey: ["/api/videos"],
+    queryFn: async () => {
+      const res = await fetch("/api/videos", { credentials: "include" });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || res.statusText || "Failed to load videos");
+      }
+      return (await res.json()) as TutorialVideo[];
+    },
     staleTime: 30_000,
     gcTime: 10 * 60_000,
     refetchOnMount: "always",
@@ -109,7 +124,8 @@ export default function VideoVault() {
     return map;
   }, [items]);
 
-  const showGate = !isConnected || subLoading || !isSubscribed;
+  const accessChecking = isConnected && subLoading;
+  const canPlayVideos = isConnected && !subLoading && isSubscribed;
 
   return (
     <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto">
@@ -133,40 +149,52 @@ export default function VideoVault() {
       </div>
 
       <div className="relative rounded-xl border bg-card/40">
-        {showGate && (
-          <div
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-xl bg-background/70 px-6 text-center backdrop-blur-md"
-            data-testid="vault-paywall-overlay"
-          >
-            <Lock className="h-10 w-10 text-primary mb-3" />
-            <h2 className="text-lg md:text-xl font-semibold max-w-md">
-              Unlock the Equilibrium Academy — Upgrade to Pro for ${TIER_PRO}/mo
-            </h2>
-            <p className="text-sm text-muted-foreground mt-2 max-w-sm">
-              {!isConnected
-                ? "Connect your wallet so we can verify your subscription from billing (Stripe + CRM)."
-                : subLoading
-                  ? "Checking your subscription…"
-                  : "Your plan does not include the vault. Upgrade to stream lessons added in the Admin panel."}
-            </p>
-            <div className="flex flex-wrap gap-2 mt-5 justify-center">
-              <Button asChild className="gap-2">
-                <Link to="/pricing" data-testid="vault-upgrade-pricing">
-                  <Sparkles className="h-4 w-4" />
-                  Upgrade to Pro
-                </Link>
+        <div className="p-4 md:p-6 space-y-10">
+          {!canPlayVideos && (
+            <div
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3"
+              data-testid="vault-paywall-banner"
+            >
+              <div className="flex items-start gap-3">
+                <Lock className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-sm">
+                    {!isConnected
+                      ? "Connect your wallet to unlock playback"
+                      : accessChecking
+                        ? "Checking your subscription…"
+                        : `Pro subscription required to watch — $${TIER_PRO}/mo`}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+                    {!isConnected
+                      ? "Anyone can browse lessons below. Connect so we can verify Pro from billing."
+                      : accessChecking
+                        ? "One moment while we confirm your plan."
+                        : "Browse the library below. Upgrade to stream lessons added in Command Center → Videos."}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <Button asChild variant="default" className="gap-2">
+                  <Link to="/pricing" data-testid="vault-upgrade-pricing">
+                    <Sparkles className="h-4 w-4" />
+                    Upgrade to Pro
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {listError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {listErrorObj instanceof Error ? listErrorObj.message : "Could not load the video library."}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void refetchVideos()}>
+                Try again
               </Button>
             </div>
-          </div>
-        )}
-
-        <div
-          className={cn(
-            "p-4 md:p-6 space-y-10 transition-[filter] duration-300",
-            showGate && "blur-sm pointer-events-none select-none",
-          )}
-        >
-          {listLoading ? (
+          ) : listLoading ? (
             <div className="flex justify-center py-16 text-muted-foreground gap-2">
               <Loader2 className="h-6 w-6 animate-spin" />
               Loading library from server…
@@ -229,15 +257,19 @@ export default function VideoVault() {
                 <DialogTitle className="pr-8 leading-snug">{active.title}</DialogTitle>
                 <DialogDescription>{active.description}</DialogDescription>
               </DialogHeader>
-              {isSubscribed ? (
+              {canPlayVideos ? (
                 <PlayerFrame url={active.videoUrl} title={active.title} />
               ) : (
                 <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Connect an active Pro wallet to play video in the vault.
+                    {!isConnected
+                      ? "Connect your wallet and use an active Pro plan to play videos here."
+                      : accessChecking
+                        ? "Confirming your subscription…"
+                        : "Upgrade to Pro to stream lessons from the vault."}
                   </p>
                   <Button asChild>
-                    <Link to="/pricing">Upgrade to Pro</Link>
+                    <Link to="/pricing">{!isConnected ? "Connect & upgrade" : "Upgrade to Pro"}</Link>
                   </Button>
                 </div>
               )}
