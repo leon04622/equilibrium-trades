@@ -1,4 +1,13 @@
-import { useMemo, useState, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +25,7 @@ import {
   Plus,
   Eye,
   FileDown,
+  Upload,
 } from "lucide-react";
 import type { WalletUser, SupportMessage, TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -37,6 +47,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { useChat } from "@/lib/chat-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { cn } from "@/lib/utils";
@@ -141,6 +152,11 @@ export default function AdminDashboard() {
   const [vaultUrl, setVaultUrl] = useState("");
   const [vaultThumb, setVaultThumb] = useState("");
   const [vaultSearch, setVaultSearch] = useState("");
+  /** Absolute URL after local upload (`/api/uploads/files/…` on this origin). */
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
+  const [uploadedFileLabel, setUploadedFileLabel] = useState("");
+  const vaultFileInputRef = useRef<HTMLInputElement>(null);
+  const { uploadFile, isUploading: isVaultFileUploading, error: vaultUploadError } = useUpload();
 
   /** Master: full CRM + videos. App admins (`ADMIN_WALLET_ADDRESSES`): videos when master is set, or full entry if master env unset. */
   const showCrmTabs = isMasterAdmin;
@@ -315,14 +331,48 @@ export default function AdminDashboard() {
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const handleVaultVideoFile = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const okType =
+        /^video\//.test(file.type) ||
+        /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+      if (!okType) {
+        toast({
+          title: "Unsupported file",
+          description: "Use a video file such as MP4, WebM, or MOV.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const res = await uploadFile(file);
+      if (res?.objectPath) {
+        const abs = `${window.location.origin}${res.objectPath}`;
+        setUploadedVideoUrl(abs);
+        setUploadedFileLabel(file.name);
+        setVaultUrl("");
+        toast({
+          title: "Upload complete",
+          description: `${file.name} is ready. Add title and click Add video, or paste a YouTube/Vimeo URL instead.`,
+        });
+      }
+    },
+    [uploadFile, toast],
+  );
+
   const addVaultVideo = useMutation({
     mutationFn: async () => {
-      if (!vaultTitle.trim() || !vaultUrl.trim() || !vaultCategory.trim()) {
-        throw new Error("Title, category, and video URL are required");
+      if (!vaultTitle.trim() || !vaultCategory.trim()) {
+        throw new Error("Title and vault section are required");
       }
-      const url = vaultUrl.trim();
+      const url = (uploadedVideoUrl || vaultUrl.trim()).trim();
+      if (!url) {
+        throw new Error("Upload a video file or paste a video URL (YouTube, Vimeo, or direct link)");
+      }
       if (!isValidHttpUrl(url)) {
-        throw new Error("Video URL must be a valid http(s) link (e.g. https://…)");
+        throw new Error("Video address must be a valid http(s) URL");
       }
       const thumb = vaultThumb.trim();
       if (thumb && !isValidHttpUrl(thumb)) {
@@ -350,6 +400,8 @@ export default function AdminDashboard() {
       setVaultCategory("SMA Masterclass");
       setVaultUrl("");
       setVaultThumb("");
+      setUploadedVideoUrl(null);
+      setUploadedFileLabel("");
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
       toast({ title: "Video published", description: "Stored in the database video library." });
@@ -731,8 +783,8 @@ export default function AdminDashboard() {
                 <CardHeader>
                   <CardTitle>Add video</CardTitle>
                   <CardDescription>
-                    <code className="text-[10px]">POST /api/admin/videos</code> — title, category, URL. YouTube, Vimeo, or direct MP4.
-                    Vault sections match the Educational Vault labels.
+                    Upload an MP4/WebM/MOV to the server (<code className="text-[10px]">/api/uploads</code>) or paste a URL, then{" "}
+                    <code className="text-[10px]">POST /api/admin/videos</code>. Vault sections match the Educational Vault.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 max-w-xl">
@@ -765,11 +817,67 @@ export default function AdminDashboard() {
                       placeholder="Short summary — defaults to title if empty"
                     />
                   </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <Label>Video source</Label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Use <strong>upload</strong> for files on this server, or <strong>URL</strong> for YouTube / Vimeo / hosted MP4.
+                    </p>
+                    <input
+                      ref={vaultFileInputRef}
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
+                      className="sr-only"
+                      onChange={(ev: ChangeEvent<HTMLInputElement>) => void handleVaultVideoFile(ev)}
+                    />
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="gap-2"
+                        disabled={isVaultFileUploading || addVaultVideo.isPending}
+                        onClick={() => vaultFileInputRef.current?.click()}
+                      >
+                        {isVaultFileUploading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        {isVaultFileUploading ? "Uploading…" : "Upload video file"}
+                      </Button>
+                      {uploadedVideoUrl && (
+                        <>
+                          <Badge variant="outline" className="text-[10px] font-normal max-w-[200px] truncate" title={uploadedFileLabel}>
+                            File: {uploadedFileLabel || "uploaded"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => {
+                              setUploadedVideoUrl(null);
+                              setUploadedFileLabel("");
+                            }}
+                          >
+                            Clear file
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    {vaultUploadError && (
+                      <p className="text-xs text-destructive">{vaultUploadError.message}</p>
+                    )}
+                  </div>
                   <div className="space-y-1">
-                    <Label>Video URL</Label>
+                    <Label>Video URL (optional if you uploaded)</Label>
                     <Input
                       value={vaultUrl}
-                      onChange={(e) => setVaultUrl(e.target.value)}
+                      onChange={(e) => {
+                        setVaultUrl(e.target.value);
+                        setUploadedVideoUrl(null);
+                        setUploadedFileLabel("");
+                      }}
                       placeholder="https://youtube.com/… or vimeo or .mp4"
                       className="font-mono text-xs"
                     />
@@ -783,7 +891,11 @@ export default function AdminDashboard() {
                       className="font-mono text-xs"
                     />
                   </div>
-                  <Button className="gap-2" disabled={addVaultVideo.isPending} onClick={() => addVaultVideo.mutate()}>
+                  <Button
+                    className="gap-2"
+                    disabled={addVaultVideo.isPending || isVaultFileUploading}
+                    onClick={() => addVaultVideo.mutate()}
+                  >
                     {addVaultVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     Add video
                   </Button>
