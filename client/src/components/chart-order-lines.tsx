@@ -826,22 +826,21 @@ export function ChartOrderLines({
                 }}
               />
               <div
-                className="absolute right-0 top-1/2 -translate-y-1/2 flex flex-row items-stretch overflow-hidden rounded-[1px] border border-black/40 shadow-md ring-1 ring-white/10"
-                style={{ width: HL_GUTTER_PX, minHeight: bracketH }}
+                className="absolute right-0 top-1/2 -translate-y-1/2 flex flex-row items-stretch overflow-hidden rounded-[2px] border border-black/50 shadow-lg ring-1 ring-white/20"
+                style={{ width: HL_GUTTER_PX, minHeight: 34, background: `linear-gradient(135deg, ${pStyles.captionBg}dd 0%, ${pStyles.captionBg}cc 100%)`, boxShadow: `0 0 16px ${previewColor}45, 0 4px 12px rgba(0,0,0,0.6), inset 0 0 8px ${previewColor}15` }}
               >
                 <div
-                  className="flex flex-col justify-center pl-1.5 pr-1 py-1 min-w-0 flex-1 box-border"
+                  className="flex flex-col justify-center pl-2 pr-2 py-1.5 min-w-0 flex-1 box-border"
                   style={{
-                    background: pStyles.captionBg,
+                    background: "transparent",
                     color: pStyles.captionText,
-                    boxShadow: `inset 0 0 0 1px ${pStyles.captionBorder}`,
                   }}
                 >
-                  <span className="text-[10px] font-sans font-semibold leading-tight truncate">
+                  <span className="text-[11px] font-mono font-bold leading-tight truncate">
                     {hlTpslPriceCaption(dragging, dragPrice!, isLong)}
                   </span>
                 </div>
-                <div className="flex items-center justify-center px-2 bg-[#0a0a0a] text-white shrink-0 border-l border-white/20">
+                <div className="flex items-center justify-center px-2.5 bg-[#0a0a0a] text-white shrink-0 border-l border-white/15 min-h-[34px]">
                   <span className="text-[10px] font-mono font-semibold tabular-nums">{fmtSize(size)}</span>
                 </div>
               </div>
@@ -1047,18 +1046,20 @@ export function ChartOrderLines({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex flex-row items-stretch select-none touch-none overflow-hidden rounded-[1px]",
-                      "border border-black/40 shadow-md ring-1 ring-white/10 backdrop-blur-[1px]",
-                      line.isGhost && "border-dashed border-white/30 opacity-[0.97]",
-                      tpslHot && !tpslActive && "opacity-[0.98]",
+                      "group flex flex-row items-stretch select-none touch-none overflow-hidden rounded-[2px]",
+                      "border border-black/50 shadow-lg ring-1 ring-white/20 backdrop-blur-md",
+                      line.isGhost && "border-dashed border-white/30 opacity-[0.95]",
+                      tpslHot && !tpslActive && "opacity-[0.99]",
+                      tpslActive && "ring-[1.5px]",
                     )}
                     style={{
-                      minHeight: 28,
+                      minHeight: 34,
                       cursor: tpslActive ? "grabbing" : "ns-resize",
                       touchAction: "none",
                       boxShadow: tpslActive
-                        ? `0 0 10px ${line.lineColor}35, 0 2px 8px rgba(0,0,0,0.45)`
-                        : "0 2px 8px rgba(0,0,0,0.45)",
+                        ? `0 0 16px ${line.lineColor}45, 0 4px 12px rgba(0,0,0,0.6), inset 0 0 8px ${line.lineColor}15`
+                        : `0 4px 12px rgba(0,0,0,0.5), inset 0 0 1px ${line.lineColor}10`,
+                      background: `linear-gradient(135deg, ${hlSeg.captionBg}dd 0%, ${hlSeg.captionBg}cc 100%)`,
                     }}
                     title="Drag · double-click to edit price"
                     onPointerDown={(e) => beginTpslDrag(e, line)}
@@ -1072,24 +1073,23 @@ export function ChartOrderLines({
                     }}
                   >
                     <div
-                      className="flex flex-col justify-center pl-1.5 pr-1.5 py-1 min-w-0 flex-1 box-border"
+                      className="flex flex-col justify-center pl-2 pr-2 py-1.5 min-w-0 flex-1 box-border"
                       style={{
-                        background: hlSeg.captionBg,
+                        background: "transparent",
                         color: hlSeg.captionText,
-                        boxShadow: `inset 0 0 0 1px ${hlSeg.captionBorder}`,
                       }}
                     >
-                      <span className="text-[10px] font-sans font-semibold leading-tight tracking-tight truncate">
+                      <span className="text-[11px] font-mono font-bold leading-tight tracking-tight truncate">
                         {hlTpslPriceCaption(line.editType!, displayPrice, isLong)}
                       </span>
                       {line.isGhost && (
-                        <span className="text-[8px] leading-tight opacity-70 normal-case mt-0.5 font-sans">
+                        <span className="text-[8px] leading-tight opacity-60 normal-case mt-1 font-sans">
                           drag to set
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center justify-center px-2 bg-[#0a0a0a] text-white shrink-0 border-l border-white/20 min-h-[28px]">
-                      <span className="text-[10px] font-mono font-semibold tabular-nums leading-none">
+                    <div className="flex items-center justify-center px-2.5 shrink-0 border-l border-white/15 min-h-[34px]" style={{ background: `${hlSeg.captionBg}66` }}>
+                      <span className="text-[10px] font-mono font-semibold tabular-nums leading-none" style={{ color: hlSeg.captionText }}>
                         {fmtSize(size)}
                       </span>
                     </div>
@@ -1097,7 +1097,7 @@ export function ChartOrderLines({
                       <button
                         type="button"
                         data-tpsl-chip
-                        className="shrink-0 flex items-center justify-center w-7 min-h-[28px] border-l border-white/20 hover:brightness-110 cursor-pointer p-0"
+                        className="shrink-0 flex items-center justify-center w-8 min-h-[34px] border-l border-white/15 hover:brightness-125 cursor-pointer p-0 transition-all"
                         style={{ background: hlSeg.closeBg, color: hlSeg.closeIcon }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1106,7 +1106,7 @@ export function ChartOrderLines({
                         data-testid={`cancel-${line.key}`}
                         title="Cancel order"
                       >
-                        <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+                        <X className="h-4 w-4" strokeWidth={2.5} />
                       </button>
                     )}
                   </div>
