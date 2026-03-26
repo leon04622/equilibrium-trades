@@ -97,11 +97,21 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
       return;
     }
     await refetchHlAuth();
+    try {
+      if (address) {
+        await fetch("/api/wallet-user/instant-trading-complete", {
+          method: "POST",
+          headers: { "x-wallet-address": address },
+        });
+      }
+    } catch {
+      /* non-fatal CRM ingest */
+    }
     toast({
       title: "Ready to trade",
       description: "Gas-free order flow is active for this session.",
     });
-  }, [prepareHyperliquidSession, refetchHlAuth, toast]);
+  }, [prepareHyperliquidSession, refetchHlAuth, toast, address]);
 
   const wrongChain = isConnected && chainId !== ARBITRUM_CHAIN_ID;
 

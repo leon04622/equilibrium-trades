@@ -13,6 +13,7 @@ import {
   getRecentTrades,
   getCandles,
   getPerpUniverseCoinNames,
+  getPerpExchangeAggregates,
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus, scanForEducationalPatterns } from "./sma-detection";
 import { gradeTrade } from "./trade-grading";
@@ -20,6 +21,13 @@ import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
 import { getPublicAppBaseUrl } from "./public-url";
 import { isAdminAddress } from "./admin-access";
+import {
+  createAdminEquilibriumChallenge,
+  verifyAdminEquilibriumSignature,
+  validateAdminEquilibriumToken,
+  revokeAdminEquilibriumToken,
+  getMasterAdminWallet,
+} from "./admin-equilibrium-auth";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 
 // ── Simple in-memory cache ──
@@ -621,6 +629,22 @@ export async function registerRoutes(
     }
   });
 
+  /** CRM: record instant-trading (HL agent) handshake completion — called from client after session is ready. */
+  app.post("/api/wallet-user/instant-trading-complete", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+      if (!walletAddress) {
+        return res.status(401).json({ error: "Wallet address required" });
+      }
+      const normalized = walletAddress.toLowerCase();
+      const user = await storage.recordInstantTradingHandshake(normalized);
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("Error recording instant trading handshake:", error);
+      res.status(500).json({ error: "Failed to record handshake" });
+    }
+  });
+
   // Update wallet user email
   app.patch("/api/wallet-user/:walletAddress/email", async (req: Request, res: Response) => {
     try {
@@ -689,23 +713,21 @@ export async function registerRoutes(
         return res.json(stripeSubscription);
       }
 
-      // Fall back to walletUsers table (admin-granted subscriptions)
       const user = await storage.getWalletUser(walletAddress);
       if (!user) {
         return res.json({ tier: 'free', active: false, expiresAt: null });
       }
 
-      // If Stripe shows no active subscription but DB says active, revoke access
+      // DB-backed Pro/Elite (admin grant or manual override) when Stripe has no active subscription
       if (user.subscriptionActive && user.subscriptionTier !== 'free') {
-        await storage.updateWalletUserSubscription(walletAddress, 'free', false, null);
-        return res.json({ tier: 'free', active: false, expiresAt: null });
+        return res.json({
+          tier: user.subscriptionTier,
+          active: true,
+          expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
+        });
       }
 
-      res.json({
-        tier: user.subscriptionTier,
-        active: user.subscriptionActive,
-        expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null
-      });
+      res.json({ tier: 'free', active: false, expiresAt: null });
     } catch (error) {
       console.error("Error fetching subscription status:", error);
       res.status(500).json({ error: "Failed to fetch subscription status" });
@@ -731,7 +753,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
       }
       
-      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved } = validated.data;
+      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
+        validated.data;
       const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
       const paramWallet = decodeURIComponent(req.params.walletAddress);
 
@@ -748,9 +771,15 @@ export async function registerRoutes(
           subscriptionTier: subscriptionTier as 'free' | 'pro' | 'elite',
           subscriptionActive: subscriptionActive,
           builderCodeApproved: builderCodeApproved ?? false,
+          manualProOverride: typeof manualProOverride === "boolean" ? manualProOverride : false,
         });
       } else if (typeof builderCodeApproved === "boolean") {
         await storage.updateWalletUserApproval(paramWallet, builderCodeApproved);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
+      }
+
+      if (typeof manualProOverride === "boolean") {
+        await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
 
@@ -898,10 +927,64 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
       }
       const message = await storage.createMessage(validated.data);
+      const { emitSupportMessage } = await import("./support-events");
+      emitSupportMessage(message);
+      if (!isAdmin) {
+        const { notifyTelegramUserSupportMessage, isTelegramConfigured } = await import("./telegram-notify");
+        if (isTelegramConfigured()) {
+          const w = (walletAddress || sessionId || conversationId).toLowerCase();
+          void notifyTelegramUserSupportMessage(w, String(validated.data.message || ""));
+        }
+      }
       res.json(message);
     } catch (error) {
       console.error("Error creating message:", error);
       res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  /** SSE: push new messages to the trading UI when admin replies (or self echo). */
+  app.get("/api/support/stream/:conversationId", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+      const sessionId = req.headers["x-session-id"] as string | undefined;
+      const conversationId = req.params.conversationId.toLowerCase();
+      const isAdmin = walletAddress ? isAdminAddress(walletAddress) : false;
+      if (!isAdmin) {
+        const owner = (walletAddress || sessionId || "").toLowerCase();
+        if (!owner || owner !== conversationId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
+      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      if (typeof (res as any).flushHeaders === "function") (res as any).flushHeaders();
+
+      const { supportEventBus } = await import("./support-events");
+      const send = (msg: unknown) => {
+        res.write(`data: ${JSON.stringify(msg)}\n\n`);
+      };
+
+      const onMessage = (m: { conversationId?: string }) => {
+        if (m && String(m.conversationId || "").toLowerCase() === conversationId) {
+          send(m);
+        }
+      };
+      supportEventBus.on("message", onMessage);
+      const ping = setInterval(() => {
+        res.write(": ping\n\n");
+      }, 25_000);
+      req.on("close", () => {
+        clearInterval(ping);
+        supportEventBus.off("message", onMessage);
+      });
+      send({ type: "connected", conversationId });
+    } catch (error) {
+      console.error("Error opening support stream:", error);
+      if (!res.headersSent) res.status(500).end();
     }
   });
 
@@ -931,6 +1014,162 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error checking admin status:", error);
       res.status(500).json({ error: "Failed to check admin status" });
+    }
+  });
+
+  // ── Admin Equilibrium CRM (master-wallet signature session) ──
+  function adminEquilibriumBearer(req: Request): string | undefined {
+    const h = req.headers.authorization;
+    if (!h?.startsWith("Bearer ")) return undefined;
+    return h.slice(7).trim() || undefined;
+  }
+
+  app.get("/api/admin-equilibrium/challenge", (_req: Request, res: Response) => {
+    const ch = createAdminEquilibriumChallenge();
+    res.json({
+      ...ch,
+      masterWalletHint: getMasterAdminWallet() ? "configured" : "any-admin-wallet",
+    });
+  });
+
+  app.post("/api/admin-equilibrium/verify", (req: Request, res: Response) => {
+    const nonce = String(req.body?.nonce || "");
+    const signature = String(req.body?.signature || "");
+    const out = verifyAdminEquilibriumSignature(nonce, signature);
+    if (!out.ok) {
+      return res.status(401).json({ error: out.error });
+    }
+    res.json({
+      accessToken: out.accessToken,
+      expiresAt: out.expiresAt,
+      wallet: out.wallet,
+    });
+  });
+
+  app.post("/api/admin-equilibrium/session/revoke", (req: Request, res: Response) => {
+    const tok = adminEquilibriumBearer(req);
+    const v = validateAdminEquilibriumToken(tok);
+    if (v.ok) revokeAdminEquilibriumToken(tok!);
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin-equilibrium/users", async (req: Request, res: Response) => {
+    const v = validateAdminEquilibriumToken(adminEquilibriumBearer(req));
+    if (!v.ok) return res.status(401).json({ error: v.error });
+    try {
+      const users = await storage.getAllWalletUsers();
+      res.json(users);
+    } catch {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.patch("/api/admin-equilibrium/users/:walletAddress/subscription", async (req: Request, res: Response) => {
+    const { validateAdminEquilibriumToken } = require("./admin-equilibrium-auth") as typeof import("./admin-equilibrium-auth");
+    const v = validateAdminEquilibriumToken(adminEquilibriumBearer(req));
+    if (!v.ok) return res.status(401).json({ error: v.error });
+    try {
+      const { updateSubscriptionSchema } = await import("@shared/schema");
+      const paramWallet = decodeURIComponent(req.params.walletAddress);
+      const validated = updateSubscriptionSchema.safeParse({
+        walletAddress: paramWallet,
+        ...req.body,
+      });
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+      }
+      const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
+        validated.data;
+      const expiresAt = subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null;
+      let user = await storage.updateWalletUserSubscription(
+        paramWallet,
+        subscriptionTier as "free" | "pro" | "elite",
+        subscriptionActive,
+        expiresAt,
+      );
+      if (!user) {
+        user = await storage.createWalletUser({
+          walletAddress: paramWallet,
+          subscriptionTier: subscriptionTier as "free" | "pro" | "elite",
+          subscriptionActive,
+          builderCodeApproved: builderCodeApproved ?? false,
+          manualProOverride: typeof manualProOverride === "boolean" ? manualProOverride : false,
+        });
+      } else if (typeof builderCodeApproved === "boolean") {
+        await storage.updateWalletUserApproval(paramWallet, builderCodeApproved);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
+      }
+      if (typeof manualProOverride === "boolean") {
+        await storage.setManualProOverride(paramWallet, manualProOverride);
+        user = (await storage.getWalletUser(paramWallet)) ?? user;
+      }
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("admin-equilibrium subscription:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.get("/api/admin-equilibrium/conversations", async (req: Request, res: Response) => {
+    const v = validateAdminEquilibriumToken(adminEquilibriumBearer(req));
+    if (!v.ok) return res.status(401).json({ error: v.error });
+    try {
+      const conversations = await storage.getAllConversations();
+      res.json(conversations);
+    } catch {
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.post("/api/admin-equilibrium/support/messages", async (req: Request, res: Response) => {
+    const v = validateAdminEquilibriumToken(adminEquilibriumBearer(req));
+    if (!v.ok) return res.status(401).json({ error: v.error });
+    try {
+      const { insertSupportMessageSchema } = await import("@shared/schema");
+      const conversationId = String(req.body?.conversationId || "").toLowerCase();
+      if (!conversationId) {
+        return res.status(400).json({ error: "conversationId is required" });
+      }
+      const messageData = {
+        ...req.body,
+        senderType: "admin",
+        senderWallet: null,
+        conversationId,
+      };
+      const validated = insertSupportMessageSchema.safeParse(messageData);
+      if (!validated.success) {
+        return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+      }
+      const message = await storage.createMessage(validated.data);
+      const { emitSupportMessage } = await import("./support-events");
+      emitSupportMessage(message);
+      res.json(message);
+    } catch (error) {
+      console.error("admin-equilibrium support message:", error);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  app.get("/api/admin-equilibrium/analytics/hyperliquid", async (req: Request, res: Response) => {
+    const v = validateAdminEquilibriumToken(adminEquilibriumBearer(req));
+    if (!v.ok) return res.status(401).json({ error: v.error });
+    try {
+      const [hl, allUsers] = await Promise.all([getPerpExchangeAggregates(), storage.getAllWalletUsers()]);
+      const handshakeComplete = allUsers.filter((u) => u.instantTradingCompletedAt).length;
+      const builderApproved = allUsers.filter((u) => u.builderCodeApproved).length;
+      res.json({
+        hyperliquid: hl,
+        sovereignCohort: {
+          totalWalletRows: allUsers.length,
+          instantTradingHandshakeComplete: handshakeComplete,
+          builderCodeApproved: builderApproved,
+        },
+        note:
+          "Exchange totals are Hyperliquid-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+      });
+    } catch (e) {
+      console.error("admin-equilibrium analytics:", e);
+      res.status(500).json({ error: "Failed to load analytics" });
     }
   });
 

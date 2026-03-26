@@ -31,6 +31,7 @@ import Portfolio from "@/pages/portfolio";
 import Videos from "@/pages/videos";
 import Candles from "@/pages/candles";
 import Admin from "@/pages/admin";
+import AdminEquilibrium from "@/pages/admin-equilibrium";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 
@@ -48,6 +49,7 @@ function OtherRoutes() {
       <Route path="/portfolio" component={Portfolio} />
       <Route path="/videos" component={Videos} />
       <Route path="/admin" component={Admin} />
+      <Route path="/admin-equilibrium" component={AdminEquilibrium} />
       <Route component={NotFound} />
     </Switch>
   );

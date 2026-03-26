@@ -112,8 +112,49 @@ export function LiveChat() {
       return res.json();
     },
     enabled: !!conversationId && isOpen && !isMinimized,
-    refetchInterval: isOpen && !isMinimized ? 4000 : false,
+    refetchInterval: isOpen && !isMinimized ? 8000 : false,
   });
+
+  /** Near real-time when admin replies (EventSource cannot set headers; use fetch + SSE stream). */
+  useEffect(() => {
+    if (!conversationId || !isOpen || isMinimized) return;
+    const ac = new AbortController();
+    let buf = "";
+    const run = async () => {
+      try {
+        const res = await fetch(
+          `/api/support/stream/${encodeURIComponent(conversationId)}`,
+          { headers: buildHeaders(), signal: ac.signal },
+        );
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() || "";
+          for (const block of parts) {
+            const line = block.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            try {
+              const payload = JSON.parse(line.slice(6)) as { id?: string; message?: string };
+              if (payload?.id) {
+                queryClient.invalidateQueries({ queryKey: ["/api/support/messages", conversationId] });
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } catch {
+        /* aborted */
+      }
+    };
+    void run();
+    return () => ac.abort();
+  }, [conversationId, isOpen, isMinimized, buildHeaders]);
 
   const { data: conversations = [], refetch: refetchConversations } = useQuery<Conversation[]>({
     queryKey: ["/api/support/conversations"],

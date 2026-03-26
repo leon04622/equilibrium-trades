@@ -145,6 +145,33 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
   }
 }
 
+/**
+ * Exchange-wide 24h notional volume (sum of perp `dayNtlVlm`) and approximate total OI in USD.
+ * Hyperliquid does not expose a public “volume only from users on builder X” aggregate; use sovereign DB counts for your cohort.
+ */
+export async function getPerpExchangeAggregates(): Promise<{
+  totalDayNotionalVolumeUsd: number;
+  totalOpenInterestUsd: number;
+  perpCoinCount: number;
+}> {
+  const tickers = await getAllTickers();
+  let totalDayNotionalVolumeUsd = 0;
+  let totalOpenInterestUsd = 0;
+  for (const t of tickers) {
+    totalDayNotionalVolumeUsd += parseFloat(t.dayNtlVlm || "0");
+    const mark = parseFloat(t.markPx || t.midPx || "0");
+    const oiSz = parseFloat(t.openInterest || "0");
+    if (mark > 0 && oiSz > 0) {
+      totalOpenInterestUsd += oiSz * mark;
+    }
+  }
+  return {
+    totalDayNotionalVolumeUsd,
+    totalOpenInterestUsd,
+    perpCoinCount: tickers.length,
+  };
+}
+
 // Known labels for PERP coins
 const PERP_LABELS: Record<string, string> = {
   "PAXG": "Gold (PAXG)",

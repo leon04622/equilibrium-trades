@@ -90,11 +90,13 @@ export default function Admin() {
       tier,
       active,
       builderCodeApproved,
+      manualProOverride,
     }: {
       walletAddress: string;
       tier: string;
       active: boolean;
       builderCodeApproved?: boolean;
+      manualProOverride?: boolean;
     }) => {
       const encoded = encodeURIComponent(walletAddress.trim());
       const body: Record<string, unknown> = {
@@ -103,6 +105,9 @@ export default function Admin() {
       };
       if (typeof builderCodeApproved === "boolean") {
         body.builderCodeApproved = builderCodeApproved;
+      }
+      if (typeof manualProOverride === "boolean") {
+        body.manualProOverride = manualProOverride;
       }
       const response = await fetch(`/api/admin/users/${encoded}/subscription`, {
         method: 'PATCH',
@@ -166,6 +171,7 @@ export default function Admin() {
         tier: grantTier,
         active: grantActive,
         builderCodeApproved: grantBuilderApproved,
+        manualProOverride: grantTier !== "free" && grantActive,
       },
       { onSuccess: () => setGrantWallet("") }
     );

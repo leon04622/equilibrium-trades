@@ -79,6 +79,8 @@ export interface IStorage {
   updateWalletUserApproval(walletAddress: string, approved: boolean): Promise<WalletUser | undefined>;
   updateWalletUserEmail(walletAddress: string, email: string): Promise<WalletUser | undefined>;
   updateWalletUserSubscription(walletAddress: string, tier: 'free' | 'pro' | 'elite', active: boolean, expiresAt?: Date | null): Promise<WalletUser | undefined>;
+  setManualProOverride(walletAddress: string, value: boolean): Promise<WalletUser | undefined>;
+  recordInstantTradingHandshake(walletAddress: string): Promise<WalletUser | undefined>;
   
   // Support Messages
   getMessages(conversationId: string): Promise<SupportMessage[]>;
@@ -435,6 +437,9 @@ export class MemStorage implements IStorage {
       walletAddress: user.walletAddress,
       email: user.email,
       builderCodeApproved: user.builderCodeApproved ?? false,
+      manualProOverride: user.manualProOverride ?? false,
+      referralBuilderStatus: user.referralBuilderStatus ?? null,
+      instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: user.subscriptionExpiresAt,
@@ -478,6 +483,9 @@ export class MemStorage implements IStorage {
       walletAddress: normalizedAddress,
       email: user.email ?? null,
       builderCodeApproved: user.builderCodeApproved ?? false,
+      manualProOverride: user.manualProOverride ?? false,
+      referralBuilderStatus: user.referralBuilderStatus ?? null,
+      instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
       subscriptionTier: (user.subscriptionTier as 'free' | 'pro' | 'elite') ?? 'free',
       subscriptionActive: user.subscriptionActive ?? false,
       subscriptionExpiresAt: null,
@@ -494,6 +502,9 @@ export class MemStorage implements IStorage {
         walletAddress: normalizedAddress,
         email: user.email ?? null,
         builderCodeApproved: user.builderCodeApproved ?? false,
+        manualProOverride: user.manualProOverride ?? false,
+        referralBuilderStatus: user.referralBuilderStatus ?? null,
+        instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
         subscriptionTier: user.subscriptionTier ?? 'free',
         subscriptionActive: user.subscriptionActive ?? false,
       }).returning();
@@ -624,6 +635,76 @@ export class MemStorage implements IStorage {
         return cached;
       }
       return undefined;
+    }
+  }
+
+  async setManualProOverride(walletAddress: string, value: boolean): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const now = new Date();
+    try {
+      if (!db) {
+        const cached = this.walletUsersCache.get(normalizedAddress);
+        if (cached) {
+          cached.manualProOverride = value;
+          cached.updatedAt = now;
+          return cached;
+        }
+        return undefined;
+      }
+      const [user] = await db
+        .update(walletUsers)
+        .set({ manualProOverride: value, updatedAt: now })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) return undefined;
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      const cached = this.walletUsersCache.get(normalizedAddress);
+      if (cached) {
+        cached.manualProOverride = value;
+        cached.updatedAt = now;
+        return cached;
+      }
+      return undefined;
+    }
+  }
+
+  async recordInstantTradingHandshake(walletAddress: string): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const now = new Date();
+    try {
+      let existing = await this.getWalletUser(normalizedAddress);
+      if (!existing) {
+        return await this.createWalletUser({
+          walletAddress: normalizedAddress,
+          referralBuilderStatus: "handshake_complete",
+          instantTradingCompletedAt: now,
+        });
+      }
+      if (!db) {
+        existing.instantTradingCompletedAt = now;
+        existing.referralBuilderStatus = "handshake_complete";
+        existing.updatedAt = now;
+        this.walletUsersCache.set(normalizedAddress, existing);
+        return existing;
+      }
+      const [user] = await db
+        .update(walletUsers)
+        .set({
+          instantTradingCompletedAt: now,
+          referralBuilderStatus: "handshake_complete",
+          updatedAt: now,
+        })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) return existing;
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      return this.walletUsersCache.get(normalizedAddress);
     }
   }
 

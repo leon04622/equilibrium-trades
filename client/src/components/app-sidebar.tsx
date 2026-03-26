@@ -274,6 +274,21 @@ export function AppSidebar() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location === "/admin-equilibrium"}
+                      data-testid="nav-admin-equilibrium"
+                    >
+                      <Link href="/admin-equilibrium">
+                        <Shield className="h-4 w-4" />
+                        <span>Admin CRM</span>
+                        <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0">
+                          Sign
+                        </Badge>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

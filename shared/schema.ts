@@ -137,6 +137,12 @@ export const walletUsers = pgTable("wallet_users", {
   walletAddress: text("wallet_address").notNull().unique(),
   email: text("email"),
   builderCodeApproved: boolean("builder_code_approved").default(false),
+  /** Admin “Grant Pro” / Alpha — keeps Pro access even if Stripe shows no active subscription. */
+  manualProOverride: boolean("manual_pro_override").default(false),
+  /** e.g. none | referred | builder_linked | handshake_complete */
+  referralBuilderStatus: text("referral_builder_status"),
+  /** Set when user completes instant-trading (HL agent) handshake on the client. */
+  instantTradingCompletedAt: timestamp("instant_trading_completed_at"),
   subscriptionTier: text("subscription_tier").default("free"),
   subscriptionActive: boolean("subscription_active").default(false),
   subscriptionExpiresAt: timestamp("subscription_expires_at"),
@@ -258,6 +264,9 @@ export interface WalletUser {
   walletAddress: string;
   email: string | null;
   builderCodeApproved: boolean;
+  manualProOverride: boolean;
+  referralBuilderStatus: string | null;
+  instantTradingCompletedAt: Date | null;
   subscriptionTier: 'free' | 'pro' | 'elite';
   subscriptionActive: boolean;
   subscriptionExpiresAt: Date | null;
@@ -270,6 +279,9 @@ export interface InsertWalletUser {
   walletAddress: string;
   email?: string | null;
   builderCodeApproved?: boolean;
+  manualProOverride?: boolean;
+  referralBuilderStatus?: string | null;
+  instantTradingCompletedAt?: Date | null;
   subscriptionTier?: 'free' | 'pro' | 'elite';
   subscriptionActive?: boolean;
 }
@@ -292,6 +304,8 @@ export const updateSubscriptionSchema = z.object({
   subscriptionExpiresAt: z.string().optional().nullable(),
   /** When set, updates builder onboarding flag (e.g. pre-approve test wallets). */
   builderCodeApproved: z.boolean().optional(),
+  /** Explicit admin bypass for Pro without Stripe (Grant Pro). */
+  manualProOverride: z.boolean().optional(),
 });
 
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
