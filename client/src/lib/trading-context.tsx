@@ -66,6 +66,8 @@ interface TradingContextType {
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
+  /** Last `frontendOpenOrders` JSON from Hyperliquid info API (debug / mirror verification). */
+  hlFrontendOpenOrdersRaw: unknown;
   tradeHistory: TradeRecord[];
   indicators: Indicator[];
   currentPrices: Record<string, number>;
@@ -192,6 +194,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
+  const [hlFrontendOpenOrdersRaw, setHlFrontendOpenOrdersRaw] = useState<unknown>(null);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>(() => loadFromStorage(STORAGE_KEYS.tradeHistory, []));
   const [indicators, setIndicatorsState] = useState<Indicator[]>(() => loadFromStorage(STORAGE_KEYS.indicators, defaultIndicators));
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
@@ -295,6 +298,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       });
       // Replace entirely — Hyperliquid is source of truth (no merge with previous openOrders).
       setOpenOrders(convertedOrders);
+      setHlFrontendOpenOrdersRaw(
+        Array.isArray(hlOrders) ? hlOrders.map((o: unknown) => (typeof o === "object" && o !== null ? { ...(o as object) } : o)) : [],
+      );
 
     } catch (error) {
       console.error("Error fetching Hyperliquid account:", error);
@@ -310,6 +316,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } else {
       setPositions([]);
       setOpenOrders([]);
+      setHlFrontendOpenOrdersRaw(null);
       setBalance(0);
       setWithdrawable(0);
       setAccountValue(0);
@@ -321,7 +328,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
 
-    const interval = setInterval(refreshAccount, 5000);
+    const interval = setInterval(refreshAccount, 2500);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refreshAccount();
@@ -348,6 +355,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     // Wallet disconnection is handled by WalletContext
     setPositions([]);
     setOpenOrders([]);
+    setHlFrontendOpenOrdersRaw(null);
   }, []);
 
   const closePosition = useCallback(async (positionId: string): Promise<{ success: boolean; error?: string }> => {
@@ -631,6 +639,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       marginUsed,
       positions,
       openOrders,
+      hlFrontendOpenOrdersRaw,
       tradeHistory,
       indicators,
       currentPrices,

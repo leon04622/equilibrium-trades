@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { PatternChart } from "@/components/pattern-chart";
+import { HlMirrorDebugPanel } from "@/components/hl-mirror-debug-panel";
 import { TradingViewChart } from "@/components/trading-view-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
@@ -425,8 +426,7 @@ export default function Trading({ visible = true }: TradingProps) {
         </button>
       </div>
 
-      {/* STABLE TP/SL: keep this as flex-1 row + bottom sibling — no %-split chart/bottom panel (breaks overlay). @see client/src/chart-tpsl/stable-contract.ts */}
-      {/* Main trading area — simple flex row so PatternChart + ChartOrderLines get a stable height (TP/SL alignment). */}
+      {/* Main trading area — flex row; chart overlay aligns to PatternChart height */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Chart toolbar - only show when chart tab is active on mobile */}
@@ -469,7 +469,7 @@ export default function Trading({ visible = true }: TradingProps) {
             <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
               <div
                 className="flex items-center gap-0 shrink-0 rounded-md border border-border/60 overflow-hidden bg-muted/20"
-                title="AI = native chart with draggable TP/SL lines (like Hyperliquid). TV = embedded TradingView only."
+                title="AI = native Hyperliquid candles; TP/SL lines mirror exchange open orders (read-only). TV = embedded TradingView."
               >
                 <Button
                   type="button"
@@ -695,6 +695,8 @@ export default function Trading({ visible = true }: TradingProps) {
           </SheetContent>
         </Sheet>
       </div>
+
+      {visible && chartEngine === "hyperliquid" && <HlMirrorDebugPanel coin={coin} />}
     </div>
   );
 }

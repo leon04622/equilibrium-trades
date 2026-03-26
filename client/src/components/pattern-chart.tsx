@@ -18,9 +18,8 @@ import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
-import "@/chart-tpsl/stable-contract";
-import { ChartOrderLines } from "@/components/chart-order-lines";
-import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
+import { HlReadonlyChartOverlay } from "@/components/hl-readonly-chart-overlay";
+import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
 interface EducationalPatternSignal {
   id: string;
@@ -65,35 +64,6 @@ const GRID = "#1e2535";
 const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
 const HANDLE_PX = 6;
-
-function refTickForTpsl(refPrice: number): number {
-  const r = refPrice > 0 ? refPrice : 1;
-  if (r >= 50_000) return 1;
-  if (r >= 10_000) return 0.5;
-  if (r >= 1_000) return 0.1;
-  if (r >= 100) return 0.01;
-  if (r >= 10) return 0.001;
-  if (r >= 1) return 0.0001;
-  if (r >= 0.1) return 0.00001;
-  return 0.0000001;
-}
-
-function ticksCloseTpsl(a: number, b: number, refPx: number): boolean {
-  const t = refTickForTpsl(refPx);
-  return Math.abs(a - b) <= Math.max(t * 2, 1e-12);
-}
-
-/** Prefer pending chart price while server openOrders is stale; drop pending once server agrees. */
-function effectiveTpslLinePrice(
-  server: number | null,
-  pending: number | undefined,
-  refPx: number,
-): number | null {
-  if (pending == null) return server;
-  if (server == null) return pending;
-  if (ticksCloseTpsl(server, pending, refPx)) return server;
-  return pending;
-}
 
 function calcSMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
   const out: { time: Time; value: number }[] = [];
@@ -181,7 +151,6 @@ function PatternChartComponent({
   const stochContainerRef = useRef<HTMLDivElement>(null);
 
   const mainChartRef = useRef<IChartApi | null>(null);
-  const [tpslDragging, setTpslDragging] = useState(false);
   const rsiChartRef = useRef<IChartApi | null>(null);
   const stochChartRef = useRef<IChartApi | null>(null);
 
@@ -195,15 +164,8 @@ function PatternChartComponent({
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const isSyncingRef = useRef(false);
 
-  /** Native canvas TP/SL (and ghost) — updated live while dragging via applyOptions. */
-  const tpslLineRefs = useRef<{
-    tp: IPriceLine | null;
-    sl: IPriceLine | null;
-    ghostTp: IPriceLine | null;
-    ghostSl: IPriceLine | null;
-  }>({ tp: null, sl: null, ghostTp: null, ghostSl: null });
-  /** Only updated from ChartOrderLines `onDraggingChange` — do not mirror React state here (avoids one-frame false before child effect runs). */
-  const tpslDraggingRef = useRef(false);
+  /** Native canvas TP/SL from Hyperliquid open orders only (no ghost, no drag). */
+  const tpslLineRefs = useRef<{ tp: IPriceLine | null; sl: IPriceLine | null }>({ tp: null, sl: null });
 
   // Tracking state for smart setData vs update()
   // Key combines coin + interval so any change to either triggers a full reload
@@ -217,54 +179,6 @@ function PatternChartComponent({
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
   /** Bumps on throttled chart interaction so TP/SL overlay re-reads priceToCoordinate after Y-scale changes. */
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
-  /** After drag end, keep native TP/SL at dropped price until openOrders matches (prevents snap-back). */
-  const [tpslPendingLines, setTpslPendingLines] = useState<{ tp?: number; sl?: number }>({});
-
-  // Y relative to pane 0. Volume uses bottom ~20% (scaleMargins top: 0.8 on volume scale).
-  //
-  // BUG (SL drag “dead” while TP works): clamping y to min(yRaw, paneH*0.8-1) maps EVERY pointer
-  // position in the volume/SL band to the SAME y → same price on every mousemove → line frozen.
-  // TP sits in the upper pane so y varied. Fix: use raw y first; if LW returns null, extrapolate
-  // from two in-candle samples (same series.coordinateToPrice as TP).
-  const coordinateToPrice = useCallback((clientY: number): number | null => {
-    try {
-      const series = candleSeriesRef.current;
-      const chart = mainChartRef.current;
-      if (!series || !chart) return null;
-      const pane0 = chart.panes()[0];
-      const paneEl = pane0?.getHTMLElement?.() ?? mainContainerRef.current;
-      if (!paneEl) return null;
-      const rect = paneEl.getBoundingClientRect();
-      const paneH = rect.height;
-      if (paneH <= 1) return null;
-
-      const yRelRaw = Math.max(0, Math.min(paneH, clientY - rect.top));
-
-      const direct = series.coordinateToPrice(yRelRaw);
-      if (direct !== null && direct !== undefined && Number.isFinite(Number(direct))) {
-        return Number(direct);
-      }
-
-      const candleMaxY = paneH * 0.8 - 1;
-      const yHi = Math.max(2, paneH * 0.08);
-      const yLo = Math.min(Math.max(yHi + 4, candleMaxY - 2), paneH * 0.72);
-      const pHi = series.coordinateToPrice(yHi);
-      const pLo = series.coordinateToPrice(yLo);
-      if (pHi === null || pLo === null || pHi === undefined || pLo === undefined || yLo <= yHi + 1) {
-        const yFb = Math.max(0, Math.min(candleMaxY, yRelRaw));
-        const fb = series.coordinateToPrice(yFb);
-        return fb !== null && fb !== undefined ? Number(fb) : null;
-      }
-      const nh = Number(pHi);
-      const nl = Number(pLo);
-      if (!Number.isFinite(nh) || !Number.isFinite(nl)) return null;
-      if (Math.abs(nh - nl) < 1e-20) return nh;
-      const price = nh + ((yRelRaw - yHi) / (yLo - yHi)) * (nl - nh);
-      return Number.isFinite(price) ? price : null;
-    } catch {
-      return null;
-    }
-  }, []);
 
   /** Pixel Y from price — must match candlestick series mapping (LW v5). */
   const priceToCoordinate = useCallback((price: number): number | null => {
@@ -277,18 +191,6 @@ function PatternChartComponent({
       return Number.isFinite(n) ? n : null;
     } catch {
       return null;
-    }
-  }, []);
-
-  const onTpslDragVisual = useCallback((kind: "tp" | "sl", price: number) => {
-    const r = tpslLineRefs.current;
-    console.debug("[TP/SL] onTpslDragVisual", { kind, price, hasTp: !!r.tp, hasSl: !!r.sl, hasGhostTp: !!r.ghostTp, hasGhostSl: !!r.ghostSl });
-    if (kind === "tp") {
-      if (r.tp) r.tp.applyOptions({ price });
-      else r.ghostTp?.applyOptions({ price });
-    } else {
-      if (r.sl) r.sl.applyOptions({ price });
-      else r.ghostSl?.applyOptions({ price });
     }
   }, []);
 
@@ -333,10 +235,6 @@ function PatternChartComponent({
     setActiveSignal(null);
   }, [coin, interval]);
 
-  useEffect(() => {
-    setTpslPendingLines({});
-  }, [coin]);
-
   const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
     queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`],
     refetchInterval: 10000,
@@ -351,51 +249,6 @@ function PatternChartComponent({
 
   const parsePrice = useCallback((val: number | string): number =>
     typeof val === "string" ? parseFloat(val) : val, []);
-
-  const onTpslDraggingChange = useCallback((dragging: boolean) => {
-    tpslDraggingRef.current = dragging;
-    setTpslDragging(dragging);
-  }, []);
-
-  const onTpslPendingCommit = useCallback((kind: "tp" | "sl", price: number) => {
-    setTpslPendingLines((prev) => ({ ...prev, [kind]: price }));
-  }, []);
-
-  const onTpslPendingClear = useCallback((kind: "tp" | "sl") => {
-    setTpslPendingLines((prev) => {
-      if (prev[kind] == null) return prev;
-      const next = { ...prev };
-      delete next[kind];
-      return next;
-    });
-  }, []);
-
-  // Drop optimistic TP/SL once the book matches (or clear when position gone).
-  useEffect(() => {
-    if (tpslDragging) return;
-    const position = positions.find((p) => p.coin === coin);
-    if (!position) {
-      setTpslPendingLines((p) => (p.tp == null && p.sl == null ? p : {}));
-      return;
-    }
-    const markPx = position.markPrice || currentPrice || position.entryPrice;
-    const { tpPrice, slPrice } = selectTpSlOrders(coin, position, openOrders);
-    setTpslPendingLines((prev) => {
-      if (prev.tp == null && prev.sl == null) return prev;
-      const next = { ...prev };
-      // Hyperliquid removed TP/SL externally → drop pending immediately (was only matching when server still had a price).
-      if (prev.tp != null && tpPrice == null) delete next.tp;
-      if (prev.sl != null && slPrice == null) delete next.sl;
-      if (prev.tp != null && tpPrice != null && ticksCloseTpsl(prev.tp, tpPrice, markPx)) {
-        delete next.tp;
-      }
-      if (prev.sl != null && slPrice != null && ticksCloseTpsl(prev.sl, slPrice, markPx)) {
-        delete next.sl;
-      }
-      if (next.tp === prev.tp && next.sl === prev.sl) return prev;
-      return next;
-    });
-  }, [positions, openOrders, coin, currentPrice, tpslDragging]);
 
   // ── Pointer drag-to-resize (mouse + touch) ──
   const startResizeDrag = useCallback((handleIdx: number) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -663,7 +516,7 @@ function PatternChartComponent({
       sma200SeriesRef.current = null;
       volumeSeriesRef.current = null;
       volumeSmaSeriesRef.current = null;
-      tpslLineRefs.current = { tp: null, sl: null, ghostTp: null, ghostSl: null };
+      tpslLineRefs.current = { tp: null, sl: null };
       chartDataReadyRef.current = false;
       // Reset prevDataKeyRef so the next data effect treats incoming candles as a key change
       prevDataKeyRef.current = "";
@@ -673,26 +526,6 @@ function PatternChartComponent({
       cleanups.forEach(fn => fn());
     };
   }, [theme, hideIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // While dragging TP/SL, disable chart pan/zoom so movement only updates the order line (HL-style).
-  useEffect(() => {
-    const chart = mainChartRef.current;
-    if (!chart || !tpslDragging) return;
-    chart.applyOptions({
-      handleScroll: { mouseWheel: false, pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false },
-      handleScale: { mouseWheel: false, pinch: false, axisPressedMouseMove: false },
-    });
-    return () => {
-      try {
-        chart.applyOptions({
-          handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-          handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
-        });
-      } catch {
-        /* chart may be disposed */
-      }
-    };
-  }, [tpslDragging, chartVersion]);
 
   // ── Data update — smart setData vs update() ──
   useEffect(() => {
@@ -845,19 +678,12 @@ function PatternChartComponent({
     }
   }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
 
-  // STABLE TP/SL IMPLEMENTATION — DO NOT MODIFY WITHOUT FULL TESTING
-  // Entry / Liq: HTML overlay in ChartOrderLines (labels + PnL). TP / SL: native createPriceLine
-  // on the candlestick series (HL-style horizontal rules) + overlay for drag / tags only.
-  // @see chart-tpsl/stable-contract.ts
-
+  // TP / SL: native price lines only when Hyperliquid returns trigger orders (no ghost, no local override).
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
 
-    // Block native line rebuild during drag AND while React state catches up (ref is source of truth from pointer).
-    if (tpslDraggingRef.current || tpslDragging) return;
-
-    const removeKey = (key: "tp" | "sl" | "ghostTp" | "ghostSl") => {
+    const removeKey = (key: "tp" | "sl") => {
       const line = tpslLineRefs.current[key];
       if (line) {
         try {
@@ -869,90 +695,42 @@ function PatternChartComponent({
       }
     };
 
-    (["tp", "sl", "ghostTp", "ghostSl"] as const).forEach(removeKey);
+    removeKey("tp");
+    removeKey("sl");
 
     const position = positions.find((p) => p.coin === coin);
     if (!position) return;
 
     const { tpPrice, slPrice } = selectTpSlOrders(coin, position, openOrders);
-    const markPx = position.markPrice || currentPrice || position.entryPrice;
-    const isLong = position.side === "long";
-    const { ghostTp, ghostSl } = ghostTpslPrices(
-      position.entryPrice,
-      markPx,
-      isLong,
-      tpPrice != null,
-      slPrice != null,
-    );
-
-    const effTp = effectiveTpslLinePrice(tpPrice, tpslPendingLines.tp, markPx);
-    const effSl = effectiveTpslLinePrice(slPrice, tpslPendingLines.sl, markPx);
 
     const HL_TP = "#0ecb81";
     const HL_SL = "#f6465d";
 
-    if (effTp != null) {
-      if (tpPrice != null) {
-        tpslLineRefs.current.tp = series.createPriceLine({
-          price: effTp,
-          color: HL_TP,
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: false,
-        });
-      } else {
-        tpslLineRefs.current.ghostTp = series.createPriceLine({
-          price: effTp,
-          color: "rgba(14, 203, 129, 0.5)",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: false,
-        });
-      }
-    } else if (ghostTp != null) {
-      tpslLineRefs.current.ghostTp = series.createPriceLine({
-        price: ghostTp,
-        color: "rgba(14, 203, 129, 0.5)",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
+    if (tpPrice != null && tpPrice > 0) {
+      tpslLineRefs.current.tp = series.createPriceLine({
+        price: tpPrice,
+        color: HL_TP,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
         axisLabelVisible: false,
       });
     }
 
-    if (effSl != null) {
-      if (slPrice != null) {
-        tpslLineRefs.current.sl = series.createPriceLine({
-          price: effSl,
-          color: HL_SL,
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: false,
-        });
-      } else {
-        tpslLineRefs.current.ghostSl = series.createPriceLine({
-          price: effSl,
-          color: "rgba(246, 70, 93, 0.5)",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: false,
-        });
-      }
-    } else if (ghostSl != null) {
-      tpslLineRefs.current.ghostSl = series.createPriceLine({
-        price: ghostSl,
-        color: "rgba(246, 70, 93, 0.5)",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
+    if (slPrice != null && slPrice > 0) {
+      tpslLineRefs.current.sl = series.createPriceLine({
+        price: slPrice,
+        color: HL_SL,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
         axisLabelVisible: false,
       });
     }
 
     return () => {
-      // Stale closure: never use `tpslDragging` here — ref is synchronous from pointer handler.
-      if (tpslDraggingRef.current) return;
-      (["tp", "sl", "ghostTp", "ghostSl"] as const).forEach(removeKey);
+      removeKey("tp");
+      removeKey("sl");
     };
-  }, [positions, openOrders, coin, currentPrice, chartVersion, tpslDragging, tpslPendingLines]);
+  }, [positions, openOrders, coin, currentPrice, chartVersion]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -967,18 +745,11 @@ function PatternChartComponent({
         data-chart-layout-tick={chartLayoutTick}
       >
         <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
-        {/* STABLE TP/SL — props must stay in sync with chart-order-lines + stable-contract */}
-        <ChartOrderLines
+        <HlReadonlyChartOverlay
           coin={coin}
           currentPrice={currentPrice ?? 0}
           visiblePriceRange={visiblePriceRange}
-          coordinateToPrice={coordinateToPrice}
           priceToCoordinate={priceToCoordinate}
-          nativeTpslLines
-          onTpslDragVisual={onTpslDragVisual}
-          onDraggingChange={onTpslDraggingChange}
-          onTpslPendingCommit={onTpslPendingCommit}
-          onTpslPendingClear={onTpslPendingClear}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
