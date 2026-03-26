@@ -2,13 +2,19 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef, Re
 import { useWallet } from "./wallet-context";
 import {
   getAccountState,
-  getPositions,
   getOpenOrders,
+  getClearinghouseStateViaInfoClient,
   closePosition as hlClosePosition,
   cancelOrder as hlCancelOrder,
   placeTriggerOrder,
   type AccountState,
 } from "./hyperliquid-client";
+import {
+  convertRawFrontendOrdersToHl,
+  mapClearinghouseAssetPositionsToDashboard,
+  applyMarginSummaryFromAccountState,
+} from "./hl-account-map";
+import { SubscriptionClient, WebSocketTransport } from "@nktkas/hyperliquid";
 
 export interface Position {
   id: string;
@@ -55,6 +61,9 @@ export interface HLOpenOrder {
   origSz: string;
   orderType?: "limit" | "stop_loss" | "take_profit";
   triggerPx?: string;
+  /** From HL `frontendOpenOrders` / WS when present — chart TP/SL mapping. */
+  isTrigger?: boolean;
+  reduceOnly?: boolean;
 }
 
 interface TradingContextType {
@@ -209,6 +218,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const isPlacingTPSLRef = useRef(false);
   /** Latest mids for mark display — avoids tying refreshAccount to currentPrices identity (prevents interval churn). */
   const currentPricesRef = useRef<Record<string, number>>({});
+  const wsSubsRef = useRef<Array<{ unsubscribe: () => Promise<void> }>>([]);
+  const userEventsRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connected = walletConnected;
   const address = walletAddress || "";
@@ -227,43 +238,41 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     setIsLoadingAccount(true);
     setHlAccountFetchError(null);
     try {
-      const [accountState, hlPositions, hlOrders] = await Promise.all([
-        getAccountState(walletAddress),
-        getPositions(walletAddress),
+      const [accountState, hlOrders] = await Promise.all([
+        getClearinghouseStateViaInfoClient(walletAddress).then(
+          (s) => s ?? getAccountState(walletAddress),
+        ),
         getOpenOrders(walletAddress),
       ]);
 
       if (accountState) {
-        const accValue = parseFloat(accountState.marginSummary.accountValue || "0");
-        const margUsed = parseFloat(accountState.marginSummary.totalMarginUsed || "0");
-        const withdrawableVal = parseFloat(accountState.withdrawable || "0");
-        setAccountValue(accValue);
-        setMarginUsed(margUsed);
-        setBalance(accValue - margUsed);
-        setWithdrawable(withdrawableVal > 0 ? withdrawableVal : Math.max(0, accValue - margUsed));
+        applyMarginSummaryFromAccountState(accountState, {
+          setAccountValue,
+          setMarginUsed,
+          setBalance,
+          setWithdrawable,
+        });
       }
 
       const mids = currentPricesRef.current;
-
-      // Convert Hyperliquid positions to our format
-      const convertedPositions: Position[] = hlPositions.map((pos, idx) => ({
+      const hlRows = mapClearinghouseAssetPositionsToDashboard(accountState?.assetPositions, mids);
+      const convertedPositions: Position[] = hlRows.map((pos, idx) => ({
         id: `hl-${pos.coin}-${idx}`,
         coin: pos.coin,
         side: pos.side,
         size: pos.size,
         entryPrice: pos.entryPrice,
-        markPrice: mids[pos.coin] || pos.entryPrice,
+        markPrice: pos.markPrice,
         leverage: pos.leverage,
-        margin: pos.marginUsed,
+        margin: pos.margin,
         unrealizedPnl: pos.unrealizedPnl,
-        unrealizedPnlPercent: pos.marginUsed > 0 ? (pos.unrealizedPnl / pos.marginUsed) * 100 : 0,
-        liquidationPrice: pos.liquidationPrice || 0,
+        unrealizedPnlPercent: pos.unrealizedPnlPercent,
+        liquidationPrice: pos.liquidationPrice,
         openedAt: new Date(),
       }));
       setPositions(convertedPositions);
       console.log("[positions] fetched from API:", convertedPositions.map(p => ({ coin: p.coin, side: p.side, size: p.size, entryPrice: p.entryPrice, pnl: p.unrealizedPnl })));
 
-      // Store open orders from Hyperliquid (includes SL/TP trigger orders via frontendOpenOrders)
       const triggerOrds = (hlOrders || []).filter((o: any) => o.isTrigger || o.triggerPx);
       if (triggerOrds.length > 0) {
         console.log("[openOrders] trigger orders raw:", JSON.stringify(triggerOrds.map((o: any) => ({
@@ -271,42 +280,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           triggerPx: o.triggerPx, limitPx: o.limitPx, isTrigger: o.isTrigger,
         }))));
       }
-      const convertedOrders: HLOpenOrder[] = (hlOrders || []).map((ord: any) => {
-        let orderType: "limit" | "stop_loss" | "take_profit" = "limit";
-        // Use Hyperliquid's orderType string first (most reliable)
-        const ot = (ord.orderType || "").toLowerCase();
-        const tc = (ord.triggerCondition || ord.tpsl || "").toLowerCase();
-        if (ord.isStopLoss === true) {
-          orderType = "stop_loss";
-        } else if (ord.tpsl === "sl" || tc === "sl") {
-          orderType = "stop_loss";
-        } else if (ord.tpsl === "tp" || tc === "tp") {
-          orderType = "take_profit";
-        } else if (ot.includes("take profit")) {
-          orderType = "take_profit";
-        } else if (ot.includes("stop")) {
-          orderType = "stop_loss";
-        } else if (tc.includes("above")) {
-          orderType = "take_profit";
-        } else if (tc.includes("below")) {
-          orderType = "stop_loss";
-        }
-        const oidRaw = ord.oid;
-        const oidNum =
-          typeof oidRaw === "string" ? parseInt(oidRaw, 10) : Number(oidRaw);
-        return {
-          coin: ord.coin,
-          oid: Number.isFinite(oidNum) ? oidNum : 0,
-          side: ord.side,
-          sz: ord.sz,
-          limitPx: ord.limitPx,
-          timestamp: ord.timestamp,
-          origSz: ord.origSz,
-          orderType,
-          triggerPx: ord.triggerPx,
-        };
-      });
-      // Replace entirely — Hyperliquid is source of truth (no merge with previous openOrders).
+      const convertedOrders = convertRawFrontendOrdersToHl(hlOrders || []);
       setOpenOrders(convertedOrders);
       setHlFrontendOpenOrdersRaw(
         Array.isArray(hlOrders) ? hlOrders.map((o: unknown) => (typeof o === "object" && o !== null ? { ...(o as object) } : o)) : [],
@@ -339,11 +313,99 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [walletConnected, walletAddress]);
 
-  // Poll Hyperliquid open orders + positions; also refresh when tab becomes visible (catch external cancels).
+  // WebSocket: open orders + clearinghouse state (1:1 with L1). userEvents debounced refetch as safety net.
+  useEffect(() => {
+    if (!walletConnected || !walletAddress) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const transport = new WebSocketTransport();
+        const subClient = new SubscriptionClient({ transport });
+        const user = walletAddress as `0x${string}`;
+        const subs: Array<{ unsubscribe: () => Promise<void> }> = [];
+
+        const sOpen = await subClient.openOrders({ user }, (evt) => {
+          if (cancelled) return;
+          const raw = (evt.orders ?? []) as unknown[];
+          setOpenOrders(convertRawFrontendOrdersToHl(raw));
+          setHlFrontendOpenOrdersRaw(
+            Array.isArray(raw)
+              ? raw.map((o: unknown) =>
+                  typeof o === "object" && o !== null ? { ...(o as object) } : o,
+                )
+              : [],
+          );
+          setHlAccountSyncAt(Date.now());
+        });
+        subs.push(sOpen);
+
+        const sCh = await subClient.clearinghouseState({ user }, (evt) => {
+          if (cancelled) return;
+          const ch = evt.clearinghouseState as unknown as AccountState;
+          applyMarginSummaryFromAccountState(ch, {
+            setAccountValue,
+            setMarginUsed,
+            setBalance,
+            setWithdrawable,
+          });
+          const mids = currentPricesRef.current;
+          const hlRows = mapClearinghouseAssetPositionsToDashboard(ch?.assetPositions, mids);
+          setPositions(
+            hlRows.map((pos, idx) => ({
+              id: `hl-${pos.coin}-${idx}`,
+              coin: pos.coin,
+              side: pos.side,
+              size: pos.size,
+              entryPrice: pos.entryPrice,
+              markPrice: pos.markPrice,
+              leverage: pos.leverage,
+              margin: pos.margin,
+              unrealizedPnl: pos.unrealizedPnl,
+              unrealizedPnlPercent: pos.unrealizedPnlPercent,
+              liquidationPrice: pos.liquidationPrice,
+              openedAt: new Date(),
+            })),
+          );
+          setHlAccountSyncAt(Date.now());
+        });
+        subs.push(sCh);
+
+        const sUe = await subClient.userEvents({ user }, () => {
+          if (cancelled) return;
+          if (userEventsRefreshTimerRef.current) clearTimeout(userEventsRefreshTimerRef.current);
+          userEventsRefreshTimerRef.current = setTimeout(() => {
+            userEventsRefreshTimerRef.current = null;
+            void refreshAccount();
+          }, 500);
+        });
+        subs.push(sUe);
+
+        wsSubsRef.current = subs;
+      } catch (e) {
+        console.warn("[HL] WebSocket subscription failed:", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (userEventsRefreshTimerRef.current) {
+        clearTimeout(userEventsRefreshTimerRef.current);
+        userEventsRefreshTimerRef.current = null;
+      }
+      const subs = wsSubsRef.current;
+      wsSubsRef.current = [];
+      for (const s of subs) {
+        void s.unsubscribe().catch(() => {});
+      }
+    };
+  }, [walletConnected, walletAddress, refreshAccount]);
+
+  // Slower REST fallback if WS misses an edge; visibility refocus still triggers immediate refresh.
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
 
-    const interval = setInterval(refreshAccount, 2500);
+    const interval = setInterval(refreshAccount, 30_000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refreshAccount();

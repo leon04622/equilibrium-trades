@@ -26,6 +26,10 @@ interface ChartOrderLinesProps {
   priceToCoordinate?: (price: number) => number | null;
   /** When true, TP/SL horizontal lines are drawn on canvas; overlay only handles drag + tags. */
   nativeTpslLines?: boolean;
+  /** When true, TP/SL + ghosts are drawn elsewhere (e.g. Apex Sovereign SVG); keep entry / liq only. */
+  tpslRenderedExternally?: boolean;
+  /** When true, entry line + PnL are drawn in Apex Sovereign; keep liq + overlay hit targets only. */
+  entryRenderedExternally?: boolean;
   /** Live-update native IPriceLine while dragging. */
   onTpslDragVisual?: (kind: "tp" | "sl", price: number) => void;
   onDraggingChange?: (dragging: boolean) => void;
@@ -192,6 +196,8 @@ export function ChartOrderLines({
   coordinateToPrice,
   priceToCoordinate,
   nativeTpslLines = false,
+  tpslRenderedExternally = false,
+  entryRenderedExternally = false,
   onTpslDragVisual,
   onDraggingChange,
   onTpslPendingCommit,
@@ -706,6 +712,12 @@ export function ChartOrderLines({
     });
   }
 
+  const lineRows = lines.filter((l) => {
+    if (tpslRenderedExternally && ["tp", "sl", "ghost-tp", "ghost-sl"].includes(l.key)) return false;
+    if (entryRenderedExternally && l.key === "entry") return false;
+    return true;
+  });
+
   const rowStyleFromLayout = (layout: LineLayout, bandHalfPx: number): CSSProperties => {
     if (layout.mode === "px") {
       return { top: layout.y - bandHalfPx, height: bandHalfPx * 2 };
@@ -778,7 +790,7 @@ export function ChartOrderLines({
           );
         })()}
 
-      {lines.map((line) => {
+      {lineRows.map((line) => {
         const layout = layoutForPrice(line.price, priceToCoordinate, effMin, effMax);
         const isSlInteractive = line.editType === "sl";
         // SL often sits just off-chart (long: below / short: above). Culling the row removed all hit targets.

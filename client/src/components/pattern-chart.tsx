@@ -9,7 +9,6 @@ import {
   LineStyle,
   type IChartApi,
   type ISeriesApi,
-  type IPriceLine,
   type Time,
 } from "lightweight-charts";
 import { useTheme } from "@/lib/theme";
@@ -19,7 +18,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
-import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
+import { ApexSovereign } from "@/components/apex-sovereign";
+import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
 interface EducationalPatternSignal {
   id: string;
@@ -164,15 +164,7 @@ function PatternChartComponent({
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const isSyncingRef = useRef(false);
 
-  /** Native canvas TP/SL (+ dashed ghosts); overlay handles drag/tags. */
-  const tpslLineRefs = useRef<{
-    tp: IPriceLine | null;
-    sl: IPriceLine | null;
-    ghostTp: IPriceLine | null;
-    ghostSl: IPriceLine | null;
-  }>({ tp: null, sl: null, ghostTp: null, ghostSl: null });
-
-  /** Keeps canvas price at dropped level until openOrders refresh (matches ChartOrderLines contract). */
+  /** Keeps optimistic TP/SL prices until openOrders refresh (Apex Sovereign + order lines contract). */
   const [nativeTpslOverride, setNativeTpslOverride] = useState<{ tp: number | null; sl: number | null }>({
     tp: null,
     sl: null,
@@ -188,38 +180,8 @@ function PatternChartComponent({
   // when candles/coin/interval haven't changed, so the fresh chart always gets populated.
   const [chartVersion, setChartVersion] = useState(0);
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
-  /** Bumps on throttled chart interaction so TP/SL overlay re-reads priceToCoordinate after Y-scale changes. */
+  /** Bumps on throttled chart interaction so Apex Sovereign SVG resyncs after Y-scale changes. */
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
-
-  /** Pixel Y from price — must match candlestick series mapping (LW v5). */
-  const priceToCoordinate = useCallback((price: number): number | null => {
-    try {
-      const series = candleSeriesRef.current;
-      if (!series) return null;
-      const c = series.priceToCoordinate(price);
-      if (c === null || c === undefined) return null;
-      const n = Number(c);
-      return Number.isFinite(n) ? n : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  /** Browser clientY → candlestick series price (chart pane–relative Y). */
-  const coordinateToPrice = useCallback((clientY: number): number | null => {
-    try {
-      const el = mainContainerRef.current;
-      const series = candleSeriesRef.current;
-      if (!el || !series) return null;
-      const y = clientY - el.getBoundingClientRect().top;
-      const raw = series.coordinateToPrice(y);
-      if (raw === null || raw === undefined) return null;
-      const n = typeof raw === "number" ? raw : Number(raw);
-      return Number.isFinite(n) && n > 0 ? n : null;
-    } catch {
-      return null;
-    }
-  }, []);
 
   // Pane resize state
   const [weights, setWeights] = useState([6, 2, 2]);
@@ -543,7 +505,6 @@ function PatternChartComponent({
       sma200SeriesRef.current = null;
       volumeSeriesRef.current = null;
       volumeSmaSeriesRef.current = null;
-      tpslLineRefs.current = { tp: null, sl: null, ghostTp: null, ghostSl: null };
       chartDataReadyRef.current = false;
       // Reset prevDataKeyRef so the next data effect treats incoming candles as a key change
       prevDataKeyRef.current = "";
@@ -727,17 +688,6 @@ function PatternChartComponent({
     });
   }, [coin, positions, openOrders]);
 
-  const onTpslDragVisual = useCallback((kind: "tp" | "sl", price: number) => {
-    const r = tpslLineRefs.current;
-    const line = kind === "tp" ? (r.tp ?? r.ghostTp) : (r.sl ?? r.ghostSl);
-    if (!line) return;
-    try {
-      line.applyOptions({ price });
-    } catch {
-      /* disposed */
-    }
-  }, []);
-
   const onTpslPendingCommit = useCallback((kind: "tp" | "sl", price: number) => {
     setNativeTpslOverride((o) => ({ ...o, [kind]: price }));
   }, []);
@@ -745,90 +695,6 @@ function PatternChartComponent({
   const onTpslPendingClear = useCallback((kind: "tp" | "sl") => {
     setNativeTpslOverride((o) => ({ ...o, [kind]: null }));
   }, []);
-
-  // TP / SL + ghost guides on canvas; ChartOrderLines supplies drag/edit and matches Y via priceToCoordinate.
-  useEffect(() => {
-    const series = candleSeriesRef.current;
-    if (!series) return;
-
-    const removeKey = (key: "tp" | "sl" | "ghostTp" | "ghostSl") => {
-      const line = tpslLineRefs.current[key];
-      if (line) {
-        try {
-          series.removePriceLine(line);
-        } catch {
-          /* disposed */
-        }
-        tpslLineRefs.current[key] = null;
-      }
-    };
-
-    removeKey("tp");
-    removeKey("sl");
-    removeKey("ghostTp");
-    removeKey("ghostSl");
-
-    const position = positions.find((p) => p.coin === coin);
-    if (!position) return;
-
-    const { tpPrice, slPrice } = selectTpSlOrders(coin, position, openOrders);
-    const effTp = nativeTpslOverride.tp ?? tpPrice;
-    const effSl = nativeTpslOverride.sl ?? slPrice;
-    const markPx = position.markPrice || currentPrice || position.entryPrice;
-    const { ghostTp, ghostSl } = ghostTpslPrices(
-      position.entryPrice,
-      markPx,
-      position.side === "long",
-      effTp != null && effTp > 0,
-      effSl != null && effSl > 0,
-    );
-
-    const HL_TP = "#0ecb81";
-    const HL_SL = "#f6465d";
-
-    if (effTp != null && effTp > 0) {
-      tpslLineRefs.current.tp = series.createPriceLine({
-        price: effTp,
-        color: HL_TP,
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: false,
-      });
-    } else if (ghostTp != null && ghostTp > 0) {
-      tpslLineRefs.current.ghostTp = series.createPriceLine({
-        price: ghostTp,
-        color: "rgba(14, 203, 129, 0.45)",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: false,
-      });
-    }
-
-    if (effSl != null && effSl > 0) {
-      tpslLineRefs.current.sl = series.createPriceLine({
-        price: effSl,
-        color: HL_SL,
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: false,
-      });
-    } else if (ghostSl != null && ghostSl > 0) {
-      tpslLineRefs.current.ghostSl = series.createPriceLine({
-        price: ghostSl,
-        color: "rgba(246, 70, 93, 0.45)",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: false,
-      });
-    }
-
-    return () => {
-      removeKey("tp");
-      removeKey("sl");
-      removeKey("ghostTp");
-      removeKey("ghostSl");
-    };
-  }, [positions, openOrders, coin, currentPrice, chartVersion, nativeTpslOverride]);
 
   const isBullish = smaStatus?.isBullish ?? true;
 
@@ -843,16 +709,23 @@ function PatternChartComponent({
         data-chart-layout-tick={chartLayoutTick}
       >
         <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
+        <ApexSovereign
+          coin={coin}
+          currentPrice={currentPrice ?? 0}
+          chartPaneRef={mainContainerRef}
+          candleSeriesRef={candleSeriesRef}
+          chartVersion={chartVersion}
+          chartLayoutTick={chartLayoutTick}
+          pendingOverride={nativeTpslOverride}
+          onPendingCommit={onTpslPendingCommit}
+          onPendingClear={onTpslPendingClear}
+        />
         <ChartOrderLines
           coin={coin}
           currentPrice={currentPrice ?? 0}
           visiblePriceRange={visiblePriceRange}
-          coordinateToPrice={coordinateToPrice}
-          priceToCoordinate={priceToCoordinate}
-          nativeTpslLines
-          onTpslDragVisual={onTpslDragVisual}
-          onTpslPendingCommit={onTpslPendingCommit}
-          onTpslPendingClear={onTpslPendingClear}
+          tpslRenderedExternally
+          entryRenderedExternally
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}

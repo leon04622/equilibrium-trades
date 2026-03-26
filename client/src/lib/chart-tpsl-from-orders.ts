@@ -49,6 +49,7 @@ export function ghostTpslPrices(
 }
 
 function isHyperliquidTpslCandidate(o: HLOpenOrder): boolean {
+  if (o.isTrigger === true && o.reduceOnly === true) return true;
   const ot = (o.orderType || "").toLowerCase();
   if (ot.includes("take profit") || ot === "take_profit") return true;
   if (ot.includes("stop") && !ot.includes("take")) return true;

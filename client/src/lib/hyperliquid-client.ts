@@ -1,4 +1,6 @@
 import { JsonRpcSigner, Wallet } from "ethers";
+import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
+import { ApiRequestError } from "@nktkas/hyperliquid/api/exchange";
 import { signL1Action as sdkSignL1Action, PrivateKeySigner } from "@nktkas/hyperliquid/signing";
 import {
   HL_BUILDER_ADDRESS as BUILDER_ADDRESS,
@@ -108,6 +110,12 @@ function getStoredAgent(userAddress: string): StoredAgent | null {
   } catch {
     return null;
   }
+}
+
+/** Returns the delegated API agent private key for this wallet (after approveAgent). */
+export function getHyperliquidAgentPrivateKey(userAddress: string): string | null {
+  const a = getStoredAgent(userAddress);
+  return a?.privateKey ?? null;
 }
 
 function storeAgent(userAddress: string, agent: StoredAgent): void {
@@ -550,6 +558,22 @@ async function getMidPrice(coin: string): Promise<number | null> {
   }
 }
 
+/**
+ * Same data as POST `clearinghouseState`, via @nktkas/hyperliquid InfoClient (SDK).
+ * Use for initial sync alongside REST open orders.
+ */
+export async function getClearinghouseStateViaInfoClient(address: string): Promise<AccountState | null> {
+  try {
+    const transport = new HttpTransport({ isTestnet: false });
+    const info = new InfoClient({ transport });
+    const data = await info.clearinghouseState({ user: address as `0x${string}` });
+    return data as unknown as AccountState;
+  } catch (e) {
+    console.warn("[Hyperliquid] InfoClient.clearinghouseState failed:", e);
+    return null;
+  }
+}
+
 export async function getAccountState(address: string): Promise<AccountState | null> {
   try {
     const response = await fetch(INFO_API_URL, {
@@ -612,22 +636,25 @@ export async function getSpotBalances(address: string): Promise<SpotBalance[]> {
   return state.balances.filter(b => parseFloat(b.total) > 0);
 }
 
-export async function getPositions(address: string): Promise<Position[]> {
-  const state = await getAccountState(address);
+export function extractPerpPositionsFromClearinghouse(state: AccountState | null): Position[] {
   if (!state) return [];
-  
   return state.assetPositions
-    .filter(ap => parseFloat(ap.position.szi) !== 0)
-    .map(ap => ({
+    .filter((ap) => parseFloat(ap.position.szi) !== 0)
+    .map((ap) => ({
       coin: ap.position.coin,
       size: Math.abs(parseFloat(ap.position.szi)),
       entryPrice: parseFloat(ap.position.entryPx),
       unrealizedPnl: parseFloat(ap.position.unrealizedPnl),
       leverage: ap.position.leverage?.value || 1,
       liquidationPrice: ap.position.liquidationPx ? parseFloat(ap.position.liquidationPx) : undefined,
-      side: parseFloat(ap.position.szi) > 0 ? "long" as const : "short" as const,
+      side: parseFloat(ap.position.szi) > 0 ? ("long" as const) : ("short" as const),
       marginUsed: parseFloat(ap.position.marginUsed || "0"),
     }));
+}
+
+export async function getPositions(address: string): Promise<Position[]> {
+  const state = await getAccountState(address);
+  return extractPerpPositionsFromClearinghouse(state);
 }
 
 export async function getCoinMaxLeverage(coin: string): Promise<number> {
@@ -658,7 +685,7 @@ export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
 }
 
 // Round to 5 significant figures, which is Hyperliquid's precision requirement
-function floatToWire(x: number): string {
+export function floatToWire(x: number): string {
   if (Math.abs(x) < 1e-8) return "0";
   
   // Round to 5 significant figures
@@ -1399,5 +1426,128 @@ export async function setLeverage(
   } catch (error: any) {
     console.error("Set leverage error:", error);
     return { success: false, error: error.message || "Failed to set leverage" };
+  }
+}
+
+// ── @nktkas/hyperliquid ExchangeClient — modify / batchModify (agent key, non-custodial) ──
+
+const TPSL_MODIFY_SLIPPAGE = 0.05;
+
+export interface TpslModifyOrderSpec {
+  coin: string;
+  orderId: number;
+  /** New trigger price for the TP/SL order. */
+  newPrice: number;
+  /** Order wire field `b` (reduce-only TP/SL matches placeTriggerOrder: !isLong). */
+  isBuy: boolean;
+  size: number;
+  tpsl: "tp" | "sl";
+}
+
+function buildTpslModifyOrderWire(spec: TpslModifyOrderSpec, assetIndex: number) {
+  const triggerPxStr = floatToWire(spec.newPrice);
+  const limitGuard = spec.isBuy
+    ? spec.newPrice * (1 + TPSL_MODIFY_SLIPPAGE)
+    : spec.newPrice * (1 - TPSL_MODIFY_SLIPPAGE);
+  const pStr = floatToWire(limitGuard);
+  return {
+    a: assetIndex,
+    b: spec.isBuy,
+    p: pStr,
+    s: floatToWire(spec.size),
+    r: true,
+    t: {
+      trigger: {
+        isMarket: true,
+        triggerPx: triggerPxStr,
+        tpsl: spec.tpsl,
+      },
+    },
+  };
+}
+
+function isApiRequestError(e: unknown): e is InstanceType<typeof ApiRequestError> {
+  return typeof e === "object" && e !== null && (e as { name?: string }).name === "ApiRequestError";
+}
+
+/**
+ * L1 `modify` via SDK: updates an existing TP/SL trigger order to a new trigger price.
+ * Signs with the stored API agent key (approveAgent); `userWalletAddress` selects that agent.
+ */
+export async function syncOrderToExchange(
+  userWalletAddress: string,
+  spec: TpslModifyOrderSpec,
+): Promise<{ ok: boolean; error?: string }> {
+  const agent = getStoredAgent(userWalletAddress);
+  if (!agent) {
+    return { ok: false, error: "Hyperliquid trading session not ready. Approve the trading key first." };
+  }
+
+  const assetIndex = await getAssetIndex(spec.coin);
+  if (assetIndex === null) {
+    return { ok: false, error: `Unknown asset: ${spec.coin}` };
+  }
+
+  const order = buildTpslModifyOrderWire(spec, assetIndex);
+
+  try {
+    const transport = new HttpTransport({ isTestnet: false });
+    const wallet = new Wallet(agent.privateKey);
+    const client = new ExchangeClient({ transport, wallet });
+    const data = await client.modify({ oid: spec.orderId, order });
+    const st = data && typeof data === "object" && "status" in data ? (data as { status: string }).status : "";
+    if (st === "ok") return { ok: true };
+    return { ok: false, error: "Exchange did not return status ok." };
+  } catch (e: unknown) {
+    if (isApiRequestError(e)) return { ok: false, error: e.message };
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Single L1 transaction: `batchModify` multiple TP/SL updates (same coin).
+ */
+export async function batchSyncOrdersToExchange(
+  userWalletAddress: string,
+  specs: TpslModifyOrderSpec[],
+): Promise<{ ok: boolean; error?: string }> {
+  if (specs.length === 0) return { ok: true };
+  if (specs.length === 1) {
+    return syncOrderToExchange(userWalletAddress, specs[0]);
+  }
+
+  const agent = getStoredAgent(userWalletAddress);
+  if (!agent) {
+    return { ok: false, error: "Hyperliquid trading session not ready. Approve the trading key first." };
+  }
+
+  const coin0 = specs[0].coin;
+  if (!specs.every((s) => s.coin === coin0)) {
+    return { ok: false, error: "batchModify requires all orders on the same coin." };
+  }
+
+  const assetIndex = await getAssetIndex(coin0);
+  if (assetIndex === null) {
+    return { ok: false, error: `Unknown asset: ${coin0}` };
+  }
+
+  const modifies = specs.map((spec) => ({
+    oid: spec.orderId,
+    order: buildTpslModifyOrderWire(spec, assetIndex),
+  }));
+
+  try {
+    const transport = new HttpTransport({ isTestnet: false });
+    const wallet = new Wallet(agent.privateKey);
+    const client = new ExchangeClient({ transport, wallet });
+    const data = await client.batchModify({ modifies });
+    const st = data && typeof data === "object" && "status" in data ? (data as { status: string }).status : "";
+    if (st === "ok") return { ok: true };
+    return { ok: false, error: "Exchange did not return status ok." };
+  } catch (e: unknown) {
+    if (isApiRequestError(e)) return { ok: false, error: e.message };
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
   }
 }
