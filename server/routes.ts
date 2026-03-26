@@ -1286,7 +1286,8 @@ export async function registerRoutes(
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     try {
       res.json(await storage.getAllWalletUsers());
-    } catch {
+    } catch (err) {
+      console.error("GET /api/users:", err);
       res.status(500).json({ error: "Failed to fetch users" });
     }
   });
@@ -1297,7 +1298,8 @@ export async function registerRoutes(
     try {
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 2000);
       res.json(await storage.getAllSupportMessages(limit));
-    } catch {
+    } catch (err) {
+      console.error("GET /api/messages:", err);
       res.status(500).json({ error: "Failed to fetch messages" });
     }
   });

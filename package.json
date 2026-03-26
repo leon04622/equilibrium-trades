@@ -10,6 +10,8 @@
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
+    "start:serverjs": "cross-env NODE_ENV=production node server.js",
+    "install:legacy": "npm install --legacy-peer-deps",
     "check": "tsc",
     "verify": "npm run check && npm run build && node script/verify.mjs",
     "db:push": "drizzle-kit push"

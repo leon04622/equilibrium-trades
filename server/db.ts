@@ -41,6 +41,9 @@ function initDatabase(): void {
 
   try {
     pool = createPool(url);
+    pool.on("error", (err) => {
+      console.error("[db] Unexpected error on idle PostgreSQL client (server stays up):", err);
+    });
     db = drizzle(pool, { schema });
     console.log("Database Connected");
     console.log("[db] PostgreSQL pool ready (node-postgres; compatible with Supabase, Neon pooled URI, standard Postgres).");

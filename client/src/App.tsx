@@ -66,7 +66,7 @@ function App() {
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3.5rem",
-  } as React.CSSProperties;
+  } as CSSProperties;
 
   return (
     <QueryClientProvider client={queryClient}>
