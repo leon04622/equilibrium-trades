@@ -11,6 +11,8 @@ import {
   BookOpen,
   BarChart3,
   Eye,
+  CheckCircle2,
+  ChevronDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -372,6 +374,10 @@ export function PatternScannerUI() {
 
   const signals = isError ? [] : (scanPayload?.patterns ?? []);
   const scanMeta = isError ? null : (scanPayload?.meta ?? null);
+  const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
+  const universeApprox = marketsData?.tickers?.length ?? 0;
+  const likelyPartialUniverse =
+    scanHasCompleted && universeApprox > 0 && scanMeta!.coinCount < Math.min(20, Math.floor(universeApprox * 0.15));
 
   const saveWatchlistMutation = useMutation({
     mutationFn: async () => {
@@ -505,35 +511,95 @@ export function PatternScannerUI() {
         </Alert>
       )}
 
-      <Alert className="border-slate-500/40 bg-slate-500/5">
-        <BarChart3 className="h-4 w-4 text-slate-600" />
-        <AlertTitle className="text-slate-700 dark:text-slate-300">Why so few patterns?</AlertTitle>
-        <AlertDescription className="text-muted-foreground text-xs sm:text-sm">
-          We scan the whole Hyperliquid list, but each row needs roughly <strong>200 closed bars</strong> per timeframe,
-          valid <strong>21/200 SMMA</strong>, and patterns that pass <strong>strict geometry + trend filters</strong> (Apex
-          pole, flag rules, no hallucinated bull flags into bearish structure). Most pairs at any moment produce{" "}
-          <strong>no qualifying label</strong> — that is expected, not a sign the universe scan is truncated.
-          {scanMeta && scanMeta.coinCount > 0 ? (
-            <>
-              {" "}
-              Your last successful response covered <strong>{scanMeta.coinCount}</strong> tickers
-              {scanMeta.cached ? " (served from a short server cache)" : ""}.
-            </>
+      {!isError ? (
+        <div
+          className={cn(
+            "rounded-lg border px-4 py-3 space-y-1.5 transition-colors",
+            isLoading && !scanPayload
+              ? "border-primary/35 bg-primary/5"
+              : signals.length > 0
+                ? "border-emerald-500/35 bg-emerald-500/[0.06]"
+                : scanHasCompleted
+                  ? "border-border bg-muted/25"
+                  : "border-border/80 bg-card/40",
+          )}
+        >
+          {isFetching && scanPayload ? (
+            <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+              <RefreshCw className="h-3 w-3 animate-spin shrink-0" aria-hidden />
+              Updating scan…
+            </p>
           ) : null}
-        </AlertDescription>
-      </Alert>
+          {isLoading && !scanPayload ? (
+            <p className="text-sm flex items-center gap-2 text-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
+              Running scan across your selected markets and timeframes…
+            </p>
+          ) : scanHasCompleted ? (
+            <>
+              <div className="flex items-start gap-2">
+                {signals.length > 0 ? (
+                  <CheckCircle2
+                    className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
+                    aria-hidden
+                  />
+                ) : (
+                  <Activity className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
+                )}
+                <div className="min-w-0 space-y-1">
+                  <p className="text-sm font-medium text-foreground leading-snug">
+                    {signals.length > 0 ? (
+                      <>
+                        Scanner found <strong>{signals.length}</strong> labeled setup
+                        {signals.length === 1 ? "" : "s"} matching the current rules.
+                      </>
+                    ) : (
+                      <>Scan finished — no setups matched the filters on this pass.</>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    This run evaluated <strong>{scanMeta!.coinCount}</strong> market
+                    {scanMeta!.coinCount === 1 ? "" : "s"} in {(scanMeta!.durationMs / 1000).toFixed(1)}s
+                    {scanMeta!.cached ? " (recent cached result)" : ""}.
+                    {signals.length === 0
+                      ? " That is normal: most symbols at any moment will not produce a label, because the model requires enough history and strict geometry + SMMA alignment."
+                      : null}
+                  </p>
+                  {likelyPartialUniverse ? (
+                    <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
+                      Only {scanMeta!.coinCount} market(s) were included — if you expected the full Hyperliquid list,
+                      enable <strong>All markets</strong> (with Mongo) or clear a short custom watchlist.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">Connect and open this page to run the scanner.</p>
+          )}
+        </div>
+      ) : null}
 
-      <Alert className="border-violet-500/40 bg-violet-500/5 hidden md:block">
-        <Zap className="h-4 w-4 text-violet-600" />
-        <AlertTitle className="text-violet-700 dark:text-violet-300">Geometric heuristic model</AlertTitle>
-        <AlertDescription className="text-muted-foreground text-sm">
-          Flags require a verified <strong>impulse pole</strong> (&gt;1.5% move, &gt;70% directional bodies). Consolidation
-          uses <strong>pivot highs/lows</strong>; retracement cannot exceed <strong>50% of pole height</strong>.{" "}
-          <strong>21 SMMA below 200 SMMA</strong> blocks bull-flag labels against macro structure (no hallucination).{" "}
-          <strong>High Probability — Trend Aligned</strong> when 1m bull flag meets 15m bullish SMMA, or when 1h/4h Apex
-          flags align with local 21/200.
-        </AlertDescription>
-      </Alert>
+      <Collapsible className="rounded-lg border border-border/70 bg-card/30">
+        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/40 rounded-lg transition-colors">
+          <BarChart3 className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+          <span className="flex-1">How pattern detection works</span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4 pt-0 space-y-3 text-xs text-muted-foreground leading-relaxed border-t border-border/50">
+          <p>
+            Each symbol and timeframe needs roughly <strong>200 closed candles</strong>, a valid <strong>21 / 200 SMMA</strong>
+            , and a pattern that passes <strong>Apex geometry</strong> (impulse pole, pivot structure, retracement limits)
+            plus <strong>trend alignment rules</strong> so labels are not printed against obvious macro structure.
+          </p>
+          <p>
+            Flags use a verified <strong>impulse pole</strong> (directional move with body participation); consolidation
+            respects <strong>pivot highs/lows</strong> and cannot retrace more than about <strong>half the pole</strong>.
+            <strong> High probability — trend aligned</strong> can appear when a short-TF flag agrees with a higher-TF SMMA
+            trend (for example 1m with 15m context).
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
 
       <Alert className="border-blue-500/50 bg-blue-500/5 hidden md:block">
         <BookOpen className="h-4 w-4 text-blue-500" />
@@ -568,14 +634,6 @@ export function PatternScannerUI() {
           ).
         </span>
       </div>
-
-      {scanMeta && scanMeta.coinCount > 0 && !isError ? (
-        <p className="text-[10px] md:text-xs text-muted-foreground font-mono px-0.5">
-          Scan coverage: {scanMeta.coinCount} markets · {(scanMeta.durationMs / 1000).toFixed(1)}s server time ·{" "}
-          {scanMeta.signalCount} labeled setups
-          {scanMeta.cached ? " · cached (≤90s)" : ""}
-        </p>
-      ) : null}
 
       <Card className="border-border/80">
         <CardHeader className="pb-2 pt-4 px-4 md:px-6">
