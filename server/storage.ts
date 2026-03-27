@@ -825,7 +825,11 @@ export class MemStorage implements IStorage {
         clientSentAt: message.clientSentAt ?? null,
       }).returning();
       return newMessage;
-    } catch {
+    } catch (err) {
+      if (db) {
+        console.error("[storage] createMessage (PostgreSQL) failed:", err);
+        throw err;
+      }
       return {
         id: randomUUID(),
         senderType: message.senderType,

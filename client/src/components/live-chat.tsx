@@ -282,8 +282,8 @@ export function LiveChat() {
           }),
         });
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "Failed to send message");
+          const err = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+          throw new Error(err.detail || err.error || "Failed to send message");
         }
         return res.json();
       }
@@ -303,8 +303,8 @@ export function LiveChat() {
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to send message");
+        const err = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        throw new Error(err.detail || err.error || "Failed to send message");
       }
       return res.json();
     },

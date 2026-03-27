@@ -86,7 +86,7 @@ initDatabase();
 
 /**
  * Creates core tables if missing (e.g. fresh Supabase/Neon DB where `npm run db:push` was never run).
- * Matches `tutorial_videos` in shared/schema.ts — fixes "relation tutorial_videos does not exist".
+ * Matches tables in shared/schema.ts — fixes "relation … does not exist" for vault + support chat.
  */
 export async function ensurePostgresCoreTables(): Promise<void> {
   if (!pool) return;
@@ -106,7 +106,21 @@ export async function ensurePostgresCoreTables(): Promise<void> {
         created_at timestamp DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log("[db] Ensured table tutorial_videos exists (CREATE IF NOT EXISTS).");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_tickets (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        sender_type text NOT NULL,
+        sender_wallet text,
+        sender_name text,
+        message text NOT NULL,
+        is_read boolean DEFAULT false,
+        conversation_id text NOT NULL,
+        wallet_address text,
+        client_sent_at timestamp,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[db] Ensured tables tutorial_videos, support_tickets (CREATE IF NOT EXISTS).");
   } catch (err) {
     console.error("[db] ensurePostgresCoreTables failed:", err);
   } finally {

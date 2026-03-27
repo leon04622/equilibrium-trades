@@ -1036,9 +1036,10 @@ export async function registerRoutes(
       const { emitSupportMessage } = await import("./support-events");
       emitSupportMessage(message);
       res.json(message);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error creating message:", error);
-      res.status(500).json({ error: "Failed to send message" });
+      const detail = error instanceof Error ? error.message : undefined;
+      res.status(500).json({ error: "Failed to send message", ...(detail ? { detail } : {}) });
     }
   });
 
@@ -1132,10 +1133,11 @@ export async function registerRoutes(
       emitSupportMessage(message);
 
       res.json(message);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("support/send:", error);
       pushAdminLog({ channel: "support", level: "error", message: String(error) });
-      res.status(500).json({ error: "Failed to send message" });
+      const detail = error instanceof Error ? error.message : undefined;
+      res.status(500).json({ error: "Failed to send message", ...(detail ? { detail } : {}) });
     }
   }
 

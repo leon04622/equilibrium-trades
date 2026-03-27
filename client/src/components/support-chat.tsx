@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { MessageCircle, X, Send, Loader2, User, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,15 +7,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWallet } from "@/lib/wallet-context";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 import type { SupportMessage } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface SupportChatProps {
   isAdmin?: boolean;
 }
 
 export function SupportChat({ isAdmin = false }: SupportChatProps) {
+  const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -24,11 +26,20 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
 
   const conversationId = isAdmin ? selectedConversation : address?.toLowerCase();
 
+  const buildHeaders = useCallback(() => {
+    const h: Record<string, string> = {};
+    if (address) h["x-wallet-address"] = address;
+    return h;
+  }, [address]);
+
   const { data: messages = [], refetch: refetchMessages } = useQuery<SupportMessage[]>({
     queryKey: ["/api/support/messages", conversationId],
     queryFn: async () => {
       if (!conversationId) return [];
-      const res = await fetch(`/api/support/messages/${conversationId}`);
+      const res = await fetch(`/api/support/messages/${encodeURIComponent(conversationId)}`, {
+        headers: buildHeaders(),
+      });
+      if (!res.ok) return [];
       return res.json();
     },
     enabled: !!conversationId && isOpen,
@@ -36,26 +47,53 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
   });
 
   const { data: conversations = [] } = useQuery<{ conversationId: string; lastMessage: SupportMessage; unreadCount: number }[]>({
-    queryKey: ["/api/support/conversations"],
-    enabled: isAdmin && isOpen,
+    queryKey: ["/api/support/conversations", address],
+    queryFn: async () => {
+      if (!address) return [];
+      const res = await fetch("/api/support/conversations", {
+        headers: { "x-wallet-address": address },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: isAdmin && isOpen && !!address,
     refetchInterval: isOpen ? 5000 : false,
   });
 
   const sendMutation = useMutation({
     mutationFn: async (msg: string) => {
       if (!conversationId) throw new Error("No conversation ID");
-      return apiRequest("POST", "/api/support/messages", {
-        senderType: isAdmin ? "admin" : "user",
-        senderWallet: isAdmin ? null : address,
-        senderName: isAdmin ? "Support Team" : `User ${address?.slice(0, 6)}...${address?.slice(-4)}`,
-        message: msg,
-        conversationId,
+      const res = await fetch("/api/support/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildHeaders(),
+        },
+        body: JSON.stringify({
+          senderType: isAdmin ? "admin" : "user",
+          senderWallet: isAdmin ? null : address,
+          senderName: isAdmin ? "Support Team" : `User ${address?.slice(0, 6)}...${address?.slice(-4)}`,
+          message: msg,
+          conversationId,
+        }),
       });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        throw new Error(err.detail || err.error || "Failed to send message");
+      }
+      return res.json();
     },
     onSuccess: () => {
       setMessage("");
       refetchMessages();
       queryClient.invalidateQueries({ queryKey: ["/api/support/conversations"] });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Message not sent",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
