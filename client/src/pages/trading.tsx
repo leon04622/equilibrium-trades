@@ -475,29 +475,31 @@ export default function Trading({ visible = true }: TradingProps) {
             
             <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
               <div
-                className="flex items-center gap-0 shrink-0 rounded-md border border-border/60 overflow-hidden bg-muted/20"
+                className="flex items-center gap-2 md:gap-3 shrink-0"
                 title="AI = native Hyperliquid candles; TP/SL lines mirror exchange open orders (read-only). TV = embedded TradingView."
               >
-                <Button
-                  type="button"
-                  variant={chartEngine === "hyperliquid" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 px-2 text-[10px] font-semibold rounded-none"
-                  onClick={() => setChartEngine("hyperliquid")}
-                  data-testid="chart-engine-ai"
-                >
-                  AI
-                </Button>
-                <Button
-                  type="button"
-                  variant={chartEngine === "tradingview" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 px-2 text-[10px] font-semibold rounded-none border-l border-border/50"
-                  onClick={() => setChartEngine("tradingview")}
-                  data-testid="chart-engine-tv"
-                >
-                  TV
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Switch
+                    id="chart-engine-ai"
+                    data-testid="chart-engine-ai"
+                    checked={chartEngine === "hyperliquid"}
+                    onCheckedChange={(on) => setChartEngine(on ? "hyperliquid" : "tradingview")}
+                  />
+                  <label htmlFor="chart-engine-ai" className="text-xs text-muted-foreground cursor-pointer">
+                    AI
+                  </label>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Switch
+                    id="chart-engine-tv"
+                    data-testid="chart-engine-tv"
+                    checked={chartEngine === "tradingview"}
+                    onCheckedChange={(on) => setChartEngine(on ? "tradingview" : "hyperliquid")}
+                  />
+                  <label htmlFor="chart-engine-tv" className="text-xs text-muted-foreground cursor-pointer">
+                    TV
+                  </label>
+                </div>
               </div>
               {chartEngine === "hyperliquid" && (
                 <>
