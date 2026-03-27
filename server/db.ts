@@ -9,8 +9,9 @@ const { Pool } = pg;
  * Supabase: Project Settings → Database → Connection string (URI), often port 5432 or pooler 6543.
  */
 export const DATABASE_URL_MISSING_MESSAGE =
-  "DATABASE_URL (or MONGODB_URI as a Postgres URI fallback) is not set. Add a PostgreSQL connection string to .env (e.g. Supabase URI). " +
-  "The server will start using in-memory fallbacks; wallet/chat/video persistence and Stripe catalog queries need a database.";
+  "DATABASE_URL is not set (or only a MongoDB URI was provided). Add a PostgreSQL connection string for Drizzle/Stripe/wallet tables (e.g. Supabase URI). " +
+  "For Admin + Educational Vault on MongoDB, set MONGO_VAULT_URI or MONGODB_URI to a mongodb:// or mongodb+srv:// URL (separate from Postgres). " +
+  "Without Postgres, the server still starts with in-memory fallbacks for non-Mongo routes.";
 
 export type AppDatabase = NodePgDatabase<typeof schema>;
 
@@ -26,17 +27,44 @@ function createPool(connectionString: string): pg.Pool {
   });
 }
 
+function looksLikeMongoConnectionString(url: string): boolean {
+  return /^mongodb(\+srv)?:\/\//i.test(url.trim());
+}
+
+/** Postgres URI only — never pass MongoDB URIs to node-postgres (common misconfig). */
+function resolvePostgresUrlFromEnv(): { url: string; legacyMongodNamedPostgres: boolean } {
+  const explicit = process.env.DATABASE_URL?.trim() || "";
+  if (explicit && looksLikeMongoConnectionString(explicit)) {
+    console.warn(
+      "[db] DATABASE_URL looks like MongoDB (mongodb://…). PostgreSQL will stay disabled; use postgresql:// for Postgres.",
+    );
+  }
+  if (explicit && !looksLikeMongoConnectionString(explicit)) {
+    return { url: explicit, legacyMongodNamedPostgres: false };
+  }
+
+  const legacy = process.env.MONGODB_URI?.trim() || "";
+  if (legacy && !looksLikeMongoConnectionString(legacy)) {
+    console.warn(
+      "[db] Using MONGODB_URI as the PostgreSQL connection string (legacy alias). Prefer DATABASE_URL for Postgres.",
+    );
+    return { url: legacy, legacyMongodNamedPostgres: true };
+  }
+
+  if (legacy && looksLikeMongoConnectionString(legacy)) {
+    console.log(
+      "[db] MONGODB_URI is a MongoDB URL — skipping for PostgreSQL. Use DATABASE_URL for Postgres; vault uses Mongo separately.",
+    );
+  }
+
+  return { url: "", legacyMongodNamedPostgres: false };
+}
+
 function initDatabase(): void {
-  const url = (process.env.DATABASE_URL || process.env.MONGODB_URI || "").trim();
+  const { url } = resolvePostgresUrlFromEnv();
   if (!url) {
     console.warn(`[db] ${DATABASE_URL_MISSING_MESSAGE}`);
     return;
-  }
-
-  if (!process.env.DATABASE_URL?.trim() && process.env.MONGODB_URI?.trim()) {
-    console.warn(
-      "[db] Using MONGODB_URI as the Postgres connection string (this app uses PostgreSQL, not MongoDB). Prefer DATABASE_URL.",
-    );
   }
 
   try {

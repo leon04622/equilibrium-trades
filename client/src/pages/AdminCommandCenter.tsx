@@ -229,9 +229,10 @@ export default function AdminCommandCenter() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Admin Command Center</h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-            Sovereign wallet only. With <code className="text-[10px]">MONGODB_URI</code>, videos, CRM, and support are
-            stored in MongoDB; otherwise PostgreSQL. Same <code className="text-[10px]">/api/videos</code> feed as the
-            Educational Vault.
+            Sovereign wallet only. Set <code className="text-[10px]">MONGO_VAULT_URI</code> or{" "}
+            <code className="text-[10px]">MONGODB_URI</code> (a <code className="text-[10px]">mongodb+srv://</code> URL)
+            on the server for MongoDB; otherwise videos/CRM/support use PostgreSQL. Check{" "}
+            <code className="text-[10px]">GET /health</code> → <code className="text-[10px]">mongoVault.connected</code>.
           </p>
           <p className="text-[10px] text-muted-foreground/80 font-mono mt-2 break-all">
             {FORTRESS_SOVEREIGN_WALLET}

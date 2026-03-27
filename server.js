@@ -5,12 +5,13 @@
  * Run `npm run build` before using this file in production.
  *
  * ── MongoDB (Admin Command Center, Educational Vault, CRM, Support) ──
- * When `MONGODB_URI` is set, videos, CRM rows, and support tickets are read/written
- * via `server/mongo-vault.ts` (bundled into `dist/index.cjs`). Without it, those
- * routes use PostgreSQL (`DATABASE_URL`) as before.
+ * When `MONGO_VAULT_URI` or `MONGODB_URI` is set to a real Mongo URL (mongodb:// or
+ * mongodb+srv://), videos, CRM, and support use MongoDB via `server/mongo-vault.ts`.
+ * Postgres (`DATABASE_URL`) is separate — do not use the same string for both.
  *
  * Environment:
- *   MONGODB_URI          — required for Mongo mode (e.g. mongodb+srv://…)
+ *   MONGO_VAULT_URI      — preferred for vault/CRM/support (mongodb+srv://…)
+ *   MONGODB_URI          — alternative if it is a Mongo URL (not used as Postgres anymore)
  *   MONGODB_DB_NAME      — optional, default `equilibrium`
  *   MONGO_VIDEOS_COLLECTION   — optional, default `vault_videos`
  *   MONGO_CRM_COLLECTION      — optional, default `crm_users`

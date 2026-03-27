@@ -10,6 +10,7 @@ import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
 import { getDatabaseStatus } from './db';
+import { getMongoVaultHealth } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
 
 const app = express();
@@ -165,12 +166,23 @@ async function initStripe() {
   // ── Health check (required by Replit autoscale) ──
   app.get("/health", (_req, res) => {
     const dbStatus = getDatabaseStatus();
+    const mongoVault = getMongoVaultHealth();
     res.status(200).json({
       status: "ok",
       timestamp: new Date().toISOString(),
       database: {
         configured: dbStatus.configured,
         ...(dbStatus.message ? { message: dbStatus.message } : {}),
+      },
+      mongoVault: {
+        uriConfigured: mongoVault.uriConfigured,
+        connected: mongoVault.connected,
+        hint:
+          mongoVault.uriConfigured && !mongoVault.connected
+            ? "Mongo URI is set but connection failed — check logs, IP allowlist, and credentials."
+            : !mongoVault.uriConfigured
+              ? "Set MONGO_VAULT_URI or MONGODB_URI (mongodb:// or mongodb+srv://) for Admin vault, CRM, and support in MongoDB."
+              : undefined,
       },
     });
   });
@@ -211,9 +223,11 @@ async function initStripe() {
     if (!d.configured && d.message) {
       log(d.message, "db");
     }
-    const mongoAlias = process.env.MONGODB_URI?.trim();
-    if (mongoAlias && !process.env.DATABASE_URL?.trim()) {
-      log("MONGODB_URI is used as the Postgres connection string (this stack is PostgreSQL, not MongoDB).", "db");
+    const mv = getMongoVaultHealth();
+    if (mv.connected) {
+      log("MongoDB vault (videos / CRM / support) is active.", "mongo-vault");
+    } else if (mv.uriConfigured) {
+      log("MongoDB vault URI is set but connection failed — check logs and Atlas IP allowlist.", "mongo-vault");
     }
   });
 })();

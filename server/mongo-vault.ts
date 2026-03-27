@@ -435,8 +435,32 @@ async function insertSupportTicket(
 
 let cachedClient: MongoClient | null = null;
 
+/** True after a successful vault/support Mongo connection this process (for /health). */
+let mongoVaultBackendActive = false;
+
+export function isMongoVaultBackendActive(): boolean {
+  return mongoVaultBackendActive;
+}
+
+export function getMongoVaultHealth(): { uriConfigured: boolean; connected: boolean } {
+  return {
+    uriConfigured: !!resolveMongoVaultUri(),
+    connected: mongoVaultBackendActive,
+  };
+}
+
+/** Prefer MONGO_VAULT_URI so Mongo never conflicts with legacy MONGODB-as-Postgres-alias in db.ts. */
+export function resolveMongoVaultUri(): string {
+  const a = process.env.MONGO_VAULT_URI?.trim() || "";
+  const b = process.env.MONGODB_URI?.trim() || "";
+  const uri = a || b;
+  if (!uri || !/^mongodb(\+srv)?:\/\//i.test(uri)) return "";
+  return uri;
+}
+
 export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
-  const uri = process.env.MONGODB_URI?.trim();
+  mongoVaultBackendActive = false;
+  const uri = resolveMongoVaultUri();
   if (!uri) return null;
   try {
     if (!cachedClient) {
@@ -446,9 +470,11 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
     }
     const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
     const db = cachedClient.db(dbName);
+    mongoVaultBackendActive = true;
     return createHandle(db);
   } catch (e) {
     console.error("[mongo-vault] MongoDB connection failed:", e);
+    mongoVaultBackendActive = false;
     cachedClient = null;
     return null;
   }
