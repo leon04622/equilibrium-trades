@@ -614,7 +614,7 @@ export async function registerRoutes(
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      const limit = Math.min(parseInt(String(req.query.limit || "200"), 10) || 200, 500);
+      const limit = Math.min(parseInt(String(req.query.limit || "10000"), 10) || 10_000, 100_000);
       const rows = await listTradeJournalEntries(target, limit);
       res.json(rows);
     } catch (error) {

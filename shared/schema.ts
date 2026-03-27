@@ -456,6 +456,8 @@ export interface TradeJournalStats {
   totalProfitLoss: number | null;
   closedTradesCount: number;
   openTradesCount: number;
+  /** `mongodb` = history survives deploy/restart; `memory` = server process only (set MONGO_VAULT_URI). */
+  storageBackend: "mongodb" | "memory";
 }
 
 export const tradeJournalCreateBodySchema = z.object({

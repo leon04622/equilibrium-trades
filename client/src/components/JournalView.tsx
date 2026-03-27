@@ -5,6 +5,7 @@ import { BookMarked, Loader2, NotebookPen } from "lucide-react";
 import type { TradeJournalEntry, TradeJournalStats } from "@shared/schema";
 import { useWallet } from "@/lib/wallet-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -77,9 +78,10 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
   const entriesQuery = useQuery({
     queryKey: ["trade-journal-entries", address],
     queryFn: () =>
-      fetchJson<TradeJournalEntry[]>(`/api/trade-journal/entries/${encodeURIComponent(address!)}`, {
-        headers,
-      }),
+      fetchJson<TradeJournalEntry[]>(
+        `/api/trade-journal/entries/${encodeURIComponent(address!)}?limit=50000`,
+        { headers },
+      ),
     enabled: !!address,
     staleTime: 15_000,
   });
@@ -165,6 +167,17 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
             </Button>
           )}
         </div>
+
+        {!journalPersisted && stats && (
+          <Alert className="border-amber-500/50 bg-amber-950/25 text-amber-100 [&>svg]:text-amber-300">
+            <AlertTitle className="text-amber-200">Journal not persisted to disk</AlertTitle>
+            <AlertDescription className="text-amber-100/90 text-sm">
+              The server is running without MongoDB (<code className="text-xs">MONGO_VAULT_URI</code>). Trades are
+              kept only in this server process — log out, restart, or scale instances can clear them. Configure Mongo
+              for full history across sessions.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Card className="border-border/80 bg-card/50">

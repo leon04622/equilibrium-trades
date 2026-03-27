@@ -1,7 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useWallet } from "@/lib/wallet-context";
 
-const CRM_EMAIL_KEY = "equilibrium_crm_email";
+export const CRM_EMAIL_KEY = "equilibrium_crm_email";
+
+/** Per-wallet: user chose "Not now" or closed the Stay in touch modal — do not reopen on refresh. */
+export function crmEmailPromptDismissedStorageKey(walletAddress: string): string {
+  return `equilibrium_stay_in_touch_dismissed_${walletAddress.trim().toLowerCase()}`;
+}
 
 /**
  * Ensures `wallet_users` has a row for the connected wallet and optional email (CRM / Command Center).
@@ -39,5 +44,3 @@ export function WalletCrmSync() {
 
   return null;
 }
-
-export { CRM_EMAIL_KEY };

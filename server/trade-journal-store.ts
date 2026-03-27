@@ -153,14 +153,14 @@ export async function insertTradeJournalEntry(input: {
   return docToApi(doc);
 }
 
-export async function listTradeJournalEntries(walletAddress: string, limit = 200): Promise<TradeJournalEntry[]> {
+export async function listTradeJournalEntries(walletAddress: string, limit = 10_000): Promise<TradeJournalEntry[]> {
   const w = walletAddress.toLowerCase();
   const c = coll();
   if (c) {
     const rows = await c
       .find({ walletAddress: w })
       .sort({ openedAt: -1 })
-      .limit(Math.min(limit, 500))
+      .limit(Math.min(limit, 100_000))
       .toArray();
     return rows.map((r) => docToApi(parseDoc(r)));
   }
@@ -252,7 +252,83 @@ export async function closeLatestOpenJournalEntry(input: {
 }
 
 export async function getTradeJournalStats(walletAddress: string): Promise<TradeJournalStats> {
-  const entries = await listTradeJournalEntries(walletAddress, 500);
+  const w = walletAddress.toLowerCase();
+  const c = coll();
+  const storageBackend = c ? "mongodb" : "memory";
+
+  if (c) {
+    const openTradesCount = await c.countDocuments({ walletAddress: w, status: "open" });
+    const agg = await c
+      .aggregate<{
+        n: number;
+        wins: number;
+        totalPnl: number;
+        rrSum: number;
+        rrCnt: number;
+      }>([
+        { $match: { walletAddress: w, status: "closed", realizedPnl: { $ne: null, $exists: true } } },
+        {
+          $group: {
+            _id: null,
+            n: { $sum: 1 },
+            wins: { $sum: { $cond: [{ $gt: ["$realizedPnl", 0] }, 1, 0] } },
+            totalPnl: { $sum: "$realizedPnl" },
+            rrSum: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [{ $ne: ["$rewardRiskRatio", null] }, { $gt: ["$rewardRiskRatio", 0] }],
+                  },
+                  "$rewardRiskRatio",
+                  0,
+                ],
+              },
+            },
+            rrCnt: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [{ $ne: ["$rewardRiskRatio", null] }, { $gt: ["$rewardRiskRatio", 0] }],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ])
+      .toArray();
+
+    const row = agg[0];
+    const closedTradesCount = row?.n ?? 0;
+    if (closedTradesCount === 0) {
+      return {
+        winRatePercent: null,
+        avgRewardRisk: null,
+        totalProfitLoss: null,
+        closedTradesCount: 0,
+        openTradesCount,
+        storageBackend,
+      };
+    }
+
+    const wins = row!.wins;
+    const winRatePercent = (wins / closedTradesCount) * 100;
+    const rrCnt = row!.rrCnt;
+    const avgRewardRisk = rrCnt > 0 ? row!.rrSum / rrCnt : null;
+
+    return {
+      winRatePercent,
+      avgRewardRisk,
+      totalProfitLoss: row!.totalPnl,
+      closedTradesCount,
+      openTradesCount,
+      storageBackend,
+    };
+  }
+
+  const entries = await listTradeJournalEntries(walletAddress, 100_000);
   const closed = entries.filter((e) => e.status === "closed" && e.realizedPnl != null);
   const openTradesCount = entries.filter((e) => e.status === "open").length;
 
@@ -263,6 +339,7 @@ export async function getTradeJournalStats(walletAddress: string): Promise<Trade
       totalProfitLoss: null,
       closedTradesCount: 0,
       openTradesCount,
+      storageBackend,
     };
   }
 
@@ -283,5 +360,6 @@ export async function getTradeJournalStats(walletAddress: string): Promise<Trade
     totalProfitLoss,
     closedTradesCount: closed.length,
     openTradesCount,
+    storageBackend,
   };
 }

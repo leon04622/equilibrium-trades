@@ -262,7 +262,7 @@ export const tradingPatterns: PatternDefinition[] = [
   },
   {
     id: "wedge-rising",
-    name: "Rising Wedge",
+    name: "Rising Wedge (Bearish)",
     type: "reversal",
     direction: "bearish",
     description: "A bearish pattern where price makes higher highs and higher lows but in a narrowing range that slopes upward.",
@@ -280,7 +280,7 @@ export const tradingPatterns: PatternDefinition[] = [
   },
   {
     id: "wedge-falling",
-    name: "Falling Wedge",
+    name: "Falling Wedge (Bullish)",
     type: "reversal",
     direction: "bullish",
     description: "A bullish pattern where price makes lower highs and lower lows in a narrowing, downward-sloping range.",
@@ -385,6 +385,81 @@ export const tradingPatterns: PatternDefinition[] = [
     successRate: 63,
     difficulty: "intermediate",
     iconName: "Sunset"
+  },
+
+  // ── AI Signals (Equilibrium universal scanner) — same labels as PatternScannerUI ──
+  {
+    id: "smma-bullish-crossover",
+    name: "21/200 SMMA Bullish Crossover",
+    type: "continuation",
+    direction: "bullish",
+    description:
+      "Shown on AI Signals when the 21 SMMA crosses above the 200 SMMA on the scanned timeframe and price confirms above both averages — the core Equilibrium trend filter.",
+    howToIdentify: [
+      "Fresh bullish crossover of 21 vs 200 SMMA on the chart interval",
+      "Price holding above both 21 and 200 for a tradeable read",
+      "Higher-timeframe bias aligned (see scanner copy for 15m / MTF context)",
+    ],
+    entryStrategy:
+      "Treat as a regime filter: only take long pattern breakouts when price is above both SMMAs, per the live scanner MA filter.",
+    exitStrategy: "Invalidation when price loses the 21 or 200 (per your plan); combine with pattern-based stops.",
+    successRate: 70,
+    difficulty: "intermediate",
+    iconName: "TrendingUp",
+  },
+  {
+    id: "smma-bearish-crossover",
+    name: "21/200 SMMA Bearish Crossover",
+    type: "continuation",
+    direction: "bearish",
+    description:
+      "Shown on AI Signals when the 21 SMMA crosses below the 200 SMMA and the scanner flags bearish confirmation relative to both averages.",
+    howToIdentify: [
+      "Fresh bearish crossover of 21 vs 200 SMMA",
+      "Price weak relative to both averages until the scanner marks tradeable",
+      "Watch counter-trend patterns — scanner may append “(Counter-Trend)”",
+    ],
+    entryStrategy:
+      "Use as bearish regime context; short setups when price is below both SMMAs and structure agrees.",
+    exitStrategy: "Cover or tighten stops on reclaim of 21/200 if your rules say so.",
+    successRate: 69,
+    difficulty: "intermediate",
+    iconName: "TrendingDown",
+  },
+  {
+    id: "bull-flag-apex",
+    name: "Bull Flag (Apex)",
+    type: "continuation",
+    direction: "bullish",
+    description:
+      "Apex geometric engine: strict pole + pivot flag on candles. Often labeled on AI Signals when the Apex scanner confirms a bull flag structure.",
+    howToIdentify: [
+      "Strong impulse (pole) then tight downward or sideways drift (flag)",
+      "Apex tier may show “High Probability — Trend Aligned” on 1m when 15m trend agrees",
+      "Volume: expansion on pole, contraction in flag (see live card)",
+    ],
+    entryStrategy: "Align with scanner tradeable state and SMMA filter; enter on breakout in pole direction.",
+    exitStrategy: "Measure pole height projected from breakout; stop under flag lows.",
+    successRate: 68,
+    difficulty: "intermediate",
+    iconName: "Flag",
+  },
+  {
+    id: "bear-flag-apex",
+    name: "Bear Flag (Apex)",
+    type: "continuation",
+    direction: "bearish",
+    description:
+      "Apex geometric bear flag — mirror of bull flag (Apex). Appears on AI Signals when the Apex engine scores a valid bearish continuation.",
+    howToIdentify: [
+      "Sharp sell pole then upward or sideways consolidation",
+      "Scanner may mark high-probability when HTF trend and SMMA align",
+    ],
+    entryStrategy: "Short breakdown when scanner + SMMA agree; avoid fighting a strong higher-TF bid without invalidation.",
+    exitStrategy: "Pole height projected down from breakdown; stop above flag highs.",
+    successRate: 67,
+    difficulty: "intermediate",
+    iconName: "Flag",
   },
 
   // Hidden Divergences - Advanced Patterns

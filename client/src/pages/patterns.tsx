@@ -44,7 +44,9 @@ export default function Patterns() {
           <h1 className="text-3xl font-display font-bold">Pattern Library</h1>
         </div>
         <p className="text-muted-foreground">
-          Master all the essential trading patterns with our comprehensive library.
+          Master classic chart patterns plus the same structures the{" "}
+          <span className="text-foreground font-medium">AI Signals</span> scanner surfaces — SMMA crossovers, Apex
+          flags, triangles, wedges, and reversals.
         </p>
       </div>
 

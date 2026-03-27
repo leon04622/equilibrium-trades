@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
-import { CRM_EMAIL_KEY } from "@/components/wallet-crm-sync";
+import { CRM_EMAIL_KEY, crmEmailPromptDismissedStorageKey } from "@/components/wallet-crm-sync";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +41,12 @@ export function EmailCaptureModal() {
           }
         })();
         if (stored) return;
+
+        try {
+          if (localStorage.getItem(crmEmailPromptDismissedStorageKey(address)) === "1") return;
+        } catch {
+          /* ignore */
+        }
 
         const res = await fetch(`/api/wallet-user/${encodeURIComponent(address)}`);
         if (!res.ok || cancelled) return;
@@ -90,6 +96,7 @@ export function EmailCaptureModal() {
       }
       try {
         localStorage.setItem(CRM_EMAIL_KEY, trimmed);
+        localStorage.setItem(crmEmailPromptDismissedStorageKey(address), "1");
       } catch {
         /* ignore */
       }
@@ -102,8 +109,23 @@ export function EmailCaptureModal() {
     }
   };
 
+  const persistDismiss = () => {
+    if (!address) return;
+    try {
+      localStorage.setItem(crmEmailPromptDismissedStorageKey(address), "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) persistDismiss();
+        setOpen(next);
+      }}
+    >
       <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>Stay in touch</DialogTitle>
@@ -125,7 +147,15 @@ export function EmailCaptureModal() {
           />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              persistDismiss();
+              setOpen(false);
+            }}
+            disabled={busy}
+          >
             Not now
           </Button>
           <Button type="button" onClick={() => void submit()} disabled={busy}>
