@@ -70,6 +70,19 @@ function sortVaultHeadings(headings: string[]): string[] {
   return [...presets, ...rest];
 }
 
+/** Same-origin uploaded vault files: path has no file extension, so react-player's file player is skipped; native video is more reliable. */
+function isUploadedVaultFileUrl(url: string): boolean {
+  const t = url.trim();
+  if (!t) return false;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const u = new URL(t, base);
+    return u.pathname.startsWith("/api/uploads/files/");
+  } catch {
+    return false;
+  }
+}
+
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
   return apiVideos.map((v) => {
     const rawSection = v.academySection as string | null | undefined;
@@ -98,11 +111,8 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
     setLoadError(null);
   }, [url]);
 
-  const origin =
-    typeof window !== "undefined" && window.location?.origin ? window.location.origin : undefined;
-
   return (
-    <div className="relative isolate w-full overflow-hidden rounded-lg bg-black pt-[56.25%]">
+    <div className="relative isolate w-full shrink-0 overflow-hidden rounded-lg bg-black pt-[56.25%]">
       <div className="absolute inset-0">
         {loadError ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-zinc-300">
@@ -113,6 +123,21 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
               </a>
             </Button>
           </div>
+        ) : isUploadedVaultFileUrl(url) ? (
+          <video
+            key={url}
+            className="absolute inset-0 h-full w-full bg-black object-contain"
+            src={url}
+            controls
+            playsInline
+            preload="auto"
+            title={title}
+            onError={() =>
+              setLoadError(
+                "This video could not be loaded in the player (blocked URL, format, or network).",
+              )
+            }
+          />
         ) : (
           <ReactPlayer
             key={url}
@@ -130,18 +155,17 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
               )
             }
             config={{
+              // Do not set `origin` in playerVars — a mismatch (www vs apex, preview hosts) makes YouTube refuse playback (e.g. Error 153).
               youtube: {
                 playerVars: {
                   rel: 0,
                   playsinline: 1,
-                  ...(origin ? { origin } : {}),
                 },
               },
               vimeo: { playerOptions: { playsinline: true } },
               file: {
                 attributes: {
                   playsInline: true,
-                  controlsList: "nodownload",
                   preload: "metadata",
                 },
               },
@@ -329,6 +353,7 @@ export default function VideoVault() {
       </div>
 
       <Dialog
+        modal={false}
         open={!!active}
         onOpenChange={(open) => {
           if (!open) setActive(null);
@@ -336,6 +361,7 @@ export default function VideoVault() {
       >
         <DialogContent
           hideClose
+          onOpenAutoFocus={(e) => e.preventDefault()}
           className="flex max-h-[min(90dvh,920px)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-4 overflow-y-auto p-4 sm:p-6"
         >
           {active && (
