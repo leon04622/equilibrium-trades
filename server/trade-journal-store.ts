@@ -38,6 +38,11 @@ function coll(): Collection<Document> | null {
   return db ? db.collection(COLL_NAME) : null;
 }
 
+/** True when the journal uses MongoDB (`trade_journal`); false means in-memory only for this server process. */
+export function isTradeJournalBackedByMongo(): boolean {
+  return coll() != null;
+}
+
 function docToApi(d: TradeJournalDoc): TradeJournalEntry {
   return {
     id: d.id,

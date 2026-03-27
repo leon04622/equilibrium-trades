@@ -54,41 +54,70 @@ type JournalViewProps = {
 };
 
 export function JournalView({ variant = "page" }: JournalViewProps) {
-  const { address, isConnected } = useWallet();
+  const { address: walletAddress, isConnected } = useWallet();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
 
   const headers = useMemo(() => {
     const h: Record<string, string> = {};
-    if (address) h["x-wallet-address"] = address;
+    if (walletAddress) h["x-wallet-address"] = walletAddress;
     return h;
-  }, [address]);
+  }, [walletAddress]);
+
+  const journalConfigQuery = useQuery({
+    queryKey: ["trade-journal-config"],
+    queryFn: async () => {
+      try {
+        return await fetchJson<{ persistedToVault: boolean }>("/api/trade-journal/config");
+      } catch {
+        return { persistedToVault: true as boolean };
+      }
+    },
+    enabled: !!walletAddress,
+    staleTime: 60_000,
+  });
+
+  /** When false, journal rows live only in this server process (no Mongo vault). */
+  const journalPersisted = journalConfigQuery.data?.persistedToVault !== false;
 
   const statsQuery = useQuery({
-    queryKey: ["trade-journal-stats", address],
-    queryFn: () =>
-      fetchJson<TradeJournalStats>(`/api/trade-journal/stats/${encodeURIComponent(address!)}`, {
-        headers,
-      }),
-    enabled: !!address,
+    queryKey: ["trade-journal-stats", walletAddress],
+    queryFn: async () => {
+      try {
+        return await fetchJson<TradeJournalStats>(
+          `/api/trade-journal/stats/${encodeURIComponent(walletAddress!)}`,
+          { headers },
+        );
+      } catch (e) {
+        console.warn("[JournalView] stats", e);
+        throw e;
+      }
+    },
+    enabled: !!walletAddress,
     staleTime: 15_000,
   });
 
   const entriesQuery = useQuery({
-    queryKey: ["trade-journal-entries", address],
-    queryFn: () =>
-      fetchJson<TradeJournalEntry[]>(
-        `/api/trade-journal/entries/${encodeURIComponent(address!)}?limit=50000`,
-        { headers },
-      ),
-    enabled: !!address,
+    queryKey: ["trade-journal-entries", walletAddress],
+    queryFn: async () => {
+      try {
+        return await fetchJson<TradeJournalEntry[]>(
+          `/api/trade-journal/entries/${encodeURIComponent(walletAddress!)}?limit=50000`,
+          { headers },
+        );
+      } catch (e) {
+        console.warn("[JournalView] entries", e);
+        throw e;
+      }
+    },
+    enabled: !!walletAddress,
     staleTime: 15_000,
   });
 
   const patchNotes = useMutation({
     mutationFn: async ({ id, notes }: { id: string; notes: string }) => {
-      if (!address) throw new Error("Wallet required");
+      if (!walletAddress) throw new Error("Wallet required");
       return fetchJson<TradeJournalEntry>(`/api/trade-journal/entries/${encodeURIComponent(id)}/notes`, {
         method: "PATCH",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -101,8 +130,8 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
         delete next[vars.id];
         return next;
       });
-      void queryClient.invalidateQueries({ queryKey: ["trade-journal-entries", address] });
-      void queryClient.invalidateQueries({ queryKey: ["trade-journal-stats", address] });
+      void queryClient.invalidateQueries({ queryKey: ["trade-journal-entries", walletAddress] });
+      void queryClient.invalidateQueries({ queryKey: ["trade-journal-stats", walletAddress] });
     },
     onError: (e: Error) => {
       toast({ title: "Could not save notes", description: e.message, variant: "destructive" });
@@ -118,7 +147,7 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
     [draftNotes, patchNotes],
   );
 
-  if (!isConnected || !address) {
+  if (!isConnected || !walletAddress) {
     return (
       <Card className={cn(variant === "embedded" && "border-border/60")}>
         <CardHeader>
@@ -175,6 +204,19 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
               The server is running without MongoDB (<code className="text-xs">MONGO_VAULT_URI</code>). Trades are
               kept only in this server process — log out, restart, or scale instances can clear them. Configure Mongo
               for full history across sessions.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {(statsQuery.isError || entriesQuery.isError) && (
+          <Alert variant="destructive">
+            <AlertTitle>Journal data unavailable</AlertTitle>
+            <AlertDescription className="text-sm">
+              {statsQuery.isError && statsQuery.error instanceof Error
+                ? statsQuery.error.message
+                : entriesQuery.isError && entriesQuery.error instanceof Error
+                  ? entriesQuery.error.message
+                  : "Try again in a moment."}
             </AlertDescription>
           </Alert>
         )}

@@ -195,21 +195,25 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       }
 
       if (walletAddr) {
-        const slN = sl != null && Number.isFinite(sl) ? sl : undefined;
-        const tpN = tp != null && Number.isFinite(tp) ? tp : undefined;
-        void saveTradeToJournal(walletAddr, {
-          walletAddress: walletAddr,
-          pair: pairLabel?.trim() || `${coin}/USDT`,
-          coin,
-          side: isBuy ? "long" : "short",
-          entryPrice: fillPrice,
-          size: qty,
-          stopLoss: slN ?? null,
-          takeProfit: tpN ?? null,
-          leverage,
-          patternStatusAtEntry: aiPatternStatus ?? null,
-          openedAt: new Date().toISOString(),
-        });
+        try {
+          const slN = sl != null && Number.isFinite(sl) ? sl : undefined;
+          const tpN = tp != null && Number.isFinite(tp) ? tp : undefined;
+          void saveTradeToJournal(walletAddr, {
+            walletAddress: walletAddr,
+            pair: pairLabel?.trim() || `${coin}/USDT`,
+            coin,
+            side: isBuy ? "long" : "short",
+            entryPrice: fillPrice,
+            size: qty,
+            stopLoss: slN ?? null,
+            takeProfit: tpN ?? null,
+            leverage,
+            patternStatusAtEntry: aiPatternStatus ?? null,
+            openedAt: new Date().toISOString(),
+          });
+        } catch (journalErr) {
+          console.warn("[trade journal]", journalErr);
+        }
       }
 
       setSize("");

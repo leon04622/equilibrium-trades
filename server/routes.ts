@@ -50,6 +50,7 @@ import {
   updateTradeJournalNotes,
   closeLatestOpenJournalEntry,
   getTradeJournalStats,
+  isTradeJournalBackedByMongo,
 } from "./trade-journal-store";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
@@ -568,6 +569,15 @@ export async function registerRoutes(
   });
 
   // ── Professional Trade Journal (Mongo `trade_journal` via trade-journal-store; in-memory if no vault) ──
+
+  app.get("/api/trade-journal/config", (_req: Request, res: Response) => {
+    try {
+      res.json({ persistedToVault: isTradeJournalBackedByMongo() });
+    } catch (error) {
+      console.error("GET /api/trade-journal/config:", error);
+      res.status(500).json({ error: "Failed to read journal config" });
+    }
+  });
 
   app.post("/api/trade-journal/entries", async (req: Request, res: Response) => {
     try {
