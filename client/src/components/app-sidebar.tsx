@@ -107,11 +107,28 @@ export function AppSidebar() {
       const res = await fetch("/api/support/conversations", {
         headers: { "x-wallet-address": address },
       });
-      if (!res.ok) return [];
-      return res.json();
+      if (!res.ok) {
+        let detail = res.statusText || "Request failed";
+        try {
+          const ct = res.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            const j = (await res.json()) as { error?: string };
+            if (typeof j?.error === "string") detail = j.error;
+          }
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`Support inbox (${res.status}): ${detail}`);
+      }
+      const data: unknown = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Support inbox: expected JSON array from API");
+      }
+      return data;
     },
     enabled: isMasterAdmin && !!address,
     refetchInterval: 30_000,
+    retry: 1,
   });
 
   const supportUnread = isMasterAdmin

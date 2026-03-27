@@ -214,15 +214,41 @@ export function LiveChat() {
     };
   }, [conversationId, isOpen, isMinimized, address, guestId]);
 
-  const { data: conversations = [], refetch: refetchConversations } = useQuery<Conversation[]>({
+  const {
+    data: conversations = [],
+    isError: conversationsQueryFailed,
+    error: conversationsQueryError,
+    refetch: refetchConversations,
+  } = useQuery<Conversation[]>({
     queryKey: ["/api/support/conversations"],
     queryFn: async () => {
       if (!address) return [];
       const res = await fetch("/api/support/conversations", {
         headers: { "x-wallet-address": address },
       });
-      if (!res.ok) return [];
-      return res.json();
+      if (!res.ok) {
+        let detail = res.statusText || "Request failed";
+        try {
+          const ct = res.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            const j = (await res.json()) as { error?: string };
+            if (typeof j?.error === "string") detail = j.error;
+          } else {
+            const t = await res.text();
+            if (t && !t.trim().startsWith("<")) detail = t.slice(0, 200);
+          }
+        } catch {
+          /* keep detail */
+        }
+        throw new Error(`Inbox API error (${res.status}): ${detail}`);
+      }
+      const data: unknown = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error(
+          "Inbox returned non-JSON or not an array — your browser may not be talking to the Node server (same host as /api).",
+        );
+      }
+      return data as Conversation[];
     },
     enabled: isMasterAdmin && !!address && isOpen && !isMinimized,
     refetchInterval: isMasterAdmin && isOpen && !isMinimized ? 4000 : false,
@@ -389,7 +415,24 @@ export function LiveChat() {
         <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
           {isMasterAdmin && !selectedConversation ? (
             <ScrollArea className="flex-1 min-h-0 p-3">
-              {conversations.length === 0 ? (
+              {conversationsQueryFailed ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 space-y-2 text-sm">
+                  <p className="font-medium text-destructive">Support inbox did not load</p>
+                  <p className="text-muted-foreground break-words">
+                    {conversationsQueryError instanceof Error
+                      ? conversationsQueryError.message
+                      : String(conversationsQueryError)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This used to look like “no messages” when the API failed. Fix: deploy the Express app, set{" "}
+                    <code className="text-[10px]">DATABASE_URL</code> or Mongo, open{" "}
+                    <code className="text-[10px]">/health</code> on this same domain.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetchConversations()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : conversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-12">
                   <MessageCircle className="h-12 w-12 text-muted-foreground/30 mb-3" />
                   <p className="text-sm text-muted-foreground text-center">
