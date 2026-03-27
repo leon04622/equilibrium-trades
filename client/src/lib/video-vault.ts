@@ -1,4 +1,7 @@
 import type { AcademySection, TutorialVideo } from "@shared/schema";
+import { extractYoutubeVideoIdFromUrl } from "@shared/schema";
+
+const YT_STANDALONE_ID = /^[a-zA-Z0-9_-]{6,}$/;
 
 function str(raw: unknown): string {
   if (raw == null) return "";
@@ -77,11 +80,16 @@ export const VAULT_SECTION_META: { id: AcademySection; label: string; descriptio
 ];
 
 export function tutorialToPlayUrl(v: Pick<TutorialVideo, "youtubeId" | "videoPath">): string {
-  if (v.youtubeId?.trim()) {
-    return `https://www.youtube.com/watch?v=${v.youtubeId.trim()}`;
+  const rawId = v.youtubeId?.trim();
+  if (rawId) {
+    const fromUrl = extractYoutubeVideoIdFromUrl(rawId);
+    const id = fromUrl ?? (YT_STANDALONE_ID.test(rawId) ? rawId : undefined);
+    if (id) return `https://www.youtube.com/watch?v=${id}`;
   }
   const p = (v.videoPath || "").trim();
   if (!p) return "";
+  const ytFromPath = extractYoutubeVideoIdFromUrl(p);
+  if (ytFromPath) return `https://www.youtube.com/watch?v=${ytFromPath}`;
   if (p.startsWith("http://") || p.startsWith("https://")) return p;
   if (typeof window !== "undefined" && p.startsWith("/")) {
     return `${window.location.origin}${p}`;

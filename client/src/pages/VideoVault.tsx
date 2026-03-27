@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { GraduationCap, Loader2, Lock, Play, Sparkles } from "lucide-react";
@@ -22,8 +22,8 @@ import {
   tutorialToPlayUrl,
 } from "@/lib/video-vault";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
-
-const ReactPlayer = lazy(() => import("react-player/lazy"));
+import ReactPlayer from "react-player";
+import { cn } from "@/lib/utils";
 
 export type VaultItem = {
   id: string;
@@ -96,24 +96,26 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   return (
     <div className="relative w-full overflow-hidden rounded-lg bg-black pt-[56.25%]">
       <div className="absolute inset-0">
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin" />
-            </div>
-          }
-        >
-          <ReactPlayer
-            url={url}
-            width="100%"
-            height="100%"
-            controls
-            playing
-            config={{
-              youtube: { playerVars: { rel: 0 } },
-            }}
-          />
-        </Suspense>
+        <ReactPlayer
+          key={url}
+          url={url}
+          width="100%"
+          height="100%"
+          controls
+          playing={false}
+          playsinline
+          pip={false}
+          config={{
+            youtube: { playerVars: { rel: 0, playsinline: 1 } },
+            vimeo: { playerOptions: { playsinline: true } },
+            file: {
+              attributes: {
+                playsInline: true,
+                controlsList: "nodownload",
+              },
+            },
+          }}
+        />
       </div>
       <span className="sr-only">{title}</span>
     </div>
@@ -295,9 +297,16 @@ export default function VideoVault() {
       </div>
 
       <Dialog open={!!active} onOpenChange={(o) => !o && setActive(null)}>
-        <DialogContent className="max-w-4xl w-[calc(100vw-1rem)] p-4 sm:p-6">
+        <DialogContent
+          className={cn(
+            "max-w-4xl w-[calc(100vw-1rem)] gap-4 p-4 sm:p-6",
+            // Radix centers with translate; that stacking context can break embedded iframes.
+            "fixed inset-0 left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col items-center justify-center border-0 bg-transparent p-3 shadow-none sm:rounded-none sm:p-6",
+            "data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-left-0 data-[state=closed]:slide-out-to-top-0",
+          )}
+        >
           {active && (
-            <>
+            <div className="flex max-h-[min(90dvh,920px)] w-full max-w-4xl flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-4 shadow-lg sm:p-6">
               <DialogHeader>
                 <DialogTitle className="pr-8 leading-snug">{active.title}</DialogTitle>
                 <DialogDescription>{active.description}</DialogDescription>
@@ -325,7 +334,7 @@ export default function VideoVault() {
                   </Button>
                 </div>
               )}
-            </>
+            </div>
           )}
         </DialogContent>
       </Dialog>

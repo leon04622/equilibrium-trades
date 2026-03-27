@@ -184,7 +184,7 @@ function isSameSiteUploadMediaPath(s: string): boolean {
 const YT_ID_RE = /^[a-zA-Z0-9_-]{6,}$/;
 
 /** Resolve YouTube watch / Shorts / Live / embed / youtu.be → video id; otherwise undefined (caller uses full URL as videoPath). */
-function extractYoutubeVideoIdFromUrl(raw: string): string | undefined {
+export function extractYoutubeVideoIdFromUrl(raw: string): string | undefined {
   const t = raw.trim();
   if (t.startsWith("/") && !t.startsWith("//")) return undefined;
   try {
