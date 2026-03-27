@@ -420,6 +420,71 @@ export const tradeGradeInputSchema = z.object({
 
 export type TradeGradeInput = z.infer<typeof tradeGradeInputSchema>;
 
+// ── Professional Trade Journal (Mongo `trade_journal` + in-memory fallback) ──
+
+export type TradeJournalPatternStatus = "forming" | "developed" | "breakout_watch";
+
+export interface TradeJournalEntry {
+  id: string;
+  walletAddress: string;
+  /** Display pair e.g. BTC/USDT */
+  pair: string;
+  /** Hyperliquid coin identifier */
+  coin: string;
+  side: "long" | "short";
+  entryPrice: number;
+  size: number;
+  openedAt: string;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  leverage: number;
+  notes: string;
+  patternStatusAtEntry: TradeJournalPatternStatus | null;
+  /** A = entered during a Developed AI pattern; otherwise Speculative */
+  entryGrade: "A" | "Speculative";
+  negativeRR: boolean;
+  rewardRiskRatio: number | null;
+  status: "open" | "closed";
+  exitPrice: number | null;
+  realizedPnl: number | null;
+  closedAt: string | null;
+}
+
+export interface TradeJournalStats {
+  winRatePercent: number | null;
+  avgRewardRisk: number | null;
+  totalProfitLoss: number | null;
+  closedTradesCount: number;
+  openTradesCount: number;
+}
+
+export const tradeJournalCreateBodySchema = z.object({
+  walletAddress: z.string().min(1),
+  pair: z.string().min(1),
+  coin: z.string().min(1),
+  side: z.enum(["long", "short"]),
+  entryPrice: z.coerce.number().positive(),
+  size: z.coerce.number().positive(),
+  stopLoss: z.coerce.number().positive().optional().nullable(),
+  takeProfit: z.coerce.number().positive().optional().nullable(),
+  leverage: z.coerce.number().min(1).optional().default(1),
+  patternStatusAtEntry: z.enum(["forming", "developed", "breakout_watch"]).nullable().optional(),
+  openedAt: z.string().optional(),
+});
+
+export const tradeJournalNotesBodySchema = z.object({
+  notes: z.string().max(4000).default(""),
+});
+
+export const tradeJournalCloseOpenBodySchema = z.object({
+  coin: z.string().min(1),
+  side: z.enum(["long", "short"]),
+  exitPrice: z.coerce.number().positive(),
+  realizedPnl: z.coerce.number(),
+});
+
+export type TradeJournalCreateBody = z.infer<typeof tradeJournalCreateBodySchema>;
+
 /** Stored in wallet_users.subscription_tier. Legacy DB rows may still say `elite` — normalize to mentoring when reading. */
 export type WalletSubscriptionTier = "free" | "pro" | "mentoring";
 

@@ -14,6 +14,7 @@ import {
   CandlestickChart,
   Shield,
   MessageCircle,
+  NotebookPen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -80,6 +81,7 @@ const toolsNavItems = [
 ];
 
 const accountNavItems = [
+  { title: "Journal", url: "/journal", icon: NotebookPen },
   { title: "Portfolio", url: "/portfolio", icon: Wallet },
   { title: "Subscription", url: "/pricing", icon: CreditCard },
   { title: "Settings", url: "/settings", icon: Settings },

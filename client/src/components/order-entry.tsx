@@ -14,11 +14,17 @@ import {
 } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
 import { useTradeHandshake } from "@/components/trade-handshake-context";
+import { saveTradeToJournal } from "@/lib/TradeExecution";
+import type { TradeJournalPatternStatus } from "@shared/schema";
 
 interface OrderEntryProps {
   coin: string;
   currentPrice: number;
   onOrderSubmit?: (order: any) => void;
+  /** Display pair for the journal (e.g. BTC/USDT) */
+  pairLabel?: string;
+  /** Best AI scanner pattern status for this symbol/timeframe — drives entry grade */
+  aiPatternStatus?: TradeJournalPatternStatus | null;
 }
 
 function fmt(p: number): string {
@@ -27,7 +33,7 @@ function fmt(p: number): string {
   return p.toFixed(4);
 }
 
-export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProps) {
+export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPatternStatus }: OrderEntryProps) {
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [size, setSize] = useState("");
   const [limitPrice, setLimitPrice] = useState("");
@@ -40,6 +46,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
 
   const { balance, refreshAccount, placeTPSL } = useTrading();
   const {
+    address: walletAddr,
     isConnected,
     signer,
     isCheckingApproval,
@@ -185,6 +192,24 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit }: OrderEntryProp
             toast({ title: "TP/SL Failed", description: tpslRes.error, variant: "destructive" });
           }
         }
+      }
+
+      if (walletAddr) {
+        const slN = sl != null && Number.isFinite(sl) ? sl : undefined;
+        const tpN = tp != null && Number.isFinite(tp) ? tp : undefined;
+        void saveTradeToJournal(walletAddr, {
+          walletAddress: walletAddr,
+          pair: pairLabel?.trim() || `${coin}/USDT`,
+          coin,
+          side: isBuy ? "long" : "short",
+          entryPrice: fillPrice,
+          size: qty,
+          stopLoss: slN ?? null,
+          takeProfit: tpN ?? null,
+          leverage,
+          patternStatusAtEntry: aiPatternStatus ?? null,
+          openedAt: new Date().toISOString(),
+        });
       }
 
       setSize("");

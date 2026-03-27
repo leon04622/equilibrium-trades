@@ -24,6 +24,7 @@
  *   MONGO_USERS_COLLECTION — optional; overrides CRM collection name for user documents
  *   MONGO_CRM_COLLECTION   — default `crm_users` when MONGO_USERS_COLLECTION unset
  *   MONGO_VIDEOS_COLLECTION, MONGO_SUPPORT_COLLECTION — optional collection names
+ *   MONGO_TRADE_JOURNAL_COLLECTION — optional; default trade_journal (execution log + coach flags per wallet)
  */
 import "dotenv/config";
 

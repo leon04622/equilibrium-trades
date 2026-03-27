@@ -51,6 +51,8 @@ export type RunLifetimeHandshakeOptions = {
  * Lifetime “builder + agent” handshake for first LONG/SHORT (or unified modal).
  * Order: Equilibrium POST /approve-builder-code (optional skip), then HL approveAgent + approveBuilderFee (builder required).
  */
+export { saveTradeToJournal } from "@/lib/trade-journal-client";
+
 export async function runEquilibriumLifetimeHandshake(
   signer: JsonRpcSigner,
   walletAddress: string,

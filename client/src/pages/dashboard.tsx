@@ -13,7 +13,7 @@ import { StatsCard } from "@/components/stats-card";
 import { PatternCard } from "@/components/pattern-card";
 import { PatternModal } from "@/components/pattern-modal";
 import { EducationalTip, tradingTips } from "@/components/educational-tip";
-import { TradeJournal } from "@/components/trade-journal";
+import { JournalView } from "@/components/JournalView";
 import { tradingPatterns } from "@/lib/patterns";
 import type { PatternDefinition } from "@shared/schema";
 
@@ -192,7 +192,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <TradeJournal />
+          <JournalView variant="embedded" />
         </div>
 
         <div className="space-y-6">

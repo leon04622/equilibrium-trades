@@ -127,6 +127,37 @@ export default function Trading({ visible = true }: TradingProps) {
 
   const chartInterval = TF_TO_INTERVAL[timeframe] || "5m";
 
+  const { data: eduPatternsRaw } = useQuery({
+    queryKey: ["trade-journal-patterns", coin, chartInterval],
+    queryFn: async () => {
+      const u = new URL("/api/signals/patterns", window.location.origin);
+      u.searchParams.set("coins", coin);
+      u.searchParams.set("timeframes", chartInterval);
+      const res = await fetch(u.toString());
+      if (!res.ok) throw new Error("Failed to load patterns");
+      return res.json();
+    },
+    enabled: visible && isConnected && hasAccess("ai_signals") && !coin.startsWith("@"),
+    staleTime: 45_000,
+  });
+
+  const aiPatternStatusForJournal = useMemo(() => {
+    const eduPatterns = Array.isArray(eduPatternsRaw) ? eduPatternsRaw : [];
+    const rows = eduPatterns.filter(
+      (p: { coin?: string; timeframe?: string }) => p.coin === coin && p.timeframe === chartInterval,
+    );
+    if (rows.length === 0) return null;
+    const rank = (s: string) =>
+      s === "developed" ? 3 : s === "breakout_watch" ? 2 : s === "forming" ? 1 : 0;
+    rows.sort(
+      (a: { patternStatus?: string }, b: { patternStatus?: string }) =>
+        rank(String(b.patternStatus || "")) - rank(String(a.patternStatus || "")),
+    );
+    const top = rows[0]?.patternStatus;
+    if (top === "developed" || top === "breakout_watch" || top === "forming") return top;
+    return null;
+  }, [eduPatternsRaw, coin, chartInterval]);
+
   // Tier 1: anyone can use the native chart; Tier 2: AI scans + indicator stack are Pro-gated in-chart
   const canUseAIPatterns = isConnected && hasAccess("ai_signals");
   const lockPremiumIndicatorStack = showIndicators && !canUseAIPatterns;
@@ -628,6 +659,8 @@ export default function Trading({ visible = true }: TradingProps) {
                 coin={coin} 
                 currentPrice={price} 
                 onOrderSubmit={handleOrderSubmit}
+                pairLabel={`${displaySymbol}/USDT`}
+                aiPatternStatus={aiPatternStatusForJournal}
               />
               
               <AccountEquity />
@@ -666,6 +699,8 @@ export default function Trading({ visible = true }: TradingProps) {
                   coin={coin} 
                   currentPrice={price} 
                   onOrderSubmit={handleOrderSubmit}
+                  pairLabel={`${displaySymbol}/USDT`}
+                  aiPatternStatus={aiPatternStatusForJournal}
                 />
                 <AccountEquity />
               </div>

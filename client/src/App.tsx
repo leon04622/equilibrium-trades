@@ -39,6 +39,7 @@ import Hyperliquid from "@/pages/hyperliquid";
 import { AdminGuard } from "@/components/admin-guard";
 import AdminCommandCenter from "@/pages/AdminPanel";
 import NotFound from "@/pages/not-found";
+import { JournalView } from "@/components/JournalView";
 
 function App() {
   const style = {
@@ -122,6 +123,7 @@ function TradingLayout() {
               <Route path="/heatmap" element={<Heatmap />} />
               <Route path="/videos" element={<EducationalVault />} />
               <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/journal" element={<JournalView />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/subscribe" element={<Pricing />} />
               <Route path="/settings" element={<Settings />} />

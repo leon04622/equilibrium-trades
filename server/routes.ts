@@ -39,6 +39,18 @@ import {
 } from "./admin-equilibrium-auth";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 import { isFortressSovereignAddress } from "./fortress-admin";
+import {
+  tradeJournalCreateBodySchema,
+  tradeJournalNotesBodySchema,
+  tradeJournalCloseOpenBodySchema,
+} from "@shared/schema";
+import {
+  insertTradeJournalEntry,
+  listTradeJournalEntries,
+  updateTradeJournalNotes,
+  closeLatestOpenJournalEntry,
+  getTradeJournalStats,
+} from "./trade-journal-store";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
 
@@ -81,6 +93,13 @@ function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>
     cache.set(key, { data, expires: Date.now() + ttlMs });
     return data;
   });
+}
+
+function canViewTradeJournalTarget(req: Request, targetWallet: string): boolean {
+  const t = targetWallet.trim().toLowerCase();
+  const self = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+  if (self && self === t) return true;
+  return requireMasterAdminWallet(req).ok;
 }
 
 async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
@@ -545,6 +564,127 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error grading trade:", error);
       res.status(500).json({ error: "Failed to grade trade" });
+    }
+  });
+
+  // ── Professional Trade Journal (Mongo `trade_journal` via trade-journal-store; in-memory if no vault) ──
+
+  app.post("/api/trade-journal/entries", async (req: Request, res: Response) => {
+    try {
+      const parsed = tradeJournalCreateBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+        return;
+      }
+      const header = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      const bodyWallet = parsed.data.walletAddress.trim().toLowerCase();
+      if (!header || header !== bodyWallet) {
+        res.status(401).json({ error: "x-wallet-address must match walletAddress in body" });
+        return;
+      }
+      const openedAt = parsed.data.openedAt ? new Date(parsed.data.openedAt) : undefined;
+      if (openedAt && Number.isNaN(openedAt.getTime())) {
+        res.status(400).json({ error: "Invalid openedAt" });
+        return;
+      }
+      const saved = await insertTradeJournalEntry({
+        walletAddress: bodyWallet,
+        pair: parsed.data.pair.trim(),
+        coin: parsed.data.coin.trim(),
+        side: parsed.data.side,
+        entryPrice: parsed.data.entryPrice,
+        size: parsed.data.size,
+        stopLoss: parsed.data.stopLoss ?? null,
+        takeProfit: parsed.data.takeProfit ?? null,
+        leverage: parsed.data.leverage,
+        patternStatusAtEntry: parsed.data.patternStatusAtEntry ?? null,
+        openedAt,
+      });
+      res.json(saved);
+    } catch (error) {
+      console.error("POST /api/trade-journal/entries:", error);
+      res.status(500).json({ error: "Failed to save journal entry" });
+    }
+  });
+
+  app.get("/api/trade-journal/entries/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const target = req.params.walletAddress.trim().toLowerCase();
+      if (!canViewTradeJournalTarget(req, target)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      const limit = Math.min(parseInt(String(req.query.limit || "200"), 10) || 200, 500);
+      const rows = await listTradeJournalEntries(target, limit);
+      res.json(rows);
+    } catch (error) {
+      console.error("GET /api/trade-journal/entries:", error);
+      res.status(500).json({ error: "Failed to list journal entries" });
+    }
+  });
+
+  app.get("/api/trade-journal/stats/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const target = req.params.walletAddress.trim().toLowerCase();
+      if (!canViewTradeJournalTarget(req, target)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      const stats = await getTradeJournalStats(target);
+      res.json(stats);
+    } catch (error) {
+      console.error("GET /api/trade-journal/stats:", error);
+      res.status(500).json({ error: "Failed to load journal stats" });
+    }
+  });
+
+  app.patch("/api/trade-journal/entries/:id/notes", async (req: Request, res: Response) => {
+    try {
+      const header = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!header) {
+        res.status(401).json({ error: "x-wallet-address required" });
+        return;
+      }
+      const parsed = tradeJournalNotesBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+        return;
+      }
+      const updated = await updateTradeJournalNotes(header, req.params.id, parsed.data.notes);
+      if (!updated) {
+        res.status(404).json({ error: "Journal entry not found" });
+        return;
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error("PATCH /api/trade-journal/entries/:id/notes:", error);
+      res.status(500).json({ error: "Failed to update notes" });
+    }
+  });
+
+  app.post("/api/trade-journal/close-open", async (req: Request, res: Response) => {
+    try {
+      const header = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!header) {
+        res.status(401).json({ error: "x-wallet-address required" });
+        return;
+      }
+      const parsed = tradeJournalCloseOpenBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+        return;
+      }
+      const closed = await closeLatestOpenJournalEntry({
+        walletAddress: header,
+        coin: parsed.data.coin.trim(),
+        side: parsed.data.side,
+        exitPrice: parsed.data.exitPrice,
+        realizedPnl: parsed.data.realizedPnl,
+      });
+      res.json({ ok: true, closed });
+    } catch (error) {
+      console.error("POST /api/trade-journal/close-open:", error);
+      res.status(500).json({ error: "Failed to close journal entry" });
     }
   });
 

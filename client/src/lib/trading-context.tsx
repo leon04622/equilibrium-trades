@@ -546,6 +546,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       } catch (gradeError) {
         console.error("Error grading trade:", gradeError);
       }
+
+      try {
+        const walletAddress = await signer.getAddress();
+        await fetch("/api/trade-journal/close-open", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-wallet-address": walletAddress,
+          },
+          body: JSON.stringify({
+            coin: position.coin,
+            side: position.side,
+            exitPrice,
+            realizedPnl: position.unrealizedPnl,
+          }),
+        });
+      } catch (journalCloseErr) {
+        console.warn("[trade-journal] close-open:", journalCloseErr);
+      }
       
       // Refresh positions from Hyperliquid to get updated state
       await refreshAccount();
