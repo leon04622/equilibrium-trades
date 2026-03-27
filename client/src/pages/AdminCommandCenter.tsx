@@ -103,9 +103,9 @@ export default function AdminCommandCenter() {
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
 
-  const { data: crmUsers = [], isLoading: crmLoading, refetch: refetchCrm } = useQuery({
+  const { data: crmUsers = [], isLoading: crmLoading, isError: crmError, error: crmErrorObj, refetch: refetchCrm } = useQuery({
     queryKey: ["fortress-crm-users", address],
-    enabled: !!address && tab === "crm",
+    enabled: !!address,
     queryFn: async () => {
       const { data, status } = await api.get<CrmRow[]>("/api/crm/users");
       if (status === 401 || status === 403) throw new Error("Unauthorized");
@@ -125,9 +125,15 @@ export default function AdminCommandCenter() {
     );
   };
 
-  const { data: videos = [], isLoading: videosLoading, refetch: refetchVideos } = useQuery({
+  const {
+    data: videos = [],
+    isLoading: videosLoading,
+    isError: videosError,
+    error: videosErrorObj,
+    refetch: refetchVideos,
+  } = useQuery({
     queryKey: ["fortress-videos", address],
-    enabled: !!address && tab === "videos",
+    enabled: !!address,
     queryFn: async () => {
       const { data, status } = await api.get<unknown>("/api/videos");
       if (status !== 200) throw new Error("Failed to load videos");
@@ -135,14 +141,33 @@ export default function AdminCommandCenter() {
     },
   });
 
-  const { data: supportFeed = [], isLoading: supportLoading, refetch: refetchSupport } = useQuery({
+  const {
+    data: supportFeed = [],
+    isLoading: supportLoading,
+    isError: supportError,
+    error: supportErrorObj,
+    refetch: refetchSupport,
+  } = useQuery({
     queryKey: ["fortress-support", address],
-    enabled: !!address && tab === "support",
-    refetchInterval: tab === "support" ? 4000 : false,
+    enabled: !!address,
+    refetchInterval: tab === "support" ? 2500 : false,
     queryFn: async () => {
-      const { data, status } = await api.get<SupportMessage[]>("/api/support", { params: { limit: 800 } });
-      if (status === 401 || status === 403) throw new Error("Unauthorized");
-      if (status !== 200 || !Array.isArray(data)) throw new Error("Failed to load support");
+      const { data, status } = await api.get<SupportMessage[] | { error?: string }>("/api/support", {
+        params: { limit: 800 },
+      });
+      if (status === 401 || status === 403) {
+        throw new Error(
+          (data as { error?: string })?.error ||
+            "Unauthorized — ensure x-wallet-address is sent (reload after connecting).",
+        );
+      }
+      if (status === 503) {
+        throw new Error((data as { error?: string })?.error || "Support API unavailable (503).");
+      }
+      if (status !== 200 || !Array.isArray(data)) {
+        const errMsg = (data as { error?: string })?.error;
+        throw new Error(errMsg || `Support feed failed (${status}). Response was not a JSON array.`);
+      }
       return data;
     },
   });
@@ -177,7 +202,12 @@ export default function AdminCommandCenter() {
         throw new Error((data as { error?: string })?.error || "Unauthorized");
       }
       if (status < 200 || status >= 300) {
-        throw new Error((data as { error?: string })?.error || "Save failed");
+        const body = data as { error?: string; details?: unknown };
+        let msg = body?.error || "Save failed";
+        if (body?.details != null) {
+          msg += ` — ${typeof body.details === "string" ? body.details : JSON.stringify(body.details)}`;
+        }
+        throw new Error(msg);
       }
       return data;
     },
@@ -264,7 +294,8 @@ export default function AdminCommandCenter() {
             <CardHeader>
               <CardTitle>Add video</CardTitle>
               <CardDescription>
-                POST <code className="text-xs">/api/videos</code> — YouTube, Vimeo, or direct MP4 URL.
+                POST <code className="text-xs">/api/videos</code> — YouTube / Vimeo / https MP4, or after upload paste{" "}
+                <code className="text-xs">/api/uploads/files/…</code>.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 max-w-xl">
@@ -340,7 +371,17 @@ export default function AdminCommandCenter() {
               </Button>
             </CardHeader>
             <CardContent>
-              {videosLoading ? (
+              {videosError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
+                  <p className="font-medium text-destructive">Could not load videos</p>
+                  <p className="text-muted-foreground">
+                    {videosErrorObj instanceof Error ? videosErrorObj.message : String(videosErrorObj)}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetchVideos()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : videosLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading…
@@ -390,7 +431,17 @@ export default function AdminCommandCenter() {
               </Button>
             </CardHeader>
             <CardContent>
-              {crmLoading ? (
+              {crmError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
+                  <p className="font-medium text-destructive">Could not load CRM</p>
+                  <p className="text-muted-foreground">
+                    {crmErrorObj instanceof Error ? crmErrorObj.message : String(crmErrorObj)}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetchCrm()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : crmLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading…
@@ -477,13 +528,36 @@ export default function AdminCommandCenter() {
               </Button>
             </CardHeader>
             <CardContent>
-              {supportLoading ? (
+              {supportError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
+                  <p className="font-medium text-destructive">Could not load support inbox</p>
+                  <p className="text-muted-foreground">
+                    {supportErrorObj instanceof Error ? supportErrorObj.message : String(supportErrorObj)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    If this says the response was not an array, your browser may be hitting a static host without the
+                    API, or a proxy returned HTML instead of JSON. Open <code className="text-[10px]">/health</code> on
+                    the same origin.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetchSupport()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : supportLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading…
                 </div>
               ) : supportSorted.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No messages yet.</p>
+                <div className="text-sm text-muted-foreground text-center py-8 space-y-2">
+                  <p>No messages yet.</p>
+                  <p className="text-xs max-w-md mx-auto">
+                    User chat uses <code className="text-[10px]">POST /api/support</code>. With MongoDB, tickets live in
+                    the <code className="text-[10px]">support_tickets</code> collection; with Postgres, in the{" "}
+                    <code className="text-[10px]">support_tickets</code> table. Multiple server instances need a shared
+                    database or messages will not appear here.
+                  </p>
+                </div>
               ) : (
                 <ScrollArea className="h-[min(560px,65vh)] pr-3">
                   <ul className="space-y-3">

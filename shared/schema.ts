@@ -175,12 +175,20 @@ function isValidAbsoluteHttpUrl(s: string): boolean {
   }
 }
 
+/** Same-site uploaded file paths from `/api/uploads/files/…` (not valid `new URL()` without a base). */
+function isSameSiteUploadMediaPath(s: string): boolean {
+  const v = s.trim();
+  return v.startsWith("/") && v.length > 1 && !v.startsWith("//");
+}
+
 const YT_ID_RE = /^[a-zA-Z0-9_-]{6,}$/;
 
 /** Resolve YouTube watch / Shorts / Live / embed / youtu.be → video id; otherwise undefined (caller uses full URL as videoPath). */
 function extractYoutubeVideoIdFromUrl(raw: string): string | undefined {
+  const t = raw.trim();
+  if (t.startsWith("/") && !t.startsWith("//")) return undefined;
   try {
-    const u = new URL(raw);
+    const u = new URL(t);
     const host = u.hostname.replace(/^www\./i, "").toLowerCase();
     const isYoutube =
       host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com" || host === "youtu.be";
@@ -218,10 +226,11 @@ export const adminVideoCreateSchema = z
   })
   .superRefine((data, ctx) => {
     const vUrl = data.videoUrl.trim();
-    if (!isValidAbsoluteHttpUrl(vUrl)) {
+    if (!isValidAbsoluteHttpUrl(vUrl) && !isSameSiteUploadMediaPath(vUrl)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Video URL must be a valid http(s) URL",
+        message:
+          "Video URL must be https://… or http://…, or a same-site path like /api/uploads/files/… after upload",
         path: ["videoUrl"],
       });
     }
@@ -229,10 +238,10 @@ export const adminVideoCreateSchema = z
       (data.thumbnailUrl && data.thumbnailUrl.trim()) ||
       (data.thumbnailPath && data.thumbnailPath.trim()) ||
       "";
-    if (thumb && !isValidAbsoluteHttpUrl(thumb)) {
+    if (thumb && !isValidAbsoluteHttpUrl(thumb) && !isSameSiteUploadMediaPath(thumb)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Thumbnail must be a valid http(s) URL",
+        message: "Thumbnail must be a valid http(s) URL or a path starting with /",
         path: ["thumbnailUrl"],
       });
     }
