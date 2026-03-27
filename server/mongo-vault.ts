@@ -35,6 +35,19 @@ export type ScannerWatchlistPrefs = {
   coins: string[];
 };
 
+/**
+ * Only explicit false / off values mean "not all markets". Missing field → full universe.
+ * Avoids string "false" or other CRM exports being misread as true.
+ */
+export function mongoScannerAllMarketsFromDoc(value: unknown): boolean {
+  if (value === false || value === 0) return false;
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    if (s === "false" || s === "0" || s === "no" || s === "off") return false;
+  }
+  return true;
+}
+
 /** Pattern scanner: `scannerAllMarkets` + `scannerWatchlistCoins` on `crm_users`. */
 export async function fetchMongoScannerWatchlistPrefs(
   walletAddress: string,
@@ -47,7 +60,7 @@ export async function fetchMongoScannerWatchlistPrefs(
   const coins = Array.isArray(doc.scannerWatchlistCoins)
     ? doc.scannerWatchlistCoins.map((c: unknown) => String(c).trim()).filter(Boolean)
     : [];
-  const allMarkets = doc.scannerAllMarkets !== false;
+  const allMarkets = mongoScannerAllMarketsFromDoc(doc.scannerAllMarkets);
   return { allMarkets, coins };
 }
 

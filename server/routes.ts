@@ -75,10 +75,51 @@ let mongoVaultHandle: MongoVaultHandle | null = null;
 
 const PATTERN_SCAN_CACHE_TTL_MS = 90_000;
 const PATTERN_SCAN_CACHE_MAX_KEYS = 8;
-const patternScanResultCache = new Map<
-  string,
-  { patterns: EducationalPatternSignal[]; meta: PatternScanMeta; at: number }
->();
+type PatternScanCacheEntry = {
+  patterns: EducationalPatternSignal[];
+  meta: PatternScanMeta;
+  at: number;
+  coins: string[];
+  source: "query" | "watchlist" | "universe";
+  volumeCapMax: number | null;
+};
+
+const patternScanResultCache = new Map<string, PatternScanCacheEntry>();
+
+function patternScanCoinsPreview(coins: string[]): string {
+  const max = 24;
+  if (coins.length === 0) return "";
+  if (coins.length <= max) return coins.join(",");
+  return `${coins.slice(0, max).join(",")},+${coins.length - max}more`;
+}
+
+function patternVolumeCapMax(): number | null {
+  const enforce = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
+  const n = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
+  if (enforce && Number.isFinite(n) && n > 0) return n;
+  return null;
+}
+
+function setPatternScanInsightHeaders(
+  res: Response,
+  opts: {
+    coins: string[];
+    source: "query" | "watchlist" | "universe";
+    volumeCapMax: number | null;
+    meta: PatternScanMeta;
+    cached: boolean;
+  },
+): void {
+  res.setHeader("X-Pattern-Scan-Coins", String(opts.meta.coinCount));
+  res.setHeader("X-Pattern-Scan-Duration-Ms", String(opts.meta.durationMs));
+  res.setHeader("X-Pattern-Scan-Signals", String(opts.meta.signalCount));
+  res.setHeader("X-Pattern-Scan-Cached", opts.cached ? "1" : "0");
+  res.setHeader("X-Pattern-Scan-Source", opts.source);
+  res.setHeader("X-Pattern-Scan-Coins-Preview", patternScanCoinsPreview(opts.coins));
+  if (opts.volumeCapMax != null) {
+    res.setHeader("X-Pattern-Scan-Volume-Cap", String(opts.volumeCapMax));
+  }
+}
 
 function patternScanCacheKey(walletKey: string, coinsParam: string, coins: string[], timeframes: string[]): string {
   const coinPart = coinsParam.trim() || [...coins].sort().join(",");
@@ -311,6 +352,9 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
       const tickers = await getAllTickers();
       const vol = new Map(tickers.map((t) => [t.coin, parseFloat(t.dayNtlVlm || "0")]));
       list = [...list].sort((a, b) => (vol.get(b) ?? 0) - (vol.get(a) ?? 0)).slice(0, maxCoins);
+      console.warn(
+        `[pattern-scan] PATTERN_SCAN_ENFORCE_MAX_COINS=1 active — scanning top ${maxCoins} by 24h volume only (often BTC-heavy).`,
+      );
     } catch {
       /* keep full list */
     }
@@ -656,12 +700,15 @@ export async function registerRoutes(
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
       const skipCache = req.query.nocache === "1" || req.query.nocache === "true";
 
+      let scanSource: "query" | "watchlist" | "universe" = "universe";
       let coins: string[];
       if (coinsParam?.trim()) {
+        scanSource = "query";
         coins = coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
       } else if (wallet) {
         const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
         if (prefs && prefs.allMarkets === false && prefs.coins.length > 0) {
+          scanSource = "watchlist";
           coins = prefs.coins;
         } else {
           coins = await resolveScanCoins(undefined);
@@ -669,6 +716,8 @@ export async function registerRoutes(
       } else {
         coins = await resolveScanCoins(undefined);
       }
+
+      const volumeCapMax = scanSource === "universe" ? patternVolumeCapMax() : null;
 
       const timeframes = timeframesParam?.trim()
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
@@ -681,23 +730,36 @@ export async function registerRoutes(
         prunePatternScanCache();
         const hit = patternScanResultCache.get(cacheKey);
         if (hit && Date.now() - hit.at <= PATTERN_SCAN_CACHE_TTL_MS) {
-          res.setHeader("X-Pattern-Scan-Coins", String(hit.meta.coinCount));
-          res.setHeader("X-Pattern-Scan-Duration-Ms", String(hit.meta.durationMs));
-          res.setHeader("X-Pattern-Scan-Signals", String(hit.meta.signalCount));
-          res.setHeader("X-Pattern-Scan-Cached", "1");
+          setPatternScanInsightHeaders(res, {
+            coins: hit.coins,
+            source: hit.source,
+            volumeCapMax: hit.volumeCapMax,
+            meta: hit.meta,
+            cached: true,
+          });
           return res.json(hit.patterns);
         }
       }
 
       const { patterns, meta } = await scanForEducationalPatterns(coins, timeframes);
       if (!skipCache) {
-        patternScanResultCache.set(cacheKey, { patterns, meta, at: Date.now() });
+        patternScanResultCache.set(cacheKey, {
+          patterns,
+          meta,
+          at: Date.now(),
+          coins,
+          source: scanSource,
+          volumeCapMax,
+        });
         prunePatternScanCache();
       }
-      res.setHeader("X-Pattern-Scan-Coins", String(meta.coinCount));
-      res.setHeader("X-Pattern-Scan-Duration-Ms", String(meta.durationMs));
-      res.setHeader("X-Pattern-Scan-Signals", String(meta.signalCount));
-      res.setHeader("X-Pattern-Scan-Cached", "0");
+      setPatternScanInsightHeaders(res, {
+        coins,
+        source: scanSource,
+        volumeCapMax,
+        meta,
+        cached: false,
+      });
       res.json(patterns);
     } catch (error) {
       console.error("Error scanning for educational patterns:", error);

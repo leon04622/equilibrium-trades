@@ -18,7 +18,7 @@ export function sleep(ms: number): Promise<void> {
 /**
  * Active HL perp universe + spot pairs that pass `getSpotTickers` liquidity filter (`@index` symbols).
  */
-export async function buildGlobalScannerTickerList(): Promise<string[]> {
+async function buildGlobalScannerTickerListOnce(): Promise<string[]> {
   const [perps, spots] = await Promise.all([getPerpUniverseCoinNames(), getSpotTickers()]);
   const set = new Set<string>();
   for (const p of perps) {
@@ -29,6 +29,15 @@ export async function buildGlobalScannerTickerList(): Promise<string[]> {
     if (c) set.add(c);
   }
   return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+export async function buildGlobalScannerTickerList(): Promise<string[]> {
+  let list = await buildGlobalScannerTickerListOnce();
+  if (list.length === 0) {
+    await sleep(500);
+    list = await buildGlobalScannerTickerListOnce();
+  }
+  return list;
 }
 
 export function chunkArray<T>(arr: T[], size: number): T[][] {

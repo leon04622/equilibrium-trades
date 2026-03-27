@@ -271,6 +271,8 @@ type WatchlistApi = {
   mongoConfigured: boolean;
 };
 
+type PatternScanSource = "query" | "watchlist" | "universe";
+
 type PatternScanPayload = {
   patterns: PatternSignal[];
   meta: {
@@ -278,6 +280,9 @@ type PatternScanPayload = {
     durationMs: number;
     signalCount: number;
     cached: boolean;
+    source: PatternScanSource;
+    coinsPreview: string;
+    volumeCapMax: number | null;
   };
 };
 
@@ -358,11 +363,19 @@ export function PatternScannerUI() {
         headers: scannerAuthHeaders(address),
       });
       if (!response.ok) throw new Error("Failed to fetch patterns");
+      const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "universe").trim();
+      const source: PatternScanSource =
+        srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" ? srcRaw : "universe";
+      const capHdr = response.headers.get("X-Pattern-Scan-Volume-Cap");
+      const capN = capHdr != null && capHdr !== "" ? Number(capHdr) : NaN;
       const meta = {
         coinCount: Number(response.headers.get("X-Pattern-Scan-Coins") || 0),
         durationMs: Number(response.headers.get("X-Pattern-Scan-Duration-Ms") || 0),
         signalCount: Number(response.headers.get("X-Pattern-Scan-Signals") || 0),
         cached: response.headers.get("X-Pattern-Scan-Cached") === "1",
+        source,
+        coinsPreview: (response.headers.get("X-Pattern-Scan-Coins-Preview") || "").trim(),
+        volumeCapMax: Number.isFinite(capN) && capN > 0 ? capN : null,
       };
       const patterns = (await response.json()) as PatternSignal[];
       return { patterns, meta };
@@ -377,7 +390,12 @@ export function PatternScannerUI() {
   const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
   const universeApprox = marketsData?.tickers?.length ?? 0;
   const likelyPartialUniverse =
-    scanHasCompleted && universeApprox > 0 && scanMeta!.coinCount < Math.min(20, Math.floor(universeApprox * 0.15));
+    scanHasCompleted &&
+    scanMeta?.source === "universe" &&
+    universeApprox > 0 &&
+    scanMeta!.coinCount < Math.min(20, Math.floor(universeApprox * 0.15));
+
+  const uniqueCoinsInSignals = useMemo(() => new Set(signals.map((s) => s.coin)), [signals]);
 
   const saveWatchlistMutation = useMutation({
     mutationFn: async () => {
@@ -511,6 +529,33 @@ export function PatternScannerUI() {
         </Alert>
       )}
 
+      {!isError && scanMeta?.source === "watchlist" ? (
+        <Alert className="border-amber-500/50 bg-amber-500/[0.08]">
+          <Eye className="h-4 w-4 text-amber-600 shrink-0" />
+          <AlertTitle className="text-amber-900 dark:text-amber-100">Watchlist mode — not the full exchange</AlertTitle>
+          <AlertDescription className="text-xs sm:text-sm text-muted-foreground">
+            Patterns are loaded only from your <strong>saved ticker list</strong> ({scanMeta.coinCount} market
+            {scanMeta.coinCount === 1 ? "" : "s"} this run). If you only see BTC, add more tickers or turn on{" "}
+            <strong>All markets</strong> (Mongo required) and <strong>Save watchlist</strong>.
+            {scanMeta.coinsPreview ? (
+              <span className="block mt-2 font-mono text-[10px] break-all opacity-90">{scanMeta.coinsPreview}</span>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!isError && scanMeta?.volumeCapMax != null ? (
+        <Alert className="border-orange-500/45 bg-orange-500/[0.07]">
+          <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
+          <AlertTitle className="text-orange-900 dark:text-orange-100">Server volume cap</AlertTitle>
+          <AlertDescription className="text-xs sm:text-sm text-muted-foreground">
+            Only the top <strong>{scanMeta.volumeCapMax}</strong> market(s) by 24h volume are scanned — results skew to
+            majors like BTC/ETH. Unset <code className="text-[10px]">PATTERN_SCAN_ENFORCE_MAX_COINS</code> (and{" "}
+            <code className="text-[10px]">PATTERN_SCAN_MAX_COINS</code>) on the host for the full Hyperliquid universe.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {!isError ? (
         <div
           className={cn(
@@ -565,6 +610,21 @@ export function PatternScannerUI() {
                       ? " That is normal: most symbols at any moment will not produce a label, because the model requires enough history and strict geometry + SMMA alignment."
                       : null}
                   </p>
+                  {scanMeta!.source === "universe" && scanMeta!.coinsPreview ? (
+                    <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
+                      Tickers in this run (sample): {scanMeta!.coinsPreview}
+                    </p>
+                  ) : null}
+                  {signals.length > 0 &&
+                  scanMeta!.source === "universe" &&
+                  uniqueCoinsInSignals.size === 1 &&
+                  scanMeta!.coinCount > 15 ? (
+                    <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
+                      All visible cards are for <strong>{Array.from(uniqueCoinsInSignals)[0]}</strong> right now — other
+                      markets in this run were checked but did not get a qualifying label on this pass (filters are
+                      strict, not broken).
+                    </p>
+                  ) : null}
                   {likelyPartialUniverse ? (
                     <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
                       Only {scanMeta!.coinCount} market(s) were included — if you expected the full Hyperliquid list,
