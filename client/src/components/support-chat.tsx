@@ -11,6 +11,7 @@ import { queryClient } from "@/lib/queryClient";
 import type { SupportMessage } from "@shared/schema";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { linkifyPlainText } from "@/lib/linkify-message";
 
 interface SupportChatProps {
   isAdmin?: boolean;
@@ -212,13 +213,18 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
                           )}
                           <div
                             className={cn(
-                              "max-w-[80%] rounded-lg px-3 py-2 text-sm",
+                              "max-w-[80%] rounded-lg px-3 py-2 text-sm break-words",
                               msg.senderType === "admin"
                                 ? "bg-muted"
                                 : "bg-primary text-primary-foreground"
                             )}
                           >
-                            {msg.message}
+                            {linkifyPlainText(
+                              msg.message,
+                              msg.senderType === "admin"
+                                ? "text-primary underline-offset-2 hover:underline break-all"
+                                : "text-primary-foreground underline font-medium break-all",
+                            )}
                           </div>
                           {msg.senderType === "user" && (
                             <div className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0">

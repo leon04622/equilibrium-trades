@@ -29,19 +29,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { parseVideosApiList } from "@/lib/video-vault";
 import { FORTRESS_SOVEREIGN_WALLET } from "@/lib/fortress-admin";
 import { cn } from "@/lib/utils";
+
+const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
 
 type CrmRow = {
   wallet: string;
@@ -312,17 +307,41 @@ export default function AdminCommandCenter() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Category / vault section</Label>
-                <Select value={category} onValueChange={setCategory}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Beginner Patterns">Beginner Patterns</SelectItem>
-                    <SelectItem value="SMA Masterclass">SMA Masterclass</SelectItem>
-                    <SelectItem value="Live Trading Sessions">Live Trading Sessions</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="v-category">Category / vault section</Label>
+                <Input
+                  id="v-category"
+                  list="vault-category-presets"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="e.g. SMA Masterclass or your own course name"
+                  maxLength={200}
+                />
+                <datalist id="vault-category-presets">
+                  {VAULT_CATEGORY_PRESETS.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+                <p className="text-xs text-muted-foreground">
+                  Type any section title — each unique name becomes its own group on{" "}
+                  <Link to="/videos" className="text-primary underline-offset-2 hover:underline">
+                    /videos
+                  </Link>
+                  . Quick picks:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {VAULT_CATEGORY_PRESETS.map((p) => (
+                    <Button
+                      key={p}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setCategory(p)}
+                    >
+                      {p}
+                    </Button>
+                  ))}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="v-desc">Description</Label>

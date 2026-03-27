@@ -32,9 +32,44 @@ export type VaultItem = {
   thumbnailUrl: string;
   videoUrl: string;
   academySection: AcademySection;
+  /** Group title on Educational Vault (admin category or legacy preset). */
+  vaultHeading: string;
 };
 
 const ACADEMY_IDS = new Set<AcademySection>(["beginner_patterns", "sma_masterclass", "live_sessions"]);
+
+const PRESET_VAULT_LABELS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
+
+/** Stable section title on /videos: admin category string, or legacy inferred preset label. */
+function vaultHeadingForVideo(v: TutorialVideo): string {
+  const raw = (v.category || "").trim();
+  if (raw) {
+    const lower = raw.toLowerCase();
+    for (const p of PRESET_VAULT_LABELS) {
+      if (p.toLowerCase() === lower) return p;
+    }
+    return raw;
+  }
+  const rawSection = v.academySection as string | null | undefined;
+  const section: AcademySection =
+    rawSection && ACADEMY_IDS.has(rawSection as AcademySection)
+      ? (rawSection as AcademySection)
+      : inferAcademySection(v);
+  return VAULT_SECTION_META.find((s) => s.id === section)?.label ?? "Library";
+}
+
+function sortVaultHeadings(headings: string[]): string[] {
+  const presetRank = (h: string) => {
+    const i = PRESET_VAULT_LABELS.findIndex((p) => p.toLowerCase() === h.toLowerCase());
+    return i >= 0 ? i : -1;
+  };
+  const unique = [...new Set(headings)];
+  const presets = unique.filter((h) => presetRank(h) >= 0).sort((a, b) => presetRank(a) - presetRank(b));
+  const rest = unique
+    .filter((h) => presetRank(h) < 0)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return [...presets, ...rest];
+}
 
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
   return apiVideos.map((v) => {
@@ -52,6 +87,7 @@ function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
         "https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=640&q=80",
       videoUrl: tutorialToPlayUrl(v),
       academySection: section,
+      vaultHeading: vaultHeadingForVideo(v),
     };
   });
 }
@@ -84,7 +120,7 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
-/** Educational Vault — lessons from GET /api/videos, grouped by admin category → Beginner Patterns / SMA Masterclass / Live Sessions. */
+/** Educational Vault — lessons from GET /api/videos, grouped by the category name set in Command Center. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
@@ -122,16 +158,21 @@ export default function VideoVault() {
 
   const items = useMemo(() => mapApiToVaultItems(apiVideos), [apiVideos]);
 
-  const bySection = useMemo(() => {
-    const map: Record<AcademySection, VaultItem[]> = {
-      beginner_patterns: [],
-      sma_masterclass: [],
-      live_sessions: [],
-    };
+  const vaultGroups = useMemo(() => {
+    const map = new Map<string, VaultItem[]>();
     for (const it of items) {
-      map[it.academySection].push(it);
+      const h = it.vaultHeading;
+      if (!map.has(h)) map.set(h, []);
+      map.get(h)!.push(it);
     }
-    return map;
+    const order = sortVaultHeadings([...map.keys()]);
+    return order.map((title) => ({
+      title,
+      description:
+        VAULT_SECTION_META.find((s) => s.label === title)?.description ??
+        "Lessons published under this category in Admin Command Center.",
+      items: map.get(title)!,
+    }));
   }, [items]);
 
   const accessChecking = isConnected && subLoading;
@@ -148,8 +189,8 @@ export default function VideoVault() {
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
             Pro-only library loaded from <code className="text-xs">/api/videos</code> (same entries as Command Center).
-            Sections follow the category you set when publishing (Beginner Patterns, SMA Masterclass, Live Trading
-            Sessions).
+            Lessons are grouped by the <strong>category name</strong> you type when publishing — use the built-in names
+            or your own (each distinct name becomes a section).
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}
@@ -215,44 +256,37 @@ export default function VideoVault() {
               No videos in the library yet. An admin can add lessons from the Command Center → Videos tab.
             </p>
           ) : (
-            VAULT_SECTION_META.map((section) => (
-              <section key={section.id} className="space-y-4">
+            vaultGroups.map((group) => (
+              <section key={group.title} className="space-y-4">
                 <div>
-                  <h2 className="text-xl font-semibold">{section.label}</h2>
-                  <p className="text-sm text-muted-foreground">{section.description}</p>
+                  <h2 className="text-xl font-semibold">{group.title}</h2>
+                  <p className="text-sm text-muted-foreground">{group.description}</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {bySection[section.id].length === 0 ? (
-                    <p className="text-sm text-muted-foreground col-span-full">
-                      No videos in this section — use category labels like “Beginner Patterns”, “SMA Masterclass”, or
-                      “Live” when publishing.
-                    </p>
-                  ) : (
-                    bySection[section.id].map((item) => (
-                      <Card
-                        key={item.id}
-                        className="overflow-hidden cursor-pointer hover-elevate transition-shadow"
-                        onClick={() => setActive(item)}
-                        data-testid={`vault-card-${item.id}`}
-                      >
-                        <div className="aspect-video relative bg-muted">
-                          <img
-                            src={item.thumbnailUrl}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                          <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-90 hover:opacity-100 transition-opacity">
-                            <Play className="h-12 w-12 text-white drop-shadow-md" />
-                          </div>
+                  {group.items.map((item) => (
+                    <Card
+                      key={item.id}
+                      className="overflow-hidden cursor-pointer hover-elevate transition-shadow"
+                      onClick={() => setActive(item)}
+                      data-testid={`vault-card-${item.id}`}
+                    >
+                      <div className="aspect-video relative bg-muted">
+                        <img
+                          src={item.thumbnailUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-90 hover:opacity-100 transition-opacity">
+                          <Play className="h-12 w-12 text-white drop-shadow-md" />
                         </div>
-                        <CardContent className="p-4">
-                          <h3 className="font-semibold line-clamp-2 leading-snug">{item.title}</h3>
-                          <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{item.description}</p>
-                        </CardContent>
-                      </Card>
-                    ))
-                  )}
+                      </div>
+                      <CardContent className="p-4">
+                        <h3 className="font-semibold line-clamp-2 leading-snug">{item.title}</h3>
+                        <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{item.description}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               </section>
             ))

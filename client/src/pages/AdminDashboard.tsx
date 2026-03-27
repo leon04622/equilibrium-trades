@@ -52,13 +52,9 @@ import { useToast } from "@/hooks/use-toast";
 import { TIER_PRO } from "@/lib/subscription-pricing";
 import { parseVideosApiList } from "@/lib/video-vault";
 import { cn } from "@/lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { linkifyPlainText } from "@/lib/linkify-message";
+
+const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
 
 type TabKey = "users" | "support" | "videos";
 
@@ -716,7 +712,14 @@ export default function AdminDashboard() {
                             <div className="text-[10px] text-muted-foreground font-mono truncate mt-0.5" title={cid}>
                               Thread: {cid}
                             </div>
-                            <div className="text-muted-foreground line-clamp-2 mt-1">{msgs[msgs.length - 1]?.message}</div>
+                            <div className="text-muted-foreground line-clamp-2 mt-1 break-all">
+                              {msgs[msgs.length - 1]?.message
+                                ? linkifyPlainText(
+                                    msgs[msgs.length - 1]!.message,
+                                    "text-primary underline-offset-2 hover:underline",
+                                  )
+                                : null}
+                            </div>
                           </button>
                           <Button
                             type="button"
@@ -757,7 +760,8 @@ export default function AdminDashboard() {
                           m.senderType === "admin" ? "bg-muted/60" : "bg-primary/10",
                         )}
                       >
-                        <span className="text-[10px] text-muted-foreground">{m.senderType}</span> — {m.message}
+                        <span className="text-[10px] text-muted-foreground">{m.senderType}</span> —{" "}
+                        {linkifyPlainText(m.message, "text-primary underline-offset-2 hover:underline break-all")}
                       </div>
                     ))}
                   </ScrollArea>
@@ -796,20 +800,31 @@ export default function AdminDashboard() {
                     <Input value={vaultTitle} onChange={(e) => setVaultTitle(e.target.value)} placeholder="Lesson title" />
                   </div>
                   <div className="space-y-1">
-                    <Label>Vault section (category)</Label>
-                    <Select value={vaultCategory} onValueChange={setVaultCategory}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose section…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Beginner Patterns">Beginner Patterns</SelectItem>
-                        <SelectItem value="SMA Masterclass">SMA Masterclass</SelectItem>
-                        <SelectItem value="Live Trading Sessions">Live Trading Sessions</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="dash-vault-category">Vault section (category)</Label>
+                    <Input
+                      id="dash-vault-category"
+                      list="dash-vault-category-presets"
+                      value={vaultCategory}
+                      onChange={(e) => setVaultCategory(e.target.value)}
+                      placeholder="e.g. SMA Masterclass or your own course name"
+                      maxLength={200}
+                    />
+                    <datalist id="dash-vault-category-presets">
+                      {VAULT_CATEGORY_PRESETS.map((p) => (
+                        <option key={p} value={p} />
+                      ))}
+                    </datalist>
                     <p className="text-[10px] text-muted-foreground">
-                      Choosing <strong>SMA Masterclass</strong> stores the lesson under that vault heading automatically.
+                      Type any name — it becomes a section on <Link to="/videos" className="text-primary underline-offset-2 hover:underline">/videos</Link>.
+                      Quick picks:
                     </p>
+                    <div className="flex flex-wrap gap-2">
+                      {VAULT_CATEGORY_PRESETS.map((p) => (
+                        <Button key={p} type="button" variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => setVaultCategory(p)}>
+                          {p}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <Label>Description (optional)</Label>

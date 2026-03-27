@@ -14,6 +14,7 @@ import { useChat } from "@/lib/chat-context";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
+import { linkifyPlainText } from "@/lib/linkify-message";
 import type { SupportMessage } from "@shared/schema";
 
 interface Conversation {
@@ -461,7 +462,10 @@ export function LiveChat() {
                               : `${conv.conversationId.slice(0, 6)}...${conv.conversationId.slice(-4)}`}
                           </p>
                           <p className="text-xs text-muted-foreground truncate">
-                            {conv.lastMessage.message}
+                            {linkifyPlainText(
+                              conv.lastMessage.message,
+                              "text-primary underline-offset-2 hover:underline break-all",
+                            )}
                           </p>
                         </div>
                       </div>
@@ -507,13 +511,18 @@ export function LiveChat() {
                         )}
                         <div
                           className={cn(
-                            "max-w-[80%] rounded-lg px-3 py-2 text-sm",
+                            "max-w-[80%] rounded-lg px-3 py-2 text-sm break-words",
                             message.senderType === "user"
                               ? "bg-primary text-primary-foreground"
                               : "bg-muted"
                           )}
                         >
-                          {message.message}
+                          {linkifyPlainText(
+                            message.message,
+                            message.senderType === "user"
+                              ? "text-primary-foreground underline font-medium break-all"
+                              : "text-primary underline-offset-2 hover:underline break-all",
+                          )}
                           <p className={cn(
                             "text-[10px] mt-1",
                             message.senderType === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
