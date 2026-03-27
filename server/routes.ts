@@ -39,16 +39,21 @@ import {
   fetchMongoScannerWatchlistPrefs,
   upsertMongoScannerWatchlistPrefs,
   getVaultDb,
+  getMongoVaultHealth,
+  resolveMongoVaultUri,
   type MongoVaultHandle,
 } from "./mongo-vault";
 import {
-  buildGlobalScannerTickerList,
   getScannerHealthSnapshot,
   getScannerHealthMonitoringEnabled,
   setScannerHealthMonitoringEnabled,
   GLOBAL_SCANNER_GOLD_PROXY_INFO,
 } from "./global-scanner";
-import { getDefaultPatternScanTickerList } from "./scanner-controller";
+import {
+  buildTopVolumePatternScanCoins,
+  getDefaultPatternScanTickerList,
+  PATTERN_SCAN_TOP_VOLUME_COUNT,
+} from "./scanner-controller";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -81,7 +86,7 @@ type PatternScanCacheEntry = {
   meta: PatternScanMeta;
   at: number;
   coins: string[];
-  source: "query" | "watchlist" | "universe";
+  source: "query" | "watchlist" | "universe" | "top_volume";
   volumeCapMax: number | null;
 };
 
@@ -105,7 +110,7 @@ function setPatternScanInsightHeaders(
   res: Response,
   opts: {
     coins: string[];
-    source: "query" | "watchlist" | "universe";
+    source: "query" | "watchlist" | "universe" | "top_volume";
     volumeCapMax: number | null;
     meta: PatternScanMeta;
     cached: boolean;
@@ -399,30 +404,15 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   if (coinsParam?.trim()) {
     return coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
   }
-  let list = await buildGlobalScannerTickerList();
-  if (list.length === 0) {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
-      list = await buildGlobalScannerTickerList();
-      if (list.length > 0) break;
-    }
-  }
-  if (list.length === 0) {
-    try {
-      const meta = await getAvailableCoins();
-      const perps = (meta.universe || [])
-        .map((u: { name?: string }) => String(u.name || "").trim())
-        .filter(Boolean);
-      if (perps.length > 0) {
-        list = [...new Set(perps)].sort((a, b) => a.localeCompare(b));
-      }
-    } catch {
-      /* keep trying fallbacks */
-    }
+  let list: string[] = [];
+  try {
+    list = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
+  } catch (e) {
+    console.warn("[pattern-scan] Top-volume coin list failed:", e);
   }
   if (list.length === 0) {
     list = getDefaultPatternScanTickerList();
-    console.warn("[pattern-scan] HL universe still empty after retries — using default ticker list (DB-independent)");
+    console.warn("[pattern-scan] Using hardcoded default tickers — HL ticker API empty");
   }
   const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
   const enforceMax = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
@@ -432,10 +422,10 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
       const vol = new Map(tickers.map((t) => [t.coin, parseFloat(t.dayNtlVlm || "0")]));
       list = [...list].sort((a, b) => (vol.get(b) ?? 0) - (vol.get(a) ?? 0)).slice(0, maxCoins);
       console.warn(
-        `[pattern-scan] PATTERN_SCAN_ENFORCE_MAX_COINS=1 active — scanning top ${maxCoins} by 24h volume only (often BTC-heavy).`,
+        `[pattern-scan] PATTERN_SCAN_ENFORCE_MAX_COINS=1 active — capping to top ${maxCoins} by 24h volume.`,
       );
     } catch {
-      /* keep full list */
+      list = list.slice(0, maxCoins);
     }
   }
   return list;
@@ -515,6 +505,15 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   mongoVaultHandle = await tryConnectMongoVault();
+
+  setInterval(() => {
+    void (async () => {
+      if (getMongoVaultHealth().connected) return;
+      if (!resolveMongoVaultUri()) return;
+      console.warn("[mongo-vault] Still disconnected — retrying Mongo handshake (5s interval)…");
+      mongoVaultHandle = await tryConnectMongoVault({ maxAttempts: 1 });
+    })();
+  }, 5000);
 
   app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
     const walletAddress = req.headers["x-wallet-address"] as string | undefined;
@@ -783,9 +782,8 @@ export async function registerRoutes(
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
       const skipCache = req.query.nocache === "1" || req.query.nocache === "true";
 
-      // Always scan full HL perps + active spot unless `coins` query explicitly lists symbols.
-      // (CRM watchlist prefs no longer narrow the scanner — avoids accidental 3-coin scans.)
-      let scanSource: "query" | "watchlist" | "universe" = "universe";
+      // Default: top 50 perps by 24h notional + PAXG (gold proxy). `coins` query overrides.
+      let scanSource: "query" | "watchlist" | "universe" | "top_volume" = "top_volume";
       let coins: string[];
       if (coinsParam?.trim()) {
         scanSource = "query";
@@ -794,7 +792,8 @@ export async function registerRoutes(
         coins = await resolveScanCoins(undefined);
       }
 
-      const volumeCapMax = scanSource === "universe" ? patternVolumeCapMax() : null;
+      const volumeCapMax =
+        scanSource === "query" ? null : patternVolumeCapMax();
 
       const timeframes = timeframesParam?.trim()
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
@@ -844,10 +843,10 @@ export async function registerRoutes(
     }
   });
 
-  /** Full HL perp + active spot list for pattern scanner watchlist UI */
+  /** Top-volume perp list (same universe as default pattern scan) */
   app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
     try {
-      let tickers = await buildGlobalScannerTickerList();
+      let tickers = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
       if (tickers.length === 0) {
         tickers = getDefaultPatternScanTickerList();
       }

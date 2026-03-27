@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, memo, useRef } from "react";
 import {
   Zap,
   TrendingUp,
@@ -21,20 +21,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 import { useWallet } from "@/lib/wallet-context";
-import { useToast } from "@/hooks/use-toast";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 
 export interface PatternSignal {
   id: string;
@@ -270,13 +259,7 @@ function LoadingSkeleton() {
   );
 }
 
-type WatchlistApi = {
-  allMarkets: boolean;
-  coins: string[];
-  mongoConfigured: boolean;
-};
-
-type PatternScanSource = "query" | "watchlist" | "universe";
+type PatternScanSource = "query" | "watchlist" | "universe" | "top_volume";
 
 type PatternScanPayload = {
   patterns: PatternSignal[];
@@ -302,54 +285,15 @@ function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
 /** Institutional-style pattern scanner — Apex geometric engine, 30s refresh, MTF SMMA context. */
 export function PatternScannerUI() {
   const { address } = useWallet();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
   const forceNocacheRef = useRef(false);
-  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() => [...SCAN_ALL_TIMEFRAMES]);
+  /** Default skips 1d to reduce request latency; user can enable 1d from badges. */
+  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() =>
+    SCAN_ALL_TIMEFRAMES.filter((tf) => tf !== "1d"),
+  );
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [draftAllMarkets, setDraftAllMarkets] = useState(true);
-  const [draftCoins, setDraftCoins] = useState<string[]>([]);
-  const [tickerFilter, setTickerFilter] = useState("");
 
   const tfParam =
     selectedTimeframes.length > 0 ? selectedTimeframes.join(",") : [...SCAN_ALL_TIMEFRAMES].join(",");
-
-  const { data: watchlistPref } = useQuery<WatchlistApi>({
-    queryKey: ["/api/scanner/watchlist", address],
-    enabled: !!address?.trim(),
-    queryFn: async () => {
-      const r = await fetch("/api/scanner/watchlist", { headers: scannerAuthHeaders(address) });
-      if (r.status === 401) throw new Error("Failed to load watchlist preferences");
-      if (!r.ok) {
-        return { allMarkets: true, coins: [], mongoConfigured: false };
-      }
-      return r.json();
-    },
-  });
-
-  const { data: marketsData } = useQuery<{ tickers: string[]; goldNote?: string }>({
-    queryKey: ["/api/scanner/markets"],
-    staleTime: 120_000,
-    queryFn: async () => {
-      const r = await fetch("/api/scanner/markets");
-      if (!r.ok) {
-        return {
-          tickers: ["BTC", "ETH", "SOL", "XRP", "AVAX", "LINK", "PAXG"],
-          goldNote: "Using built-in ticker list — /api/scanner/markets unavailable.",
-        };
-      }
-      return r.json();
-    },
-  });
-
-  useEffect(() => {
-    if (!watchlistPref?.mongoConfigured) return;
-    setDraftAllMarkets(watchlistPref.allMarkets);
-    setDraftCoins(watchlistPref.coins?.length ? [...watchlistPref.coins] : []);
-  }, [watchlistPref]);
-
-  /** Watchlist UI is local + optional Mongo persist — never gates pattern scan fetches. */
-  const canCustomizeWatchlist = !!address?.trim();
 
   const {
     data: scanPayload,
@@ -368,9 +312,11 @@ export function PatternScannerUI() {
         headers: scannerAuthHeaders(address),
       });
       if (!response.ok) throw new Error("Failed to fetch patterns");
-      const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "universe").trim();
+      const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "top_volume").trim();
       const source: PatternScanSource =
-        srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" ? srcRaw : "universe";
+        srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" || srcRaw === "top_volume"
+          ? srcRaw
+          : "top_volume";
       const capHdr = response.headers.get("X-Pattern-Scan-Volume-Cap");
       const capN = capHdr != null && capHdr !== "" ? Number(capHdr) : NaN;
       const meta = {
@@ -394,38 +340,6 @@ export function PatternScannerUI() {
   const scanMeta = isError ? null : (scanPayload?.meta ?? null);
   const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
   const uniqueCoinsInSignals = useMemo(() => new Set(signals.map((s) => s.coin)), [signals]);
-
-  const saveWatchlistMutation = useMutation({
-    mutationFn: async () => {
-      if (!address?.trim()) throw new Error("Connect wallet to save watchlist");
-      const r = await fetch("/api/scanner/watchlist", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", ...scannerAuthHeaders(address) },
-        body: JSON.stringify({ allMarkets: draftAllMarkets, coins: draftCoins }),
-      });
-      const data = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(data.error || "Save failed");
-      return data;
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["/api/scanner/watchlist", address] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/signals/patterns"] });
-      toast({ title: "Watchlist saved", description: "Your scanner market selection is stored on your user record." });
-    },
-    onError: (e: Error) =>
-      toast({ title: "Could not save watchlist", description: e.message, variant: "destructive" }),
-  });
-
-  const toggleDraftCoin = useCallback((c: string) => {
-    setDraftCoins((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
-  }, []);
-
-  const filteredTickers = useMemo(() => {
-    const all = marketsData?.tickers ?? [];
-    const q = tickerFilter.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((t) => t.toLowerCase().includes(q));
-  }, [marketsData?.tickers, tickerFilter]);
 
   useEffect(() => {
     if (!isFetching) {
@@ -476,8 +390,8 @@ export function PatternScannerUI() {
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs md:text-sm text-muted-foreground">
-            Impulse-validated flags (15-bar pole, pivot channel, ≤50% retrace) + 21/200 SMMA guards. MTF bundle 200 bars
-            per TF.
+            Server scans the <strong>top 50 Hyperliquid perps by 24h volume</strong> plus <strong>PAXG</strong> (on-chain gold
+            proxy — not OANDA XAU). Apex: 15-bar pole + SMMA guards; 1m/5m candle fetches run before higher TFs.
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
@@ -561,7 +475,7 @@ export function PatternScannerUI() {
           {isLoading && !scanPayload ? (
             <p className="text-sm flex items-center gap-2 text-foreground">
               <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
-              Running scan across your selected markets and timeframes…
+              Scanning top volume markets and selected timeframes…
             </p>
           ) : scanHasCompleted ? (
             <>
@@ -593,13 +507,14 @@ export function PatternScannerUI() {
                       ? " That is normal: most symbols at any moment will not produce a label, because the model requires enough history and strict geometry + SMMA alignment."
                       : null}
                   </p>
-                  {scanMeta!.source === "universe" && scanMeta!.coinsPreview ? (
+                  {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") &&
+                  scanMeta!.coinsPreview ? (
                     <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
                       Tickers in this run (sample): {scanMeta!.coinsPreview}
                     </p>
                   ) : null}
                   {signals.length > 0 &&
-                  scanMeta!.source === "universe" &&
+                  (scanMeta!.source === "universe" || scanMeta!.source === "top_volume") &&
                   uniqueCoinsInSignals.size === 1 &&
                   scanMeta!.coinCount > 15 ? (
                     <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
@@ -612,31 +527,10 @@ export function PatternScannerUI() {
               </div>
             </>
           ) : (
-            <p className="text-xs text-muted-foreground">Connect and open this page to run the scanner.</p>
+            <p className="text-xs text-muted-foreground">Waiting for scan to start…</p>
           )}
         </div>
       ) : null}
-
-      <Collapsible className="rounded-lg border border-border/70 bg-card/30">
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/40 rounded-lg transition-colors">
-          <BarChart3 className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
-          <span className="flex-1">How pattern detection works</span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="px-4 pb-4 pt-0 space-y-3 text-xs text-muted-foreground leading-relaxed border-t border-border/50">
-          <p>
-            Each symbol and timeframe needs roughly <strong>200 closed candles</strong>, a valid <strong>21 / 200 SMMA</strong>
-            , and a pattern that passes <strong>Apex geometry</strong> (impulse pole, pivot structure, retracement limits)
-            plus <strong>trend alignment rules</strong> so labels are not printed against obvious macro structure.
-          </p>
-          <p>
-            Flags use a verified <strong>impulse pole</strong> (directional move with body participation); consolidation
-            respects <strong>pivot highs/lows</strong> and cannot retrace more than about <strong>half the pole</strong>.
-            <strong> High probability — trend aligned</strong> can appear when a short-TF flag agrees with a higher-TF SMMA
-            trend (for example 1m with 15m context).
-          </p>
-        </CollapsibleContent>
-      </Collapsible>
 
       <Alert className="border-blue-500/50 bg-blue-500/5 hidden md:block">
         <BookOpen className="h-4 w-4 text-blue-500" />
@@ -666,86 +560,10 @@ export function PatternScannerUI() {
           ))}
         </div>
         <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
-          Auto-refresh <strong>30s</strong> when healthy. Server pulls 200 candles per TF per coin (batched 5 tickers / 2s).
-          Tap a TF to exclude it. Use <strong>Scan</strong> for a fresh pass (<code className="text-[9px]">nocache</code>
-          ).
+          Auto-refresh <strong>30s</strong>. 200 candles per TF; batched 5 tickers / 2s. Tap a TF to exclude (1d off by
+          default for speed). <strong>Scan</strong> = fresh pass.
         </span>
       </div>
-
-      <Card className="border-border/80">
-        <CardHeader className="pb-2 pt-4 px-4 md:px-6">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Eye className="h-4 w-4" />
-            Markets &amp; watchlist
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm px-4 md:px-6 pb-4 md:pb-6">
-          {marketsData?.goldNote ? (
-            <p className="text-[10px] text-muted-foreground leading-snug">{marketsData.goldNote}</p>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            The scanner always loads <strong>all Hyperliquid perps plus active spot</strong> each run (same list as{" "}
-            <code className="text-[10px]">/api/scanner/markets</code>), with a built-in default list if HL is slow. Optional
-            Mongo CRM only stores your saved tickers — it does not limit scans.
-          </p>
-
-          {canCustomizeWatchlist ? (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="scanner-all-markets"
-                  checked={draftAllMarkets}
-                  onCheckedChange={(v) => setDraftAllMarkets(v)}
-                />
-                <Label htmlFor="scanner-all-markets" className="text-xs font-medium cursor-pointer">
-                  All markets (HL perps + active spot)
-                </Label>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-8 w-fit text-xs"
-                disabled={
-                  saveWatchlistMutation.isPending || (!draftAllMarkets && draftCoins.length === 0)
-                }
-                onClick={() => saveWatchlistMutation.mutate()}
-              >
-                {saveWatchlistMutation.isPending ? "Saving…" : "Save watchlist"}
-              </Button>
-            </div>
-          ) : null}
-
-          {canCustomizeWatchlist && !draftAllMarkets ? (
-            <div className="space-y-2">
-              <Label className="text-xs">Tickers</Label>
-              <Input
-                className="h-8 text-xs"
-                placeholder="Filter tickers…"
-                value={tickerFilter}
-                onChange={(e) => setTickerFilter(e.target.value)}
-              />
-              <ScrollArea className="h-[min(200px,40vh)] rounded-md border p-2">
-                <div className="space-y-2 pr-3">
-                  {filteredTickers.map((t) => (
-                    <label
-                      key={t}
-                      className="flex items-center gap-2 text-xs font-mono cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5"
-                    >
-                      <Checkbox
-                        checked={draftCoins.includes(t)}
-                        onCheckedChange={() => toggleDraftCoin(t)}
-                      />
-                      {t}
-                    </label>
-                  ))}
-                </div>
-              </ScrollArea>
-              <p className="text-[10px] text-muted-foreground">{draftCoins.length} selected</p>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-4">
         <Card className="bg-primary/5 border-primary/20">

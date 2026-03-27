@@ -54,18 +54,29 @@ const INTERVAL_MS: Record<string, number> = {
   "1d": 86_400_000,
 };
 
+/** Fetch / analyze lower timeframes first (1m, 5m) so fast TFs are not blocked behind 1d candle pulls. */
+const SCAN_TF_ORDER = ["1m", "5m", "3m", "15m", "30m", "1h", "2h", "4h", "1d"] as const;
+
+export function prioritizeScanTimeframes(timeframes: string[]): string[] {
+  const raw = timeframes.filter(Boolean);
+  const uniq = [...new Set(raw)];
+  if (uniq.length === 0) return [...UNIVERSAL_SCAN_TIMEFRAMES];
+  return SCAN_TF_ORDER.filter((tf) => uniq.includes(tf));
+}
+
 /** Serialize candleSnapshot calls so full-universe scans do not trip Hyperliquid rate limits. */
 const candleFetchLimit = pLimit(16);
 
 /**
  * Candle intervals needed for the requested scan TFs only (not always all nine).
  * 1m high-probability tier needs 15m SMMA — include 15m whenever 1m is scanned.
+ * Order: 1m → 5m → … so sequential HL fetches prioritize short TFs.
  */
 function intervalsForPatternScan(timeframes: string[]): readonly string[] {
   const set = new Set(timeframes.filter(Boolean));
-  if (set.size === 0) return UNIVERSAL_SCAN_TIMEFRAMES;
+  if (set.size === 0) return [...UNIVERSAL_SCAN_TIMEFRAMES];
   if (set.has("1m")) set.add("15m");
-  return UNIVERSAL_SCAN_TIMEFRAMES.filter((iv) => set.has(iv));
+  return SCAN_TF_ORDER.filter((iv) => set.has(iv));
 }
 
 export type MarketBias = "bullish" | "bearish" | "neutral_choppy";
@@ -657,7 +668,8 @@ async function scanOneCoinMtf(
   coin: string,
   timeframes: string[],
 ): Promise<{ signals: EducationalPatternSignal[]; diag: CoinScanDiagnostics }> {
-  const intervals = intervalsForPatternScan(timeframes);
+  const orderedTf = prioritizeScanTimeframes(timeframes);
+  const intervals = intervalsForPatternScan(orderedTf);
   const bundle = await fetchMtfCandleBundle(
     coin,
     PATTERN_SCAN_CANDLE_LIMIT,
@@ -669,7 +681,7 @@ async function scanOneCoinMtf(
   const diag: CoinScanDiagnostics = { coin, len1m: m1.length, candle1mLastTs: lastTs };
 
   const tfLimit = pLimit(9);
-  const tasks = timeframes.map(
+  const tasks = orderedTf.map(
     (tf) => () =>
       bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_CANDLE_LIMIT
         ? analyzeEducationalUniversal(coin, tf, bundle[tf]!, bundle)
@@ -694,10 +706,9 @@ export async function scanForEducationalPatterns(
   coins: string[],
   timeframes: string[] = [...UNIVERSAL_SCAN_TIMEFRAMES],
 ): Promise<{ patterns: EducationalPatternSignal[]; meta: PatternScanMeta }> {
-  const uniqueTf =
-    timeframes.filter(Boolean).length > 0
-      ? [...new Set(timeframes.filter(Boolean))]
-      : [...UNIVERSAL_SCAN_TIMEFRAMES];
+  const uniqueTf = prioritizeScanTimeframes(
+    timeframes.filter(Boolean).length > 0 ? timeframes : [...UNIVERSAL_SCAN_TIMEFRAMES],
+  );
 
   const monitoring = getScannerHealthMonitoringEnabled();
   const startedAt = Date.now();

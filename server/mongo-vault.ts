@@ -209,6 +209,7 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
     joinDate: created,
     createdAt: created,
     updatedAt: now,
+    /** Display tier for Admin CRM + subscription readers — must persist Grant Access / Pro grants. */
     subTier: crmDisplayTier(user.subscriptionTier),
     subscriptionTier: user.subscriptionTier,
     subscriptionActive: user.subscriptionActive,
@@ -695,7 +696,11 @@ export function resolveMongoVaultUri(): string {
 
 const MONGO_CONNECT_MAX_ATTEMPTS = 5;
 
-export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
+export async function tryConnectMongoVault(opts?: {
+  /** Startup uses 5; background tick uses 1 to pair with `setInterval` retries. */
+  maxAttempts?: number;
+}): Promise<MongoVaultHandle | null> {
+  const maxAttempts = Math.min(10, Math.max(1, opts?.maxAttempts ?? MONGO_CONNECT_MAX_ATTEMPTS));
   mongoVaultBackendActive = false;
   vaultDb = null;
   if (cachedClient) {
@@ -719,7 +724,7 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
     return null;
   }
 
-  for (let attempt = 1; attempt <= MONGO_CONNECT_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       cachedClient = new MongoClient(uri, {
         serverSelectionTimeoutMS: 15_000,
@@ -727,7 +732,7 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
       });
       await cachedClient.connect();
       console.log(
-        `[mongo-vault] Connected to MongoDB (attempt ${attempt}/${MONGO_CONNECT_MAX_ATTEMPTS}) — vault / CRM / support`,
+        `[mongo-vault] Connected to MongoDB (attempt ${attempt}/${maxAttempts}) — vault / CRM / support`,
       );
       const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
       const db = cachedClient.db(dbName);
@@ -735,7 +740,7 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
       mongoVaultBackendActive = true;
       return createHandle(db);
     } catch (e) {
-      console.error(`[mongo-vault] MongoDB connection failed (attempt ${attempt}/${MONGO_CONNECT_MAX_ATTEMPTS}):`, e);
+      console.error(`[mongo-vault] MongoDB connection failed (attempt ${attempt}/${maxAttempts}):`, e);
       mongoVaultBackendActive = false;
       vaultDb = null;
       if (cachedClient) {
@@ -746,7 +751,7 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
         }
         cachedClient = null;
       }
-      if (attempt < MONGO_CONNECT_MAX_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         const delayMs = 2000 * attempt;
         console.warn(`[mongo-vault] Retrying Mongo handshake in ${delayMs}ms…`);
         await sleep(delayMs);
