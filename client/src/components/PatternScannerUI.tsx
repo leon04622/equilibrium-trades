@@ -386,7 +386,7 @@ export function PatternScannerUI() {
       return { patterns, meta };
     },
     refetchInterval: (query) => (query.state.status === "error" ? false : 30_000),
-    staleTime: 0,
+    staleTime: 25_000,
     retry: 1,
   });
 

@@ -242,6 +242,12 @@ export default function Trading({ visible = true }: TradingProps) {
     }
   }, [tickers, updatePrices]);
 
+  // Route is hidden via display:none while browsing other pages; returning null here
+  // unmounts chart, order book, and symbol list so their queries and canvas stop.
+  if (!visible) {
+    return null;
+  }
+
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
     if (p >= 1) return p.toFixed(2);
