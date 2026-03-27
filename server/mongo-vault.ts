@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { MongoClient, ObjectId, type Db, type Collection, type Document } from "mongodb";
 import { adminVideoCreateSchema, insertSupportMessageSchema, supportSendBodySchema } from "@shared/schema";
-import type { InsertSupportMessage, SupportMessage } from "@shared/schema";
+import type { InsertSupportMessage, SupportMessage, WalletUser } from "@shared/schema";
 import { isFortressSovereignAddress } from "./fortress-admin";
 import {
   resolveWalletAddressFromRequest,
@@ -13,8 +13,22 @@ import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
 
 const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION || "vault_videos";
-const CRM_COLL = process.env.MONGO_CRM_COLLECTION || "crm_users";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
+
+/** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `crm_users`). */
+export function mongoCrmUsersCollectionName(): string {
+  return (
+    process.env.MONGO_USERS_COLLECTION?.trim() ||
+    process.env.MONGO_CRM_COLLECTION?.trim() ||
+    "crm_users"
+  );
+}
+
+let vaultDb: Db | null = null;
+
+export function getVaultDb(): Db | null {
+  return vaultDb;
+}
 
 export type MongoVaultHandle = {
   handleGetVideos(req: Request, res: Response): Promise<void>;
@@ -68,9 +82,93 @@ function rowToSupportMessage(doc: Document): SupportMessage {
   };
 }
 
+function crmDisplayTier(tier: string | undefined): "Free" | "Pro" | "Mentor" {
+  const t = (tier || "free").toLowerCase();
+  if (t === "mentoring" || t === "elite" || t === "mentor") return "Mentor";
+  if (t === "pro") return "Pro";
+  if (t === "free") return "Free";
+  return "Free";
+}
+
+function crmSubscriptionStatusFromWallet(user: WalletUser): "Active" | "Expired" {
+  const t = (user.subscriptionTier || "free").toLowerCase();
+  if (t === "free") return "Active";
+  const exp = user.subscriptionExpiresAt;
+  const expMs = exp instanceof Date ? exp.getTime() : exp ? new Date(exp as unknown as string).getTime() : NaN;
+  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+  return user.subscriptionActive && expOk ? "Active" : "Expired";
+}
+
+/** Upsert CRM / users document when Mongo vault DB is connected (wallet connect, admin, Stripe sync). */
+export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<void> {
+  if (!vaultDb) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const wallet = user.walletAddress.toLowerCase();
+  const now = new Date();
+  const created =
+    user.createdAt instanceof Date ? user.createdAt : new Date(user.createdAt || now);
+  const doc: Record<string, unknown> = {
+    wallet,
+    walletAddress: wallet,
+    email: user.email ?? null,
+    joinDate: created,
+    createdAt: created,
+    updatedAt: now,
+    subTier: crmDisplayTier(user.subscriptionTier),
+    subscriptionTier: user.subscriptionTier,
+    subscriptionActive: user.subscriptionActive,
+    subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+    manualProOverride: user.manualProOverride ?? false,
+    status: crmSubscriptionStatusFromWallet(user),
+  };
+  await coll.updateOne(
+    { $or: [{ wallet }, { walletAddress: wallet }] },
+    { $set: doc, $setOnInsert: { source: "equilibrium_app" } },
+    { upsert: true },
+  );
+}
+
+function mongoDocToCrmRow(u: Document) {
+  const wallet = String(u.wallet ?? u.walletAddress ?? "");
+  const tierRaw = String(u.subTier ?? u.subscriptionTier ?? "free");
+  const displayTier = crmDisplayTier(tierRaw);
+  let status: "Active" | "Expired" = "Active";
+  if (u.status === "Active" || u.status === "Expired") {
+    status = u.status as "Active" | "Expired";
+  } else {
+    const t = tierRaw.toLowerCase();
+    if (t === "free") status = "Active";
+    else {
+      const active = Boolean(u.subscriptionActive);
+      const exp = u.subscriptionExpiresAt;
+      const expMs =
+        exp instanceof Date ? exp.getTime() : exp ? new Date(String(exp)).getTime() : NaN;
+      const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+      status = active && expOk ? "Active" : "Expired";
+    }
+  }
+  return {
+    wallet,
+    email: u.email != null && u.email !== "" ? String(u.email) : null,
+    joinDate:
+      u.joinDate != null
+        ? u.joinDate instanceof Date
+          ? u.joinDate.toISOString()
+          : String(u.joinDate)
+        : u.createdAt instanceof Date
+          ? u.createdAt.toISOString()
+          : u.createdAt != null
+            ? String(u.createdAt)
+            : null,
+    subTier: displayTier,
+    status,
+    manualProOverride: Boolean(u.manualProOverride),
+  };
+}
+
 function createHandle(db: Db): MongoVaultHandle {
   const videos: Collection<Document> = db.collection(VIDEOS_COLL);
-  const crm: Collection<Document> = db.collection(CRM_COLL);
+  const crm: Collection<Document> = db.collection(mongoCrmUsersCollectionName());
   const tickets: Collection<Document> = db.collection(SUPPORT_COLL);
 
   return {
@@ -469,6 +567,7 @@ export function resolveMongoVaultUri(): string {
 
 export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
   mongoVaultBackendActive = false;
+  vaultDb = null;
   const uri = resolveMongoVaultUri();
   if (!uri) return null;
   try {
@@ -479,11 +578,13 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
     }
     const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
     const db = cachedClient.db(dbName);
+    vaultDb = db;
     mongoVaultBackendActive = true;
     return createHandle(db);
   } catch (e) {
     console.error("[mongo-vault] MongoDB connection failed:", e);
     mongoVaultBackendActive = false;
+    vaultDb = null;
     cachedClient = null;
     return null;
   }

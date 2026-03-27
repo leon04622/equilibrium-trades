@@ -54,6 +54,7 @@ export function useSubscription() {
       case "video_library":
         return !!isPro;
       case "heatmap":
+        return !!isPro;
       case "coaching":
         return !!isMentoring;
       default:

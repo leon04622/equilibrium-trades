@@ -670,8 +670,7 @@ export default function AdminDashboard() {
                     <CardTitle>Support Inbox</CardTitle>
                     <CardDescription>
                       Messages from the chat bubble are stored in <code className="text-[10px]">support_tickets</code>{" "}
-                      and trigger Telegram when <code className="text-[10px]">TELEGRAM_BOT_TOKEN</code> +{" "}
-                      <code className="text-[10px]">TELEGRAM_CHAT_ID</code> are set. Live updates: WebSocket + poll.
+                      (MongoDB or PostgreSQL). Live updates: WebSocket + poll.
                     </CardDescription>
                   </div>
                   <Button
@@ -743,7 +742,7 @@ export default function AdminDashboard() {
                   <CardTitle>Reply</CardTitle>
                   <CardDescription>
                     User messages arrive via Chat Support; ingest uses <code className="text-[10px]">POST /api/support/send</code>{" "}
-                    (Telegram when configured). Replies use WebSocket + SSE.
+                    Replies use WebSocket + SSE; messages persist in your database (Mongo or Postgres).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">

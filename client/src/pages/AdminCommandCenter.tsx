@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, type ChangeEvent } from "react";
+import { useMemo, useState, useCallback, useEffect, type ChangeEvent } from "react";
 import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,8 +11,9 @@ import {
   ArrowUpDown,
   Shield,
   Upload,
+  MessageSquare,
 } from "lucide-react";
-import type { TutorialVideo } from "@shared/schema";
+import type { TutorialVideo, SupportMessage } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,8 @@ import { useUpload } from "@/hooks/use-upload";
 import { parseVideosApiList } from "@/lib/video-vault";
 import { FORTRESS_SOVEREIGN_WALLET } from "@/lib/fortress-admin";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+import { linkifyPlainText } from "@/lib/linkify-message";
 
 const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
 
@@ -43,9 +46,11 @@ type CrmRow = {
   email: string | null;
   joinDate: string | null;
   subTier: string;
+  status?: string;
+  manualProOverride?: boolean;
 };
 
-type SortKey = "wallet" | "email" | "joinDate" | "subTier";
+type SortKey = "wallet" | "email" | "joinDate" | "subTier" | "status";
 
 function useSovereignApi(address: string | null | undefined): AxiosInstance {
   return useMemo(() => {
@@ -76,8 +81,13 @@ function sortCrmRows(rows: CrmRow[], key: SortKey, dir: "asc" | "desc"): CrmRow[
       vb = b.joinDate || "";
       return va.localeCompare(vb) * mult;
     }
-    va = String(a[key] ?? "").toLowerCase();
-    vb = String(b[key] ?? "").toLowerCase();
+    if (key === "status") {
+      va = (a.status || "").toLowerCase();
+      vb = (b.status || "").toLowerCase();
+      return va.localeCompare(vb) * mult;
+    }
+    va = String(a[key as "wallet" | "email" | "subTier"] ?? "").toLowerCase();
+    vb = String(b[key as "wallet" | "email" | "subTier"] ?? "").toLowerCase();
     return va.localeCompare(vb) * mult;
   });
 }
@@ -89,7 +99,8 @@ export default function AdminCommandCenter() {
   const api = useSovereignApi(address);
   const { uploadFile, isUploading: isVideoFileUploading, error: videoUploadHookError } = useUpload();
 
-  const [tab, setTab] = useState("videos");
+  const [tab, setTab] = useState("crm");
+  const [crmSearch, setCrmSearch] = useState("");
   const [crmSort, setCrmSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "joinDate",
     dir: "desc",
@@ -114,10 +125,92 @@ export default function AdminCommandCenter() {
     },
   });
 
+  const filteredCrm = useMemo(() => {
+    const q = crmSearch.trim().toLowerCase();
+    if (!q) return crmUsers;
+    return crmUsers.filter(
+      (r) =>
+        r.wallet.toLowerCase().includes(q) ||
+        (r.email && r.email.toLowerCase().includes(q)) ||
+        (r.subTier && r.subTier.toLowerCase().includes(q)),
+    );
+  }, [crmUsers, crmSearch]);
+
   const sortedCrm = useMemo(
-    () => sortCrmRows(crmUsers, crmSort.key, crmSort.dir),
-    [crmUsers, crmSort],
+    () => sortCrmRows(filteredCrm, crmSort.key, crmSort.dir),
+    [filteredCrm, crmSort],
   );
+
+  const manualProMutation = useMutation({
+    mutationFn: async ({ wallet, enable }: { wallet: string; enable: boolean }) => {
+      const { data, status } = await api.patch(`/api/admin/users/${encodeURIComponent(wallet)}/subscription`, {
+        walletAddress: wallet,
+        subscriptionTier: enable ? "pro" : "free",
+        subscriptionActive: enable,
+        manualProOverride: enable,
+      });
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) {
+        throw new Error((data as { error?: string })?.error || "Update failed");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["fortress-crm-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+    },
+  });
+
+  const {
+    data: supportFeed = [],
+    isLoading: supportLoading,
+    isError: supportError,
+    error: supportErrorObj,
+    refetch: refetchSupport,
+  } = useQuery({
+    queryKey: ["fortress-support-feed", address],
+    enabled: !!address && tab === "support",
+    refetchInterval: tab === "support" ? 4000 : false,
+    queryFn: async () => {
+      const { data, status } = await api.get<SupportMessage[]>("/api/support", { params: { limit: 800 } });
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status !== 200) throw new Error("Failed to load support");
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
+  useEffect(() => {
+    if (!address || tab !== "support") return;
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(`${proto}//${window.location.host}/ws/support-chat`);
+      ws.onopen = () => {
+        ws?.send(
+          JSON.stringify({
+            type: "subscribe",
+            scope: "admin_inbox",
+            walletAddress: address,
+          }),
+        );
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as { type?: string; message?: { id?: string } };
+          if (data?.type === "support_message" && data?.message?.id) {
+            void queryClient.invalidateQueries({ queryKey: ["fortress-support-feed"] });
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      ws?.close();
+    };
+  }, [address, tab, queryClient]);
 
   const toggleSort = (key: SortKey) => {
     setCrmSort((prev) =>
@@ -276,16 +369,165 @@ export default function AdminCommandCenter() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <TabsList className="grid w-full grid-cols-3 max-w-2xl">
+          <TabsTrigger value="crm" className="gap-1.5">
+            <Users className="h-4 w-4 shrink-0" />
+            Live CRM
+          </TabsTrigger>
           <TabsTrigger value="videos" className="gap-1.5">
             <Video className="h-4 w-4 shrink-0" />
             Videos
           </TabsTrigger>
-          <TabsTrigger value="crm" className="gap-1.5">
-            <Users className="h-4 w-4 shrink-0" />
-            User CRM
+          <TabsTrigger value="support" className="gap-1.5">
+            <MessageSquare className="h-4 w-4 shrink-0" />
+            Support
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="crm">
+          <Card className="border-border/80 bg-card/50">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>Live CRM</CardTitle>
+                <CardDescription>
+                  MongoDB users collection (or Postgres wallet_users) — wallet, email, tier, subscription status.
+                </CardDescription>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => void refetchCrm()} aria-label="Refresh CRM">
+                <RefreshCw className={cn("h-4 w-4", crmLoading && "animate-spin")} />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="max-w-md space-y-2">
+                <Label htmlFor="crm-search">Search</Label>
+                <Input
+                  id="crm-search"
+                  placeholder="Wallet or email…"
+                  value={crmSearch}
+                  onChange={(e) => setCrmSearch(e.target.value)}
+                />
+              </div>
+              {crmError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
+                  <p className="font-medium text-destructive">Could not load CRM</p>
+                  <p className="text-muted-foreground">
+                    {crmErrorObj instanceof Error ? crmErrorObj.message : String(crmErrorObj)}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetchCrm()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : crmLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading…
+                </div>
+              ) : (
+                <ScrollArea className="h-[min(520px,60vh)]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[120px]">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("wallet")}
+                          >
+                            Wallet
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("email")}
+                          >
+                            Email
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("joinDate")}
+                          >
+                            Join date
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("subTier")}
+                          >
+                            Tier
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("status")}
+                          >
+                            Status
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-right whitespace-nowrap">Manual Pro</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sortedCrm.map((row) => {
+                        const manualOn = !!row.manualProOverride;
+                        return (
+                          <TableRow key={row.wallet}>
+                            <TableCell className="font-mono text-xs align-top break-all max-w-[180px]">
+                              {row.wallet}
+                            </TableCell>
+                            <TableCell className="text-sm align-top">{row.email || "—"}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground align-top whitespace-nowrap">
+                              {row.joinDate ? new Date(row.joinDate).toLocaleDateString() : "—"}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <Badge variant="secondary" className="text-xs">
+                                {row.subTier || "Free"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="align-top text-xs">{row.status ?? "—"}</TableCell>
+                            <TableCell className="align-top text-right">
+                              <Switch
+                                checked={manualOn}
+                                disabled={manualProMutation.isPending}
+                                onCheckedChange={(enable) => {
+                                  manualProMutation.mutate(
+                                    { wallet: row.wallet, enable },
+                                    {
+                                      onError: (err: Error) =>
+                                        toast({
+                                          title: "Update failed",
+                                          description: err.message,
+                                          variant: "destructive",
+                                        }),
+                                    },
+                                  );
+                                }}
+                                aria-label={`Manual Pro for ${row.wallet.slice(0, 8)}`}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="videos" className="space-y-6">
           <Card className="border-border/80 bg-card/50">
@@ -480,97 +722,55 @@ export default function AdminCommandCenter() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="crm">
+        <TabsContent value="support" className="space-y-4">
           <Card className="border-border/80 bg-card/50">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>User CRM</CardTitle>
-                <CardDescription>GET /api/crm/users — wallet_users</CardDescription>
+                <CardTitle>Support feed</CardTitle>
+                <CardDescription>
+                  All messages from the Chat Support bubble — stored in MongoDB or Postgres (no third-party inbox).
+                </CardDescription>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => void refetchCrm()} aria-label="Refresh CRM">
-                <RefreshCw className={cn("h-4 w-4", crmLoading && "animate-spin")} />
+              <Button variant="ghost" size="icon" onClick={() => void refetchSupport()} aria-label="Refresh support">
+                <RefreshCw className={cn("h-4 w-4", supportLoading && "animate-spin")} />
               </Button>
             </CardHeader>
             <CardContent>
-              {crmError ? (
+              {supportError ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
-                  <p className="font-medium text-destructive">Could not load CRM</p>
+                  <p className="font-medium text-destructive">Could not load support</p>
                   <p className="text-muted-foreground">
-                    {crmErrorObj instanceof Error ? crmErrorObj.message : String(crmErrorObj)}
+                    {supportErrorObj instanceof Error ? supportErrorObj.message : String(supportErrorObj)}
                   </p>
-                  <Button variant="outline" size="sm" onClick={() => void refetchCrm()}>
+                  <Button variant="outline" size="sm" onClick={() => void refetchSupport()}>
                     Retry
                   </Button>
                 </div>
-              ) : crmLoading ? (
+              ) : supportLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading…
                 </div>
+              ) : supportFeed.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No support messages yet.</p>
               ) : (
-                <ScrollArea className="h-[min(520px,60vh)]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[44%]">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
-                            onClick={() => toggleSort("wallet")}
-                          >
-                            Wallet
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                          </button>
-                        </TableHead>
-                        <TableHead>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
-                            onClick={() => toggleSort("email")}
-                          >
-                            Email
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                          </button>
-                        </TableHead>
-                        <TableHead>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
-                            onClick={() => toggleSort("joinDate")}
-                          >
-                            Join date
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                          </button>
-                        </TableHead>
-                        <TableHead>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
-                            onClick={() => toggleSort("subTier")}
-                          >
-                            Tier
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-                          </button>
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sortedCrm.map((row) => (
-                        <TableRow key={row.wallet}>
-                          <TableCell className="font-mono text-xs align-top break-all">{row.wallet}</TableCell>
-                          <TableCell className="text-sm align-top">{row.email || "—"}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground align-top whitespace-nowrap">
-                            {row.joinDate ? new Date(row.joinDate).toLocaleDateString() : "—"}
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <Badge variant="secondary" className="text-xs">
-                              {row.subTier || "free"}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <ScrollArea className="h-[min(560px,65vh)] pr-3">
+                  <ul className="space-y-3">
+                    {supportFeed.map((m) => (
+                      <li key={m.id} className="rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
+                        <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-[10px]">
+                            {m.senderType}
+                          </Badge>
+                          <span>{m.createdAt ? new Date(m.createdAt).toLocaleString() : "—"}</span>
+                        </div>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground break-all">{m.conversationId}</p>
+                        <p className="mt-2 whitespace-pre-wrap break-words">
+                          {linkifyPlainText(m.message, "text-primary underline-offset-2 hover:underline break-all")}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
                 </ScrollArea>
               )}
             </CardContent>

@@ -1,5 +1,13 @@
 /**
- * Pro Educational Vault (`/videos`). Implementation lives in `VideoVault.tsx`;
- * this module exists so launch docs and imports can use the “Educational Vault” name.
+ * Pro Educational Vault (`/videos`). Gated by {@link SubscriptionGuard}; player UI stays in `VideoVault.tsx`.
  */
-export { default } from "./VideoVault";
+import { SubscriptionGuard } from "@/components/SubscriptionGuard";
+import VideoVault from "./VideoVault";
+
+export default function EducationalVault() {
+  return (
+    <SubscriptionGuard>
+      <VideoVault />
+    </SubscriptionGuard>
+  );
+}

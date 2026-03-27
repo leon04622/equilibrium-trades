@@ -29,7 +29,7 @@ import {
 } from "./master-admin";
 import { issueCommandCenterWsToken } from "./command-center-ws-token";
 import { pushAdminLog } from "./admin-log-bus";
-import { tryConnectMongoVault, type MongoVaultHandle } from "./mongo-vault";
+import { tryConnectMongoVault, upsertMongoCrmUserFromWallet, type MongoVaultHandle } from "./mongo-vault";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -41,6 +41,35 @@ import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 import { isFortressSovereignAddress } from "./fortress-admin";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
+
+function crmTierLabel(tier: string | undefined): "Free" | "Pro" | "Mentor" {
+  const t = (tier || "free").toLowerCase();
+  if (t === "mentoring" || t === "elite") return "Mentor";
+  if (t === "pro") return "Pro";
+  return "Free";
+}
+
+function crmStatusFromSubscriptionRow(u: {
+  subscriptionTier: string;
+  subscriptionActive: boolean;
+  subscriptionExpiresAt: Date | null;
+}): "Active" | "Expired" {
+  const t = (u.subscriptionTier || "free").toLowerCase();
+  if (t === "free") return "Active";
+  const exp = u.subscriptionExpiresAt;
+  const expMs = exp instanceof Date ? exp.getTime() : NaN;
+  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+  return u.subscriptionActive && expOk ? "Active" : "Expired";
+}
+
+async function syncWalletUserToMongoCrm(walletAddress: string): Promise<void> {
+  try {
+    const u = await storage.getWalletUser(walletAddress);
+    if (u) await upsertMongoCrmUserFromWallet(u);
+  } catch (e) {
+    console.error("[routes] Mongo CRM user sync:", e);
+  }
+}
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -580,7 +609,13 @@ export async function registerRoutes(
               : u.createdAt != null
                 ? String(u.createdAt)
                 : null,
-          subTier: u.subscriptionTier ?? "free",
+          subTier: crmTierLabel(u.subscriptionTier),
+          status: crmStatusFromSubscriptionRow({
+            subscriptionTier: u.subscriptionTier,
+            subscriptionActive: u.subscriptionActive,
+            subscriptionExpiresAt: u.subscriptionExpiresAt,
+          }),
+          manualProOverride: u.manualProOverride ?? false,
         })),
       );
     } catch (e) {
@@ -627,15 +662,18 @@ export async function registerRoutes(
         if (emailIn) {
           try {
             const updated = await storage.updateWalletUserEmail(validated.data.walletAddress, emailIn);
+            const finalUser = updated ?? existing;
+            void syncWalletUserToMongoCrm(validated.data.walletAddress);
             return res.json({
               success: true,
               message: "User already registered; email updated for CRM.",
-              user: updated ?? existing,
+              user: finalUser,
             });
           } catch {
             /* fall through */
           }
         }
+        void syncWalletUserToMongoCrm(validated.data.walletAddress);
         return res.json({
           success: true,
           message: "User already registered",
@@ -644,6 +682,7 @@ export async function registerRoutes(
       }
 
       const user = await storage.createWalletUser(validated.data);
+      void syncWalletUserToMongoCrm(validated.data.walletAddress);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error registering wallet user:", error);
@@ -727,6 +766,7 @@ export async function registerRoutes(
         user = await storage.updateWalletUserApproval(normalizedWallet, true);
       }
 
+      void syncWalletUserToMongoCrm(normalizedWallet);
       res.json({ 
         success: true, 
         message: "Builder code approved",
@@ -747,6 +787,7 @@ export async function registerRoutes(
       }
       const normalized = walletAddress.toLowerCase();
       const user = await storage.recordInstantTradingHandshake(normalized);
+      void syncWalletUserToMongoCrm(normalized);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error recording instant trading handshake:", error);
@@ -771,7 +812,8 @@ export async function registerRoutes(
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
+      void syncWalletUserToMongoCrm(req.params.walletAddress);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating wallet user email:", error);
@@ -802,6 +844,7 @@ export async function registerRoutes(
             stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null
           );
         }
+        void syncWalletUserToMongoCrm(walletAddress);
         return res.json(stripeSubscription);
       }
 
@@ -884,6 +927,7 @@ export async function registerRoutes(
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
 
+      void syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating subscription:", error);
@@ -1385,6 +1429,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
+      void syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("command-center subscription:", error);
@@ -1540,6 +1585,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
+      void syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("admin-equilibrium subscription:", error);
@@ -1730,6 +1776,7 @@ export async function registerRoutes(
       if (!walletUser) {
         walletUser = await storage.createWalletUser({ walletAddress, email });
       }
+      void syncWalletUserToMongoCrm(walletAddress);
 
       // Create or get Stripe customer
       let customerId: string;

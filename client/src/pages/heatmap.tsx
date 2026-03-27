@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { SubscriptionGate } from "@/components/subscription-gate";
+import { SubscriptionGuard } from "@/components/SubscriptionGuard";
 
 interface Ticker {
   coin: string;
@@ -178,12 +178,8 @@ function HeatmapContent() {
 
 export default function Heatmap() {
   return (
-    <SubscriptionGate 
-      feature="heatmap"
-      title="Liquidity Heatmap"
-      description="Upgrade to Elite Mentoring to access the real-time liquidity heatmap with order flow visualization."
-    >
+    <SubscriptionGuard>
       <HeatmapContent />
-    </SubscriptionGate>
+    </SubscriptionGuard>
   );
 }

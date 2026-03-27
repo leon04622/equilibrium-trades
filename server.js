@@ -4,21 +4,25 @@
  * Loads the compiled application from `dist/index.cjs` (same bundle as `npm start`).
  * Run `npm run build` before using this file in production.
  *
- * ── MongoDB (Admin Command Center, Educational Vault, CRM, Support) ──
- * When `MONGO_VAULT_URI` or `MONGODB_URI` is set to a real Mongo URL (mongodb:// or
- * mongodb+srv://), videos, CRM, and support use MongoDB via `server/mongo-vault.ts`.
- * Postgres (`DATABASE_URL`) is separate — do not use the same string for both.
+ * ── Data & CRM ──
+ * • PostgreSQL (`DATABASE_URL`): wallet_users, subscriptions, support_tickets, tutorial_videos, etc.
+ * • MongoDB (`MONGO_VAULT_URI` or `MONGODB_URI` as mongodb://…): optional vault + unified CRM `users` store
+ *   (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `crm_users`) with:
+ *   wallet, email, joinDate, subTier (Free/Pro/Mentor), status (Active/Expired), manualProOverride.
+ *   Rows upsert on wallet register, email update, admin subscription patch, Stripe subscription poll, checkout.
+ * • Support chat messages stay in your database only (Mongo or Postgres) — review in Admin → Support tab.
  *
- * Environment:
- *   MONGO_VAULT_URI      — preferred for vault/CRM/support (mongodb+srv://…)
- *   MONGODB_URI          — alternative if it is a Mongo URL (not used as Postgres anymore)
- *   MONGODB_DB_NAME      — optional, default `equilibrium`
- *   MONGO_VIDEOS_COLLECTION   — optional, default `vault_videos`
- *   MONGO_CRM_COLLECTION      — optional, default `crm_users`
- *   MONGO_SUPPORT_COLLECTION  — optional, default `support_tickets`
+ * Sovereign admin (Command Center, CRM, videos, support inbox): `0x115560812df8e7515eecc957b6796531e936edd9`
+ * — see `server/fortress-admin.ts` and `client/src/lib/fortress-admin.ts`.
  *
- * Sovereign admin wallet (videos / CRM / support inbox) is hardcoded in
- * `server/fortress-admin.ts` and `client/src/lib/fortress-admin.ts`.
+ * Environment (see also `.env.example`):
+ *   DATABASE_URL           — PostgreSQL URI (not Mongo)
+ *   MONGO_VAULT_URI        — preferred Mongo for vault/CRM/support
+ *   MONGODB_URI            — alternative Mongo URL
+ *   MONGODB_DB_NAME        — default `equilibrium`
+ *   MONGO_USERS_COLLECTION — optional; overrides CRM collection name for user documents
+ *   MONGO_CRM_COLLECTION   — default `crm_users` when MONGO_USERS_COLLECTION unset
+ *   MONGO_VIDEOS_COLLECTION, MONGO_SUPPORT_COLLECTION — optional collection names
  */
 import "dotenv/config";
 
