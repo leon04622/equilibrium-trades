@@ -175,14 +175,16 @@ async function syncWalletUserToMongoCrm(walletAddress: string): Promise<void> {
   }
 }
 
-function mongoSubscriptionSnapshotToPayload(
-  mongo: NonNullable<Awaited<ReturnType<typeof fetchMongoCrmSubscriptionSnapshot>>>,
-): {
+type WalletSubscriptionPayload = {
   tier: "free" | "pro" | "mentoring" | "elite";
   active: boolean;
   expiresAt: string | null;
   subTier: string;
-} {
+};
+
+function mongoSubscriptionSnapshotToPayload(
+  mongo: NonNullable<Awaited<ReturnType<typeof fetchMongoCrmSubscriptionSnapshot>>>,
+): WalletSubscriptionPayload {
   const t = mongo.subscriptionTier.toLowerCase();
   let tier: "free" | "pro" | "mentoring" | "elite" = "free";
   if (t === "pro") tier = "pro";
@@ -190,6 +192,14 @@ function mongoSubscriptionSnapshotToPayload(
   const exp = mongo.subscriptionExpiresAt;
   const expMs = exp instanceof Date ? exp.getTime() : NaN;
   const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+  if (mongo.manualProOverride && tier !== "free") {
+    return {
+      tier,
+      active: true,
+      expiresAt: exp instanceof Date ? exp.toISOString() : null,
+      subTier: mongo.subTier,
+    };
+  }
   const active = mongo.subscriptionActive && tier !== "free" && expOk;
   return {
     tier,
@@ -199,55 +209,28 @@ function mongoSubscriptionSnapshotToPayload(
   };
 }
 
-/** Single source of truth for subscription UI (Postgres → Stripe → Mongo CRM fallback). */
-async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise<{
-  tier: "free" | "pro" | "mentoring" | "elite";
-  active: boolean;
-  expiresAt: string | null;
-  subTier: string;
-}> {
-  let walletAddress = walletAddressRaw.trim();
-  try {
-    walletAddress = decodeURIComponent(walletAddress);
-  } catch {
-    /* ignore */
-  }
-  walletAddress = walletAddress.trim().toLowerCase();
-  if (!/^0x[a-f0-9]{40}$/.test(walletAddress)) {
-    return { tier: "free", active: false, expiresAt: null, subTier: "Free" };
-  }
+function tierRank(t: WalletSubscriptionPayload["tier"]): number {
+  if (t === "mentoring" || t === "elite") return 3;
+  if (t === "pro") return 2;
+  return 1;
+}
 
-  if (isAdminAddress(walletAddress)) {
-    return { tier: "mentoring", active: true, expiresAt: null, subTier: "Mentor" };
-  }
+/** Prefer highest paid tier among Stripe, Postgres, and Mongo CRM (admin grants must not be ignored). */
+function pickBestPaidSubscriptionPayload(
+  candidates: (WalletSubscriptionPayload | null | undefined)[],
+): WalletSubscriptionPayload | null {
+  const paid = candidates.filter(
+    (c): c is WalletSubscriptionPayload =>
+      !!c && c.active && tierRank(c.tier) >= 2,
+  );
+  if (paid.length === 0) return null;
+  paid.sort((a, b) => tierRank(b.tier) - tierRank(a.tier));
+  return paid[0];
+}
 
-  const stripeSubscription = await stripeService.getActiveSubscriptionByWalletAddress(walletAddress);
-  if (stripeSubscription) {
-    const user = await storage.getWalletUser(walletAddress);
-    if (user && (user.subscriptionTier !== stripeSubscription.tier || !user.subscriptionActive)) {
-      await storage.updateWalletUserSubscription(
-        walletAddress,
-        stripeSubscription.tier,
-        true,
-        stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null,
-      );
-    }
-    void syncWalletUserToMongoCrm(walletAddress);
-    return {
-      tier: stripeSubscription.tier,
-      active: !!stripeSubscription.active,
-      expiresAt: stripeSubscription.expiresAt ?? null,
-      subTier: crmTierLabel(stripeSubscription.tier),
-    };
-  }
-
-  const user = await storage.getWalletUser(walletAddress);
-  if (!user) {
-    const mongo = await fetchMongoCrmSubscriptionSnapshot(walletAddress);
-    if (mongo) return mongoSubscriptionSnapshotToPayload(mongo);
-    return { tier: "free", active: false, expiresAt: null, subTier: "Free" };
-  }
-
+function subscriptionPayloadFromPostgresUser(
+  user: NonNullable<Awaited<ReturnType<typeof storage.getWalletUser>>>,
+): WalletSubscriptionPayload | null {
   if (user.manualProOverride && user.subscriptionTier !== "free") {
     return {
       tier: user.subscriptionTier as "pro" | "mentoring" | "elite",
@@ -256,8 +239,11 @@ async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise
       subTier: crmTierLabel(user.subscriptionTier),
     };
   }
-
   if (user.subscriptionActive && user.subscriptionTier !== "free") {
+    const exp = user.subscriptionExpiresAt;
+    const expMs = exp instanceof Date ? exp.getTime() : NaN;
+    const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+    if (!expOk) return null;
     return {
       tier: user.subscriptionTier as "pro" | "mentoring" | "elite",
       active: true,
@@ -265,7 +251,76 @@ async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise
       subTier: crmTierLabel(user.subscriptionTier),
     };
   }
+  return null;
+}
 
+const FREE_WALLET_SUBSCRIPTION_PAYLOAD: WalletSubscriptionPayload = {
+  tier: "free",
+  active: false,
+  expiresAt: null,
+  subTier: "Free",
+};
+
+/** Single source of truth for subscription UI — merges Stripe, Postgres, and Mongo CRM. */
+async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise<WalletSubscriptionPayload> {
+  let walletAddress = walletAddressRaw.trim();
+  try {
+    walletAddress = decodeURIComponent(walletAddress);
+  } catch {
+    /* ignore */
+  }
+  walletAddress = walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(walletAddress)) {
+    return FREE_WALLET_SUBSCRIPTION_PAYLOAD;
+  }
+
+  if (isAdminAddress(walletAddress)) {
+    return { tier: "mentoring", active: true, expiresAt: null, subTier: "Mentor" };
+  }
+
+  const mongoSnap = await fetchMongoCrmSubscriptionSnapshot(walletAddress);
+  const mongoPayload = mongoSnap ? mongoSubscriptionSnapshotToPayload(mongoSnap) : null;
+
+  const stripeSubscription = await stripeService.getActiveSubscriptionByWalletAddress(walletAddress);
+  if (stripeSubscription) {
+    const u = await storage.getWalletUser(walletAddress);
+    if (u && (u.subscriptionTier !== stripeSubscription.tier || !u.subscriptionActive)) {
+      await storage.updateWalletUserSubscription(
+        walletAddress,
+        stripeSubscription.tier,
+        true,
+        stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null,
+      );
+    }
+    void syncWalletUserToMongoCrm(walletAddress);
+  }
+
+  const user = await storage.getWalletUser(walletAddress);
+  const pgPayload = user ? subscriptionPayloadFromPostgresUser(user) : null;
+
+  const stripePayload = stripeSubscription
+    ? {
+        tier: stripeSubscription.tier,
+        active: !!stripeSubscription.active,
+        expiresAt: stripeSubscription.expiresAt ?? null,
+        subTier: crmTierLabel(stripeSubscription.tier),
+      }
+    : null;
+
+  const best = pickBestPaidSubscriptionPayload([stripePayload, pgPayload, mongoPayload]);
+  if (best) return best;
+
+  if (user) {
+    return {
+      tier: "free",
+      active: false,
+      expiresAt: null,
+      subTier: crmTierLabel(user.subscriptionTier ?? undefined),
+    };
+  }
+  if (mongoSnap) {
+    return { tier: "free", active: false, expiresAt: null, subTier: mongoSnap.subTier };
+  }
   return { tier: "free", active: false, expiresAt: null, subTier: crmTierLabel("free") };
 }
 

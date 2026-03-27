@@ -30,6 +30,37 @@ export function getVaultDb(): Db | null {
   return vaultDb;
 }
 
+const LEGACY_CRM_USERS_COLLECTION = "crm_users";
+
+function inferSubscriptionTierString(doc: Document): string {
+  const raw = String(doc.subscriptionTier ?? "").trim().toLowerCase();
+  if (raw && raw !== "free") return raw;
+  const st = doc.subTier != null ? String(doc.subTier).trim().toLowerCase() : "";
+  if (st === "pro") return "pro";
+  if (st === "mentor" || st === "mentoring" || st === "elite") return "mentoring";
+  return raw || "free";
+}
+
+/** Find CRM user doc in primary collection, then legacy `crm_users` if names differ. */
+export async function findCrmUserDocumentByWallet(walletAddress: string): Promise<Document | null> {
+  if (!vaultDb) return null;
+  const w = walletAddress.trim().toLowerCase();
+  const filter = { $or: [{ wallet: w }, { walletAddress: w }] };
+  const primary = mongoCrmUsersCollectionName();
+  const tryCollections =
+    primary === LEGACY_CRM_USERS_COLLECTION
+      ? [primary]
+      : [primary, LEGACY_CRM_USERS_COLLECTION];
+  const seen = new Set<string>();
+  for (const name of tryCollections) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const doc = await vaultDb.collection(name).findOne(filter);
+    if (doc) return doc;
+  }
+  return null;
+}
+
 export type ScannerWatchlistPrefs = {
   allMarkets: boolean;
   coins: string[];
@@ -53,9 +84,7 @@ export async function fetchMongoScannerWatchlistPrefs(
   walletAddress: string,
 ): Promise<ScannerWatchlistPrefs | null> {
   if (!vaultDb) return null;
-  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
-  const w = walletAddress.trim().toLowerCase();
-  const doc = await coll.findOne({ $or: [{ wallet: w }, { walletAddress: w }] });
+  const doc = await findCrmUserDocumentByWallet(walletAddress);
   if (!doc) return null;
   const coins = Array.isArray(doc.scannerWatchlistCoins)
     ? doc.scannerWatchlistCoins.map((c: unknown) => String(c).trim()).filter(Boolean)
@@ -69,6 +98,7 @@ export async function upsertMongoScannerWatchlistPrefs(
   prefs: ScannerWatchlistPrefs,
 ): Promise<{ ok: boolean }> {
   if (!vaultDb) return { ok: false };
+  /** Always write to the configured primary CRM collection (not legacy read-only alias). */
   const coll = vaultDb.collection(mongoCrmUsersCollectionName());
   const w = walletAddress.trim().toLowerCase();
   const now = new Date();
@@ -205,13 +235,12 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
   subscriptionActive: boolean;
   subscriptionExpiresAt: Date | null;
   subTier: string;
+  manualProOverride: boolean;
 } | null> {
   if (!vaultDb) return null;
-  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
-  const w = walletAddress.trim().toLowerCase();
-  const doc = await coll.findOne({ $or: [{ wallet: w }, { walletAddress: w }] });
+  const doc = await findCrmUserDocumentByWallet(walletAddress);
   if (!doc) return null;
-  const tierRaw = String(doc.subscriptionTier ?? "free").toLowerCase();
+  const tierRaw = inferSubscriptionTierString(doc);
   const active = Boolean(doc.subscriptionActive);
   const expRaw = doc.accessExpires ?? doc.subscriptionExpiresAt;
   let subscriptionExpiresAt: Date | null = null;
@@ -229,6 +258,7 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
     subscriptionActive: active,
     subscriptionExpiresAt,
     subTier,
+    manualProOverride: Boolean(doc.manualProOverride),
   };
 }
 

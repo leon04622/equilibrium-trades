@@ -24,8 +24,8 @@ export function useSubscription() {
   const { data: subscription, isLoading, error, refetch } = useQuery<SubscriptionStatus>({
     queryKey: ["/api/user-status", address],
     enabled: isConnected && !!address,
-    staleTime: 45_000,
-    refetchOnMount: true,
+    staleTime: 15_000,
+    refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
       const r = await checkSubscription(address!);
