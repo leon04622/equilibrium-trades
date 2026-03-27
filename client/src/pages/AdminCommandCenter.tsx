@@ -113,6 +113,7 @@ export default function AdminCommandCenter() {
   const { uploadFile, isUploading: isVideoFileUploading, error: videoUploadHookError } = useUpload();
 
   const [tab, setTab] = useState("crm");
+  const [crmJournalWallet, setCrmJournalWallet] = useState<string | null>(null);
   const [crmSearch, setCrmSearch] = useState("");
   const [crmSort, setCrmSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "joinDate",
