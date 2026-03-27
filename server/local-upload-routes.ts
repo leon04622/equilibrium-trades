@@ -1,10 +1,8 @@
 import type { Express, Request, Response } from "express";
 import express from "express";
 import { randomUUID } from "crypto";
-import { createReadStream } from "fs";
 import fs from "fs/promises";
 import path from "path";
-import parseRange from "range-parser";
 
 /**
  * Presigned-style upload flow without GCS: same JSON shape as Replit object storage
@@ -32,63 +30,6 @@ async function resolveUploadedFile(id: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function contentTypeForVideoFile(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  const map: Record<string, string> = {
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".m4v": "video/x-m4v",
-    ".ogv": "video/ogg",
-  };
-  return map[ext] || "application/octet-stream";
-}
-
-async function sendVideoFileWithRange(req: Request, res: Response, filePath: string): Promise<void> {
-  const statResult = await fs.stat(filePath);
-  const fileSize = statResult.size;
-  const contentType = contentTypeForVideoFile(filePath);
-  const rangeHeader = req.headers.range;
-
-  res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-
-  if (rangeHeader) {
-    const parsed = parseRange(fileSize, rangeHeader);
-    if (parsed === -1) {
-      res.status(416);
-      res.setHeader("Content-Range", `bytes */${fileSize}`);
-      res.end();
-      return;
-    }
-    if (parsed !== -2 && Array.isArray(parsed) && parsed.length > 0) {
-      const { start, end } = parsed[0];
-      const chunkSize = end - start + 1;
-      res.status(206);
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
-      res.setHeader("Content-Length", chunkSize);
-      res.setHeader("Content-Type", contentType);
-      const stream = createReadStream(filePath, { start, end });
-      stream.on("error", () => {
-        if (!res.headersSent) res.status(500).end();
-        else stream.destroy();
-      });
-      stream.pipe(res);
-      return;
-    }
-  }
-
-  res.status(200);
-  res.setHeader("Content-Length", fileSize);
-  res.setHeader("Content-Type", contentType);
-  const stream = createReadStream(filePath);
-  stream.on("error", () => {
-    if (!res.headersSent) res.status(500).end();
-    else stream.destroy();
-  });
-  stream.pipe(res);
 }
 
 export function registerLocalUploadRoutes(app: Express): void {
@@ -147,23 +88,7 @@ export function registerLocalUploadRoutes(app: Express): void {
     },
   );
 
-  app.head("/api/uploads/files/:id", async (req: Request, res: Response) => {
-    const filePath = await resolveUploadedFile(req.params.id);
-    if (!filePath) {
-      return res.status(404).end();
-    }
-    try {
-      const statResult = await fs.stat(filePath);
-      res.status(200);
-      res.setHeader("Content-Length", statResult.size);
-      res.setHeader("Content-Type", contentTypeForVideoFile(filePath));
-      res.setHeader("Accept-Ranges", "bytes");
-      res.end();
-    } catch {
-      res.status(500).end();
-    }
-  });
-
+  // Use sendFile (via `send`): correct Range/Content-Type for video; custom streaming regressed on some deploys.
   app.get("/api/uploads/files/:id", async (req: Request, res: Response) => {
     const filePath = await resolveUploadedFile(req.params.id);
     if (!filePath) {
@@ -171,7 +96,11 @@ export function registerLocalUploadRoutes(app: Express): void {
     }
 
     try {
-      await sendVideoFileWithRange(req, res, path.resolve(filePath));
+      res.sendFile(path.resolve(filePath), (err) => {
+        if (err && !res.headersSent) {
+          res.status(500).json({ error: "Failed to send file" });
+        }
+      });
     } catch {
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to send file" });
