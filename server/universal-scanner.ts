@@ -6,6 +6,16 @@
 import pLimit from "p-limit";
 import { getCandles, type HyperliquidCandle } from "./hyperliquid";
 import {
+  GLOBAL_SCANNER_BATCH_SIZE,
+  GLOBAL_SCANNER_BATCH_DELAY_MS,
+  chunkArray,
+  sleep,
+  finalizeScannerHealthRun,
+  getScannerHealthMonitoringEnabled,
+  isGoldScannerTicker,
+  type ScannerHealthErrorRow,
+} from "./global-scanner";
+import {
   calculateSMAFromCandles,
   detectCrossover,
   collectPatternCandidates,
@@ -415,14 +425,29 @@ function upsertByScore(
   if (!ex || sNew > sOld) map.set(k, item);
 }
 
-/** Fresh last-`limit` candles per interval; explicit start/end bypasses HL candle cache. */
+/**
+ * Fresh last-`limit` candles per interval; explicit start/end bypasses HL candle cache.
+ * `throttleSequential` uses the same `getCandles` calls as the parallel path (1m vs 1h identical), only serialized to respect rate limits during full-universe scans.
+ */
 export async function fetchMtfCandleBundle(
   coin: string,
   limit: number,
   intervals: readonly string[] = UNIVERSAL_SCAN_TIMEFRAMES,
+  opts?: { throttleSequential?: boolean },
 ): Promise<Record<string, HyperliquidCandle[]>> {
   const end = Date.now();
   const ivs = intervals.length > 0 ? intervals : [...UNIVERSAL_SCAN_TIMEFRAMES];
+
+  if (opts?.throttleSequential) {
+    const out: Record<string, HyperliquidCandle[]> = {};
+    for (const interval of ivs) {
+      const ms = INTERVAL_MS[interval] ?? 60_000;
+      const start = end - ms * limit - ms * 2;
+      out[interval] = await getCandles(coin, interval, start, end, limit);
+    }
+    return out;
+  }
+
   const entries = await Promise.all(
     ivs.map((interval) =>
       candleFetchLimit(async () => {
@@ -621,12 +646,22 @@ export async function analyzeEducationalUniversal(
   };
 }
 
+type CoinScanDiagnostics = {
+  coin: string;
+  len1m: number;
+  candle1mLastTs?: number;
+};
+
 async function scanOneCoinMtf(
   coin: string,
   timeframes: string[],
-): Promise<EducationalPatternSignal[]> {
+): Promise<{ signals: EducationalPatternSignal[]; diag: CoinScanDiagnostics }> {
   const intervals = intervalsForPatternScan(timeframes);
-  const bundle = await fetchMtfCandleBundle(coin, 200, intervals);
+  const bundle = await fetchMtfCandleBundle(coin, 200, intervals, { throttleSequential: true });
+  const m1 = bundle["1m"] || [];
+  const lastTs = m1.length > 0 ? m1[m1.length - 1]!.t : undefined;
+  const diag: CoinScanDiagnostics = { coin, len1m: m1.length, candle1mLastTs: lastTs };
+
   const tfLimit = pLimit(9);
   const tasks = timeframes.map(
     (tf) => () =>
@@ -635,10 +670,14 @@ async function scanOneCoinMtf(
         : Promise.resolve(null),
   );
   const results = await Promise.all(tasks.map((fn) => tfLimit(fn)));
-  return results.filter((x): x is EducationalPatternSignal => x != null);
+  const signals = results.filter((x): x is EducationalPatternSignal => x != null);
+  return { signals, diag };
 }
 
-/** Multi-coin scan: per coin, fetch only needed intervals, then analyze each requested TF. */
+/**
+ * Multi-coin scan: queue tickers in batches (5 every 2s) so Hyperliquid rate limits are not tripped on 1m/5m.
+ * Every timeframe uses the same `getCandles` path as higher TFs (`fetchMtfCandleBundle` with `throttleSequential`).
+ */
 export async function scanForEducationalPatterns(
   coins: string[],
   timeframes: string[] = [...UNIVERSAL_SCAN_TIMEFRAMES],
@@ -647,9 +686,66 @@ export async function scanForEducationalPatterns(
     timeframes.filter(Boolean).length > 0
       ? [...new Set(timeframes.filter(Boolean))]
       : [...UNIVERSAL_SCAN_TIMEFRAMES];
-  const coinLimit = pLimit(4);
-  const out = await Promise.all(coins.map((coin) => coinLimit(() => scanOneCoinMtf(coin, uniqueTf))));
-  const flat = out.flat();
+
+  const monitoring = getScannerHealthMonitoringEnabled();
+  const startedAt = Date.now();
+  const healthErrors: ScannerHealthErrorRow[] = [];
+  let gold1mLagMs: number | null = null;
+  let alt1mThinOrEmpty = 0;
+  const wants1m = uniqueTf.includes("1m");
+
+  const flat: EducationalPatternSignal[] = [];
+  const batches = chunkArray(coins, GLOBAL_SCANNER_BATCH_SIZE);
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi]!;
+    const batchSignals = await Promise.all(
+      batch.map(async (coin) => {
+        try {
+          const { signals, diag } = await scanOneCoinMtf(coin, uniqueTf);
+          if (monitoring && wants1m) {
+            if (diag.len1m < 200 && coin !== "BTC") {
+              alt1mThinOrEmpty++;
+            }
+            if (diag.candle1mLastTs != null) {
+              const lag = Date.now() - diag.candle1mLastTs;
+              if (isGoldScannerTicker(coin)) {
+                if (gold1mLagMs === null || lag > gold1mLagMs) gold1mLagMs = lag;
+              }
+            } else if (isGoldScannerTicker(coin)) {
+              healthErrors.push({ coin, phase: "1m", message: "No 1m candles returned" });
+            }
+          }
+          return signals;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (monitoring) {
+            healthErrors.push({ coin, phase: "scan", message: msg });
+          }
+          console.error(`[pattern-scan] ${coin}:`, e);
+          return [] as EducationalPatternSignal[];
+        }
+      }),
+    );
+    flat.push(...batchSignals.flat());
+    if (bi < batches.length - 1) {
+      await sleep(GLOBAL_SCANNER_BATCH_DELAY_MS);
+    }
+  }
+
+  if (monitoring) {
+    finalizeScannerHealthRun({
+      startedAt,
+      timeframes: uniqueTf,
+      totalCoinsPlanned: coins.length,
+      coinsCompleted: coins.length,
+      signalsEmitted: flat.length,
+      errors: healthErrors,
+      gold1mLagMs,
+      alt1mThinOrEmpty,
+    });
+  }
+
   flat.sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
   return flat;
 }

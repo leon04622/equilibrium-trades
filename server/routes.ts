@@ -11,7 +11,6 @@ import {
   getOrderBook, 
   getRecentTrades,
   getCandles,
-  getPerpUniverseCoinNames,
   getPerpExchangeAggregates,
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus } from "./sma-detection";
@@ -33,8 +32,18 @@ import {
   tryConnectMongoVault,
   upsertMongoCrmUserFromWallet,
   fetchMongoCrmSubscriptionSnapshot,
+  fetchMongoScannerWatchlistPrefs,
+  upsertMongoScannerWatchlistPrefs,
+  getVaultDb,
   type MongoVaultHandle,
 } from "./mongo-vault";
+import {
+  buildGlobalScannerTickerList,
+  getScannerHealthSnapshot,
+  getScannerHealthMonitoringEnabled,
+  setScannerHealthMonitoringEnabled,
+  GLOBAL_SCANNER_GOLD_PROXY_INFO,
+} from "./global-scanner";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -257,10 +266,11 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   if (coinsParam?.trim()) {
     return coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
   }
-  const live = await getPerpUniverseCoinNames();
-  let list = live.length > 0 ? live : ["BTC", "ETH", "SOL"];
+  let list = await buildGlobalScannerTickerList();
+  if (list.length === 0) list = ["BTC", "ETH", "SOL"];
   const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
-  if (Number.isFinite(maxCoins) && maxCoins > 0 && list.length > maxCoins) {
+  const enforceMax = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
+  if (enforceMax && Number.isFinite(maxCoins) && maxCoins > 0 && list.length > maxCoins) {
     try {
       const tickers = await getAllTickers();
       const vol = new Map(tickers.map((t) => [t.coin, parseFloat(t.dayNtlVlm || "0")]));
@@ -602,13 +612,27 @@ export async function registerRoutes(
 
   // ============ EDUCATIONAL PATTERN SCANNER ============
 
-  // Scan for educational patterns (no entry/SL/TP - for learning)
+  // Scan for educational patterns (no entry/SL/TP — for learning)
   app.get("/api/signals/patterns", async (req: Request, res: Response) => {
     try {
       const coinsParam = req.query.coins as string;
       const timeframesParam = req.query.timeframes as string;
+      const wallet = resolveWalletAddressFromRequest(req)?.trim();
 
-      const coins = await resolveScanCoins(coinsParam);
+      let coins: string[];
+      if (coinsParam?.trim()) {
+        coins = coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
+      } else if (wallet) {
+        const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
+        if (prefs && prefs.allMarkets === false && prefs.coins.length > 0) {
+          coins = prefs.coins;
+        } else {
+          coins = await resolveScanCoins(undefined);
+        }
+      } else {
+        coins = await resolveScanCoins(undefined);
+      }
+
       const timeframes = timeframesParam?.trim()
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
         : [...SCAN_ALL_TIMEFRAMES];
@@ -619,6 +643,86 @@ export async function registerRoutes(
       console.error("Error scanning for educational patterns:", error);
       res.status(500).json({ error: "Failed to scan for patterns" });
     }
+  });
+
+  /** Full HL perp + active spot list for pattern scanner watchlist UI */
+  app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
+    try {
+      const tickers = await buildGlobalScannerTickerList();
+      res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO });
+    } catch (error) {
+      console.error("Error building scanner markets list:", error);
+      res.status(500).json({ error: "Failed to load markets" });
+    }
+  });
+
+  app.get("/api/scanner/watchlist", async (req: Request, res: Response) => {
+    const wallet = resolveWalletAddressFromRequest(req)?.trim();
+    if (!wallet) {
+      res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      return;
+    }
+    if (!getVaultDb()) {
+      res.json({ allMarkets: true, coins: [], mongoConfigured: false });
+      return;
+    }
+    const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
+    if (!prefs) {
+      res.json({ allMarkets: true, coins: [], mongoConfigured: true });
+      return;
+    }
+    res.json({
+      allMarkets: prefs.allMarkets,
+      coins: prefs.coins,
+      mongoConfigured: true,
+    });
+  });
+
+  app.patch("/api/scanner/watchlist", async (req: Request, res: Response) => {
+    const wallet = resolveWalletAddressFromRequest(req)?.trim();
+    if (!wallet) {
+      res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      return;
+    }
+    if (!getVaultDb()) {
+      res.status(503).json({ error: "MongoDB vault not connected; cannot persist watchlist" });
+      return;
+    }
+    const body = req.body as { allMarkets?: unknown; coins?: unknown };
+    const allMarkets = body.allMarkets !== false;
+    const coins = Array.isArray(body.coins)
+      ? body.coins.map((c) => String(c).trim()).filter(Boolean)
+      : [];
+    if (!allMarkets && coins.length === 0) {
+      res.status(400).json({ error: "Select at least one ticker when All Markets is off" });
+      return;
+    }
+    const saved = await upsertMongoScannerWatchlistPrefs(wallet, { allMarkets, coins });
+    if (!saved.ok) {
+      res.status(503).json({ error: "Failed to save watchlist" });
+      return;
+    }
+    res.json({ ok: true, allMarkets, coins });
+  });
+
+  app.get("/api/admin/scanner-health", async (req: Request, res: Response) => {
+    const wallet = resolveWalletAddressFromRequest(req)?.trim();
+    if (!isFortressSovereignAddress(wallet)) {
+      res.status(403).json({ error: "Sovereign admin wallet required" });
+      return;
+    }
+    res.json(getScannerHealthSnapshot());
+  });
+
+  app.post("/api/admin/scanner-health/monitoring", async (req: Request, res: Response) => {
+    const wallet = resolveWalletAddressFromRequest(req)?.trim();
+    if (!isFortressSovereignAddress(wallet)) {
+      res.status(403).json({ error: "Sovereign admin wallet required" });
+      return;
+    }
+    const enabled = Boolean((req.body as { enabled?: unknown })?.enabled);
+    setScannerHealthMonitoringEnabled(enabled);
+    res.json({ ok: true, enabled: getScannerHealthMonitoringEnabled() });
   });
 
   // ============ SMA CROSSOVER SIGNALS (Legacy) ============

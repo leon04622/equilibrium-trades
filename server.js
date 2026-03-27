@@ -27,6 +27,10 @@
  *   MONGO_TRADE_JOURNAL_COLLECTION — optional; default trade_journal (execution log + coach flags per wallet)
  *   EQUILIBRIUM_BILLING_SYNC_SECRET — optional; `x-equilibrium-billing-secret` for POST /api/billing/sync-tier (Stripe / payment callbacks)
  *   Subscription reads: GET /api/user-status/:wallet (Postgres + Stripe + Mongo). Admin tier: PATCH /api/admin/update-tier (master or sovereign wallet).
+ *
+ * Pattern scanner (`/api/signals/patterns`): full HL perp + active spot list (`server/global-scanner.ts`), batched 5 tickers / 2s,
+ * Mongo `crm_users.scannerAllMarkets` + `scannerWatchlistCoins` for watchlist persistence. Optional cap: set
+ * `PATTERN_SCAN_ENFORCE_MAX_COINS=1` with `PATTERN_SCAN_MAX_COINS`. Sovereign: GET/POST `/api/admin/scanner-health*`.
  */
 import "dotenv/config";
 

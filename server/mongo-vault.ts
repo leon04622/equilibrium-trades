@@ -30,6 +30,58 @@ export function getVaultDb(): Db | null {
   return vaultDb;
 }
 
+export type ScannerWatchlistPrefs = {
+  allMarkets: boolean;
+  coins: string[];
+};
+
+/** Pattern scanner: `scannerAllMarkets` + `scannerWatchlistCoins` on `crm_users`. */
+export async function fetchMongoScannerWatchlistPrefs(
+  walletAddress: string,
+): Promise<ScannerWatchlistPrefs | null> {
+  if (!vaultDb) return null;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = walletAddress.trim().toLowerCase();
+  const doc = await coll.findOne({ $or: [{ wallet: w }, { walletAddress: w }] });
+  if (!doc) return null;
+  const coins = Array.isArray(doc.scannerWatchlistCoins)
+    ? doc.scannerWatchlistCoins.map((c: unknown) => String(c).trim()).filter(Boolean)
+    : [];
+  const allMarkets = doc.scannerAllMarkets !== false;
+  return { allMarkets, coins };
+}
+
+export async function upsertMongoScannerWatchlistPrefs(
+  walletAddress: string,
+  prefs: ScannerWatchlistPrefs,
+): Promise<{ ok: boolean }> {
+  if (!vaultDb) return { ok: false };
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = walletAddress.trim().toLowerCase();
+  const now = new Date();
+  await coll.updateOne(
+    { $or: [{ wallet: w }, { walletAddress: w }] },
+    {
+      $set: {
+        scannerAllMarkets: Boolean(prefs.allMarkets),
+        scannerWatchlistCoins: prefs.coins.map((c) => c.trim()).filter(Boolean),
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        wallet: w,
+        walletAddress: w,
+        source: "equilibrium_app",
+        joinDate: now,
+        createdAt: now,
+        subTier: "Free",
+        accessExpires: null,
+      },
+    },
+    { upsert: true },
+  );
+  return { ok: true };
+}
+
 export type MongoVaultHandle = {
   handleGetVideos(req: Request, res: Response): Promise<void>;
   handlePostVideo(req: Request, res: Response): Promise<void>;

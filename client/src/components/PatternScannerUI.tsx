@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo } from "react";
+import { useState, useEffect, useMemo, memo, useCallback } from "react";
 import {
   Zap,
   TrendingUp,
@@ -19,8 +19,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
+import { useWallet } from "@/lib/wallet-context";
+import { useToast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface PatternSignal {
   id: string;
@@ -256,13 +263,62 @@ function LoadingSkeleton() {
   );
 }
 
+type WatchlistApi = {
+  allMarkets: boolean;
+  coins: string[];
+  mongoConfigured: boolean;
+};
+
+function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
+  if (!wallet?.trim()) return {};
+  return {
+    "x-wallet-address": wallet.trim(),
+    Authorization: `Bearer ${wallet.trim()}`,
+  };
+}
+
 /** Institutional-style pattern scanner — Apex geometric engine, 30s refresh, MTF SMMA context. */
 export function PatternScannerUI() {
+  const { address } = useWallet();
+  const queryClient = useQueryClient();
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() => [...SCAN_ALL_TIMEFRAMES]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [draftAllMarkets, setDraftAllMarkets] = useState(true);
+  const [draftCoins, setDraftCoins] = useState<string[]>([]);
+  const [tickerFilter, setTickerFilter] = useState("");
 
   const tfParam =
     selectedTimeframes.length > 0 ? selectedTimeframes.join(",") : [...SCAN_ALL_TIMEFRAMES].join(",");
+
+  const { data: watchlistPref } = useQuery<WatchlistApi>({
+    queryKey: ["/api/scanner/watchlist", address],
+    enabled: !!address?.trim(),
+    queryFn: async () => {
+      const r = await fetch("/api/scanner/watchlist", { headers: scannerAuthHeaders(address) });
+      if (!r.ok) throw new Error("Failed to load watchlist preferences");
+      return r.json();
+    },
+  });
+
+  const { data: marketsData } = useQuery<{ tickers: string[]; goldNote?: string }>({
+    queryKey: ["/api/scanner/markets"],
+    staleTime: 120_000,
+    queryFn: async () => {
+      const r = await fetch("/api/scanner/markets");
+      if (!r.ok) throw new Error("Failed to load markets");
+      return r.json();
+    },
+  });
+
+  useEffect(() => {
+    if (!watchlistPref) return;
+    setDraftAllMarkets(watchlistPref.allMarkets);
+    setDraftCoins(watchlistPref.coins?.length ? [...watchlistPref.coins] : []);
+  }, [watchlistPref]);
+
+  const watchlistScanKey = watchlistPref
+    ? `${watchlistPref.allMarkets}:${[...(watchlistPref.coins || [])].sort().join(",")}`
+    : `anon:${address ?? ""}`;
 
   const {
     data: signals = [],
@@ -272,9 +328,11 @@ export function PatternScannerUI() {
     isError,
     error,
   } = useQuery<PatternSignal[]>({
-    queryKey: ["/api/signals/patterns", tfParam],
+    queryKey: ["/api/signals/patterns", tfParam, address ?? "", watchlistScanKey],
     queryFn: async () => {
-      const response = await fetch(`/api/signals/patterns?timeframes=${encodeURIComponent(tfParam)}`);
+      const response = await fetch(`/api/signals/patterns?timeframes=${encodeURIComponent(tfParam)}`, {
+        headers: scannerAuthHeaders(address),
+      });
       if (!response.ok) throw new Error("Failed to fetch patterns");
       return response.json();
     },
@@ -282,6 +340,38 @@ export function PatternScannerUI() {
     staleTime: 0,
     retry: 1,
   });
+
+  const saveWatchlistMutation = useMutation({
+    mutationFn: async () => {
+      if (!address?.trim()) throw new Error("Connect wallet to save watchlist");
+      const r = await fetch("/api/scanner/watchlist", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...scannerAuthHeaders(address) },
+        body: JSON.stringify({ allMarkets: draftAllMarkets, coins: draftCoins }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(data.error || "Save failed");
+      return data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/scanner/watchlist", address] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/signals/patterns"] });
+      toast({ title: "Watchlist saved", description: "Your scanner market selection is stored on your user record." });
+    },
+    onError: (e: Error) =>
+      toast({ title: "Could not save watchlist", description: e.message, variant: "destructive" }),
+  });
+
+  const toggleDraftCoin = useCallback((c: string) => {
+    setDraftCoins((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
+  }, []);
+
+  const filteredTickers = useMemo(() => {
+    const all = marketsData?.tickers ?? [];
+    const q = tickerFilter.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((t) => t.toLowerCase().includes(q));
+  }, [marketsData?.tickers, tickerFilter]);
 
   useEffect(() => {
     if (!isFetching) {
@@ -411,9 +501,93 @@ export function PatternScannerUI() {
           ))}
         </div>
         <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
-          Full scan every <strong>30s</strong> (1m scalpers). Server pulls 200 candles per TF per coin. Tap to exclude a TF.
+          Full scan every <strong>30s</strong> (1m scalpers). Server pulls 200 candles per TF per coin (batched 5 tickers /
+          2s). Tap to exclude a TF.
         </span>
       </div>
+
+      <Card className="border-border/80">
+        <CardHeader className="pb-2 pt-4 px-4 md:px-6">
+          <CardTitle className="text-sm font-display flex items-center gap-2">
+            <Eye className="h-4 w-4" />
+            Markets &amp; watchlist
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm px-4 md:px-6 pb-4 md:pb-6">
+          {marketsData?.goldNote ? (
+            <p className="text-[10px] text-muted-foreground leading-snug">{marketsData.goldNote}</p>
+          ) : null}
+          {!address ? (
+            <p className="text-xs text-muted-foreground">
+              Connect your wallet to save &quot;All markets&quot; or a custom list — stored in the MongoDB users
+              collection when the vault is connected.
+            </p>
+          ) : !watchlistPref?.mongoConfigured ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              MongoDB is not connected on this server — full-universe scans still run, but preferences will not persist
+              after refresh.
+            </p>
+          ) : null}
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="scanner-all-markets"
+                checked={draftAllMarkets}
+                onCheckedChange={(v) => setDraftAllMarkets(v)}
+                disabled={!address}
+              />
+              <Label htmlFor="scanner-all-markets" className="text-xs font-medium cursor-pointer">
+                All markets (HL perps + active spot)
+              </Label>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-8 w-fit text-xs"
+              disabled={
+                !address ||
+                !watchlistPref?.mongoConfigured ||
+                saveWatchlistMutation.isPending ||
+                (!draftAllMarkets && draftCoins.length === 0)
+              }
+              onClick={() => saveWatchlistMutation.mutate()}
+            >
+              {saveWatchlistMutation.isPending ? "Saving…" : "Save watchlist"}
+            </Button>
+          </div>
+
+          {!draftAllMarkets ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Tickers</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="Filter tickers…"
+                value={tickerFilter}
+                onChange={(e) => setTickerFilter(e.target.value)}
+              />
+              <ScrollArea className="h-[min(200px,40vh)] rounded-md border p-2">
+                <div className="space-y-2 pr-3">
+                  {filteredTickers.map((t) => (
+                    <label
+                      key={t}
+                      className="flex items-center gap-2 text-xs font-mono cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5"
+                    >
+                      <Checkbox
+                        checked={draftCoins.includes(t)}
+                        onCheckedChange={() => toggleDraftCoin(t)}
+                      />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+              </ScrollArea>
+              <p className="text-[10px] text-muted-foreground">{draftCoins.length} selected</p>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-4">
         <Card className="bg-primary/5 border-primary/20">

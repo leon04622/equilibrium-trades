@@ -12,6 +12,7 @@ import {
   Shield,
   Upload,
   MessageSquare,
+  Activity,
 } from "lucide-react";
 import type { TutorialVideo, SupportMessage } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,6 +54,20 @@ type CrmRow = {
 };
 
 type SortKey = "wallet" | "email" | "joinDate" | "subTier" | "status" | "builderStatus";
+
+type ScannerHealthSnapshot = {
+  monitoringEnabled: boolean;
+  lastScanAt: string | null;
+  lastScanDurationMs: number | null;
+  lastTimeframes: string[];
+  totalCoinsPlanned: number;
+  coinsCompleted: number;
+  signalsEmitted: number;
+  gold1mLagMs: number | null;
+  alt1mThinOrEmpty: number;
+  errors: { coin: string; phase: string; message: string }[];
+  statusSummary: string;
+};
 
 function useSovereignApi(address: string | null | undefined): AxiosInstance {
   return useMemo(() => {
@@ -343,6 +358,46 @@ export default function AdminCommandCenter() {
     }
   };
 
+  const {
+    data: scannerHealth,
+    isLoading: scannerHealthLoading,
+    isError: scannerHealthError,
+    error: scannerHealthErrObj,
+    refetch: refetchScannerHealth,
+  } = useQuery({
+    queryKey: ["fortress-scanner-health", address],
+    enabled: !!address && tab === "scanner",
+    refetchInterval: tab === "scanner" ? 12_000 : false,
+    queryFn: async () => {
+      const { data, status } = await api.get<ScannerHealthSnapshot>("/api/admin/scanner-health");
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status !== 200) throw new Error("Failed to load scanner health");
+      return data;
+    },
+  });
+
+  const scannerMonitoringMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const { data, status } = await api.post<{ ok?: boolean; enabled?: boolean }>(
+        "/api/admin/scanner-health/monitoring",
+        { enabled },
+      );
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) {
+        throw new Error((data as { error?: string })?.error || "Update failed");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["fortress-scanner-health"] });
+      toast({
+        title: "Scanner health",
+        description: "Monitoring flag updated. Run a pattern scan (Signals page) to record metrics.",
+      });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const removeVideo = useMutation({
     mutationFn: async (id: string) => {
       const { data, status } = await api.delete(`/api/videos/${encodeURIComponent(id)}`);
@@ -383,7 +438,7 @@ export default function AdminCommandCenter() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 max-w-2xl">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 max-w-4xl gap-1">
           <TabsTrigger value="crm" className="gap-1.5">
             <Users className="h-4 w-4 shrink-0" />
             Live CRM
@@ -395,6 +450,10 @@ export default function AdminCommandCenter() {
           <TabsTrigger value="support" className="gap-1.5">
             <MessageSquare className="h-4 w-4 shrink-0" />
             Support
+          </TabsTrigger>
+          <TabsTrigger value="scanner" className="gap-1.5">
+            <Activity className="h-4 w-4 shrink-0" />
+            Scanner
           </TabsTrigger>
         </TabsList>
 
@@ -811,6 +870,110 @@ export default function AdminCommandCenter() {
                     ))}
                   </ul>
                 </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="scanner" className="space-y-4">
+          <Card className="border-border/80 bg-card/50">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>Scanner health</CardTitle>
+                <CardDescription>
+                  Toggle telemetry for the educational pattern scanner (1m gold lag, alt thin data, API errors). Open the
+                  Signals page or wait for auto-refresh to run a scan after enabling.
+                </CardDescription>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => void refetchScannerHealth()} aria-label="Refresh health">
+                <RefreshCw className={cn("h-4 w-4", scannerHealthLoading && "animate-spin")} />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {scannerHealthError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
+                  <p className="font-medium text-destructive">Could not load scanner health</p>
+                  <p className="text-muted-foreground">
+                    {scannerHealthErrObj instanceof Error ? scannerHealthErrObj.message : String(scannerHealthErrObj)}
+                  </p>
+                </div>
+              ) : scannerHealthLoading && !scannerHealth ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-6 justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading…
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="scanner-health-monitoring"
+                        checked={scannerHealth?.monitoringEnabled ?? false}
+                        disabled={scannerMonitoringMutation.isPending}
+                        onCheckedChange={(v) => scannerMonitoringMutation.mutate(v)}
+                      />
+                      <Label htmlFor="scanner-health-monitoring" className="text-sm font-medium cursor-pointer">
+                        Record metrics on each pattern scan
+                      </Label>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/50 p-4 space-y-2 text-sm">
+                    <p className="font-medium">{scannerHealth?.statusSummary ?? "—"}</p>
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground font-mono">
+                      <div>
+                        <dt className="inline text-foreground/80">Last scan</dt>{" "}
+                        <dd className="inline">
+                          {scannerHealth?.lastScanAt
+                            ? new Date(scannerHealth.lastScanAt).toLocaleString()
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline text-foreground/80">Duration</dt>{" "}
+                        <dd className="inline">
+                          {scannerHealth?.lastScanDurationMs != null
+                            ? `${scannerHealth.lastScanDurationMs} ms`
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline text-foreground/80">Coins / signals</dt>{" "}
+                        <dd className="inline">
+                          {scannerHealth?.totalCoinsPlanned ?? 0} planned · {scannerHealth?.signalsEmitted ?? 0} signals
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline text-foreground/80">Gold 1m lag</dt>{" "}
+                        <dd className="inline">
+                          {scannerHealth?.gold1mLagMs != null
+                            ? `${Math.round(scannerHealth.gold1mLagMs / 1000)}s behind latest bar`
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="inline text-foreground/80">Alts thin/empty 1m</dt>{" "}
+                        <dd className="inline">{scannerHealth?.alt1mThinOrEmpty ?? 0}</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="inline text-foreground/80">Timeframes</dt>{" "}
+                        <dd className="inline">{(scannerHealth?.lastTimeframes ?? []).join(", ") || "—"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  {scannerHealth && scannerHealth.errors.length > 0 ? (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 max-h-48 overflow-y-auto">
+                      <p className="text-xs font-medium text-amber-800 dark:text-amber-200 mb-2">Recent errors</p>
+                      <ul className="space-y-1 text-[11px] font-mono break-all">
+                        {scannerHealth.errors.map((e, i) => (
+                          <li key={`${e.coin}-${i}`}>
+                            <span className="text-foreground">{e.coin}</span>{" "}
+                            <span className="text-muted-foreground">[{e.phase}]</span> {e.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
               )}
             </CardContent>
           </Card>
