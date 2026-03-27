@@ -9,7 +9,7 @@ import { attachSupportChatWs } from "./support-chat-ws";
 import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
-import { getDatabaseStatus } from './db';
+import { getDatabaseStatus, ensurePostgresCoreTables } from './db';
 import { getMongoVaultHealth } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
 
@@ -90,6 +90,7 @@ async function initStripe() {
 
 (async () => {
   await initStripe();
+  await ensurePostgresCoreTables();
 
   // Redirect apex domain to www only
   app.use((req: Request, res: Response, next: NextFunction) => {

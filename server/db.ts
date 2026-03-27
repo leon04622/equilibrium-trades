@@ -84,6 +84,36 @@ function initDatabase(): void {
 
 initDatabase();
 
+/**
+ * Creates core tables if missing (e.g. fresh Supabase/Neon DB where `npm run db:push` was never run).
+ * Matches `tutorial_videos` in shared/schema.ts — fixes "relation tutorial_videos does not exist".
+ */
+export async function ensurePostgresCoreTables(): Promise<void> {
+  if (!pool) return;
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tutorial_videos (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        title text NOT NULL,
+        description text NOT NULL,
+        duration text NOT NULL DEFAULT '',
+        category text NOT NULL,
+        youtube_id text,
+        video_path text,
+        thumbnail_path text,
+        academy_section text,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[db] Ensured table tutorial_videos exists (CREATE IF NOT EXISTS).");
+  } catch (err) {
+    console.error("[db] ensurePostgresCoreTables failed:", err);
+  } finally {
+    client.release();
+  }
+}
+
 export function isDatabaseConfigured(): boolean {
   return db !== null;
 }
