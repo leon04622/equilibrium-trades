@@ -344,7 +344,30 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
     return coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
   }
   let list = await buildGlobalScannerTickerList();
-  if (list.length === 0) list = ["BTC", "ETH", "SOL"];
+  if (list.length === 0) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+      list = await buildGlobalScannerTickerList();
+      if (list.length > 0) break;
+    }
+  }
+  if (list.length === 0) {
+    try {
+      const meta = await getAvailableCoins();
+      const perps = (meta.universe || [])
+        .map((u: { name?: string }) => String(u.name || "").trim())
+        .filter(Boolean);
+      if (perps.length > 0) {
+        list = [...new Set(perps)].sort((a, b) => a.localeCompare(b));
+      }
+    } catch {
+      /* keep trying fallbacks */
+    }
+  }
+  if (list.length === 0) {
+    list = ["BTC", "ETH", "SOL"];
+    console.warn("[pattern-scan] HL universe still empty after retries — using minimal fallback list");
+  }
   const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
   const enforceMax = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
   if (enforceMax && Number.isFinite(maxCoins) && maxCoins > 0 && list.length > maxCoins) {
@@ -704,19 +727,13 @@ export async function registerRoutes(
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
       const skipCache = req.query.nocache === "1" || req.query.nocache === "true";
 
+      // Always scan full HL perps + active spot unless `coins` query explicitly lists symbols.
+      // (CRM watchlist prefs no longer narrow the scanner — avoids accidental 3-coin scans.)
       let scanSource: "query" | "watchlist" | "universe" = "universe";
       let coins: string[];
       if (coinsParam?.trim()) {
         scanSource = "query";
         coins = coinsParam.split(",").map((c) => c.trim()).filter(Boolean);
-      } else if (wallet) {
-        const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
-        if (prefs && prefs.allMarkets === false && prefs.coins.length > 0) {
-          scanSource = "watchlist";
-          coins = prefs.coins;
-        } else {
-          coins = await resolveScanCoins(undefined);
-        }
       } else {
         coins = await resolveScanCoins(undefined);
       }

@@ -347,10 +347,6 @@ export function PatternScannerUI() {
 
   const canCustomizeWatchlist = !!(address?.trim() && watchlistPref?.mongoConfigured);
 
-  const watchlistScanKey = watchlistPref
-    ? `${watchlistPref.allMarkets}:${[...(watchlistPref.coins || [])].sort().join(",")}`
-    : `anon:${address ?? ""}`;
-
   const {
     data: scanPayload,
     isLoading,
@@ -359,7 +355,7 @@ export function PatternScannerUI() {
     isError,
     error,
   } = useQuery<PatternScanPayload>({
-    queryKey: ["/api/signals/patterns", tfParam, address ?? "", watchlistScanKey],
+    queryKey: ["/api/signals/patterns", tfParam, address ?? ""],
     queryFn: async () => {
       const qs =
         `timeframes=${encodeURIComponent(tfParam)}` + (forceNocacheRef.current ? "&nocache=1" : "");
@@ -393,13 +389,6 @@ export function PatternScannerUI() {
   const signals = isError ? [] : (scanPayload?.patterns ?? []);
   const scanMeta = isError ? null : (scanPayload?.meta ?? null);
   const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
-  const universeApprox = marketsData?.tickers?.length ?? 0;
-  const likelyPartialUniverse =
-    scanHasCompleted &&
-    scanMeta?.source === "universe" &&
-    universeApprox > 0 &&
-    scanMeta!.coinCount < Math.min(20, Math.floor(universeApprox * 0.15));
-
   const uniqueCoinsInSignals = useMemo(() => new Set(signals.map((s) => s.coin)), [signals]);
 
   const saveWatchlistMutation = useMutation({
@@ -534,21 +523,6 @@ export function PatternScannerUI() {
         </Alert>
       )}
 
-      {!isError && scanMeta?.source === "watchlist" ? (
-        <Alert className="border-amber-500/50 bg-amber-500/[0.08]">
-          <Eye className="h-4 w-4 text-amber-600 shrink-0" />
-          <AlertTitle className="text-amber-900 dark:text-amber-100">Watchlist mode — not the full exchange</AlertTitle>
-          <AlertDescription className="text-xs sm:text-sm text-muted-foreground">
-            Patterns are loaded only from your <strong>saved ticker list</strong> ({scanMeta.coinCount} market
-            {scanMeta.coinCount === 1 ? "" : "s"} this run). If you only see BTC, add more tickers or turn on{" "}
-            <strong>All markets</strong> (Mongo required) and <strong>Save watchlist</strong>.
-            {scanMeta.coinsPreview ? (
-              <span className="block mt-2 font-mono text-[10px] break-all opacity-90">{scanMeta.coinsPreview}</span>
-            ) : null}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       {!isError && scanMeta?.volumeCapMax != null ? (
         <Alert className="border-orange-500/45 bg-orange-500/[0.07]">
           <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
@@ -630,12 +604,6 @@ export function PatternScannerUI() {
                       strict, not broken).
                     </p>
                   ) : null}
-                  {likelyPartialUniverse ? (
-                    <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
-                      Only {scanMeta!.coinCount} market(s) were included — if you expected the full Hyperliquid list,
-                      enable <strong>All markets</strong> (with Mongo) or clear a short custom watchlist.
-                    </p>
-                  ) : null}
                 </div>
               </div>
             </>
@@ -711,21 +679,16 @@ export function PatternScannerUI() {
           {marketsData?.goldNote ? (
             <p className="text-[10px] text-muted-foreground leading-snug">{marketsData.goldNote}</p>
           ) : null}
-          {!address ? (
-            <p className="text-xs text-muted-foreground">
-              Wallet optional — the server scans <strong>all Hyperliquid perps plus active spot</strong> by default.
-              Connect and enable Mongo to save an optional custom watchlist.
+          <p className="text-xs text-muted-foreground">
+            The scanner always loads <strong>all Hyperliquid perps plus active spot</strong> each run (same list as{" "}
+            <code className="text-[10px]">/api/scanner/markets</code>). Connect with Mongo if you want to store an optional
+            CRM watchlist record (it does not limit what gets scanned).
+          </p>
+          {!watchlistPref?.mongoConfigured && address ? (
+            <p className="text-[10px] text-muted-foreground">
+              Mongo not configured — watchlist save is unavailable. Scans are unchanged.
             </p>
-          ) : !watchlistPref?.mongoConfigured ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              MongoDB is not connected — every run still uses the <strong>full HL universe</strong>. A custom ticker list
-              and persistence require <code className="text-[10px]">MONGO_VAULT_URI</code>.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Turn off &quot;All markets&quot; to scan only selected tickers (saved to your CRM user document).
-            </p>
-          )}
+          ) : null}
 
           {canCustomizeWatchlist ? (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
