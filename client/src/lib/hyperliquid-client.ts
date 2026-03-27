@@ -177,12 +177,22 @@ export function isHyperliquidTradingSessionReady(walletAddress: string): boolean
   return !!getStoredAgent(walletAddress);
 }
 
+export type EnsureHyperliquidSessionOptions = {
+  /**
+   * When true (first-trade lifetime handshake), builder fee EIP-712 must succeed.
+   * Skipping or failing aborts setup so CRM `isBuilderLinked` stays false until complete.
+   */
+  requireBuilderFee?: boolean;
+};
+
 /**
  * One-time Hyperliquid setup: authorize the local agent key (EIP-712) and approve builder fee (EIP-712).
+ * Hyperliquid’s one-time ~1 USDC account activation is charged on the first successful CoreWriter action (e.g. approveAgent).
  * All later orders / TP-SL / cancel / leverage use {@link signL1ActionWithAgent} only — no wallet popups.
  */
 export async function ensureHyperliquidTradingSession(
-  signer: JsonRpcSigner
+  signer: JsonRpcSigner,
+  opts?: EnsureHyperliquidSessionOptions,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await syncServerTime();
@@ -236,15 +246,34 @@ export async function ensureHyperliquidTradingSession(
         if (feeResult === "ok") {
           localStorage.setItem(feeKey, "1");
         } else if (feeResult === "user_cancelled") {
+          if (opts?.requireBuilderFee) {
+            return {
+              success: false,
+              error:
+                "Hyperliquid builder fee approval was cancelled. It is required once to link platform fees — please sign to continue.",
+            };
+          }
           console.warn(
             "[Hyperliquid] User skipped builder fee approval — trading still works; platform fee on orders is omitted until approved.",
           );
         } else {
+          if (opts?.requireBuilderFee) {
+            return {
+              success: false,
+              error:
+                "Could not complete Hyperliquid builder fee approval (approveBuilderFee). Check your connection and try again.",
+            };
+          }
           console.warn(
             "[Hyperliquid] Builder fee approval failed — trading still works; retry from the trading banner when convenient.",
           );
         }
       }
+    } else if (opts?.requireBuilderFee) {
+      return {
+        success: false,
+        error: "Builder fee is not configured — contact support.",
+      };
     }
 
     return { success: true };
@@ -360,9 +389,7 @@ async function authorizeAgent(
 // Submit approveBuilderFee action to Hyperliquid so the platform earns a fee on the user's trades
 async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthStep> {
   if (!isBuilderFeeConfigured()) {
-    console.warn(
-      "VITE_BUILDER_ADDRESS not set or invalid — skipping builder fee approval (set in .env.production and rebuild)"
-    );
+    console.warn("[Hyperliquid] Builder address invalid — skipping builder fee approval");
     return "failed";
   }
 

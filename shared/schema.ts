@@ -297,6 +297,8 @@ export const walletUsers = pgTable("wallet_users", {
   walletAddress: text("wallet_address").notNull().unique(),
   email: text("email"),
   builderCodeApproved: boolean("builder_code_approved").default(false),
+  /** Lifetime HL builder fee + agent handshake complete — synced to Mongo CRM `isBuilderLinked`. */
+  isBuilderLinked: boolean("is_builder_linked").default(false),
   /** Admin “Grant Pro” / Alpha — keeps Pro access even if Stripe shows no active subscription. */
   manualProOverride: boolean("manual_pro_override").default(false),
   /** e.g. none | referred | builder_linked | handshake_complete */
@@ -429,6 +431,7 @@ export interface WalletUser {
   walletAddress: string;
   email: string | null;
   builderCodeApproved: boolean;
+  isBuilderLinked: boolean;
   manualProOverride: boolean;
   referralBuilderStatus: string | null;
   instantTradingCompletedAt: Date | null;
@@ -444,6 +447,7 @@ export interface InsertWalletUser {
   walletAddress: string;
   email?: string | null;
   builderCodeApproved?: boolean;
+  isBuilderLinked?: boolean;
   manualProOverride?: boolean;
   referralBuilderStatus?: string | null;
   instantTradingCompletedAt?: Date | null;
@@ -455,6 +459,7 @@ export const insertWalletUserSchema = z.object({
   walletAddress: z.string().min(1, "Wallet address is required"),
   email: z.string().email().optional().nullable(),
   builderCodeApproved: z.boolean().optional().default(false),
+  isBuilderLinked: z.boolean().optional().default(false),
   subscriptionTier: tierInputSchema.optional().default("free"),
   subscriptionActive: z.boolean().optional().default(false),
 });

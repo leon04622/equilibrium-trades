@@ -94,6 +94,7 @@ export interface IStorage {
   updateWalletUserSubscription(walletAddress: string, tier: WalletSubscriptionTier | 'elite', active: boolean, expiresAt?: Date | null): Promise<WalletUser | undefined>;
   setManualProOverride(walletAddress: string, value: boolean): Promise<WalletUser | undefined>;
   recordInstantTradingHandshake(walletAddress: string): Promise<WalletUser | undefined>;
+  recordLifetimeTradeHandshake(walletAddress: string): Promise<WalletUser | undefined>;
   
   // Support Messages
   getMessages(conversationId: string): Promise<SupportMessage[]>;
@@ -456,6 +457,7 @@ export class MemStorage implements IStorage {
       walletAddress: user.walletAddress,
       email: user.email,
       builderCodeApproved: user.builderCodeApproved ?? false,
+      isBuilderLinked: user.isBuilderLinked ?? false,
       manualProOverride: user.manualProOverride ?? false,
       referralBuilderStatus: user.referralBuilderStatus ?? null,
       instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
@@ -502,6 +504,7 @@ export class MemStorage implements IStorage {
       walletAddress: normalizedAddress,
       email: user.email ?? null,
       builderCodeApproved: user.builderCodeApproved ?? false,
+      isBuilderLinked: user.isBuilderLinked ?? false,
       manualProOverride: user.manualProOverride ?? false,
       referralBuilderStatus: user.referralBuilderStatus ?? null,
       instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
@@ -521,6 +524,7 @@ export class MemStorage implements IStorage {
         walletAddress: normalizedAddress,
         email: user.email ?? null,
         builderCodeApproved: user.builderCodeApproved ?? false,
+        isBuilderLinked: user.isBuilderLinked ?? false,
         manualProOverride: user.manualProOverride ?? false,
         referralBuilderStatus: user.referralBuilderStatus ?? null,
         instantTradingCompletedAt: user.instantTradingCompletedAt ?? null,
@@ -716,6 +720,49 @@ export class MemStorage implements IStorage {
         .set({
           instantTradingCompletedAt: now,
           referralBuilderStatus: "handshake_complete",
+          updatedAt: now,
+        })
+        .where(eq(walletUsers.walletAddress, normalizedAddress))
+        .returning();
+      if (!user) return existing;
+      const mapped = this.mapDbUser(user);
+      this.walletUsersCache.set(normalizedAddress, mapped);
+      return mapped;
+    } catch {
+      return this.walletUsersCache.get(normalizedAddress);
+    }
+  }
+
+  async recordLifetimeTradeHandshake(walletAddress: string): Promise<WalletUser | undefined> {
+    const normalizedAddress = walletAddress.toLowerCase();
+    const now = new Date();
+    try {
+      let existing = await this.getWalletUser(normalizedAddress);
+      if (!existing) {
+        return await this.createWalletUser({
+          walletAddress: normalizedAddress,
+          builderCodeApproved: true,
+          isBuilderLinked: true,
+          referralBuilderStatus: "builder_linked",
+          instantTradingCompletedAt: now,
+        });
+      }
+      if (!db) {
+        existing.isBuilderLinked = true;
+        existing.builderCodeApproved = true;
+        existing.instantTradingCompletedAt = now;
+        existing.referralBuilderStatus = "builder_linked";
+        existing.updatedAt = now;
+        this.walletUsersCache.set(normalizedAddress, existing);
+        return existing;
+      }
+      const [user] = await db
+        .update(walletUsers)
+        .set({
+          isBuilderLinked: true,
+          builderCodeApproved: true,
+          instantTradingCompletedAt: now,
+          referralBuilderStatus: "builder_linked",
           updatedAt: now,
         })
         .where(eq(walletUsers.walletAddress, normalizedAddress))

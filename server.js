@@ -8,7 +8,8 @@
  * • PostgreSQL (`DATABASE_URL`): wallet_users, subscriptions, support_tickets, tutorial_videos, etc.
  * • MongoDB (`MONGO_VAULT_URI` or `MONGODB_URI` as mongodb://…): optional vault + unified CRM `users` store
  *   (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `crm_users`) with:
- *   wallet, email, joinDate, subTier (Free/Pro/Mentor), status (Active/Expired), manualProOverride.
+ *   wallet, email, joinDate, subTier (Free/Pro/Mentor), status (Active/Expired), manualProOverride,
+ *   isBuilderLinked (Mongo + Postgres `wallet_users.is_builder_linked` after lifetime trade handshake).
  *   Rows upsert on wallet register, email update, admin subscription patch, Stripe subscription poll, checkout.
  * • Support chat messages stay in your database only (Mongo or Postgres) — review in Admin → Support tab.
  *

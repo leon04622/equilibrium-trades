@@ -120,6 +120,7 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
     subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
     manualProOverride: user.manualProOverride ?? false,
     status: crmSubscriptionStatusFromWallet(user),
+    isBuilderLinked: user.isBuilderLinked ?? false,
   };
   await coll.updateOne(
     { $or: [{ wallet }, { walletAddress: wallet }] },
@@ -163,6 +164,7 @@ function mongoDocToCrmRow(u: Document) {
     subTier: displayTier,
     status,
     manualProOverride: Boolean(u.manualProOverride),
+    builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
   };
 }
 
@@ -275,21 +277,7 @@ function createHandle(db: Db): MongoVaultHandle {
       }
       try {
         const rows = await crm.find({}).toArray();
-        const out = rows.map((u) => ({
-          wallet: String(u.wallet ?? u.walletAddress ?? ""),
-          email: u.email != null && u.email !== "" ? String(u.email) : null,
-          joinDate:
-            u.joinDate != null
-              ? u.joinDate instanceof Date
-                ? u.joinDate.toISOString()
-                : String(u.joinDate)
-              : u.createdAt instanceof Date
-                ? u.createdAt.toISOString()
-                : u.createdAt != null
-                  ? String(u.createdAt)
-                  : null,
-          subTier: String(u.subTier ?? u.subscriptionTier ?? "free"),
-        }));
+        const out = rows.map((u) => mongoDocToCrmRow(u));
         res.json(out.filter((r) => r.wallet));
       } catch (e) {
         console.error("[mongo-vault] GET /api/crm/users:", e);

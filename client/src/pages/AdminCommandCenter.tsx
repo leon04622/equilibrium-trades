@@ -48,9 +48,10 @@ type CrmRow = {
   subTier: string;
   status?: string;
   manualProOverride?: boolean;
+  builderStatus?: string;
 };
 
-type SortKey = "wallet" | "email" | "joinDate" | "subTier" | "status";
+type SortKey = "wallet" | "email" | "joinDate" | "subTier" | "status" | "builderStatus";
 
 function useSovereignApi(address: string | null | undefined): AxiosInstance {
   return useMemo(() => {
@@ -84,6 +85,11 @@ function sortCrmRows(rows: CrmRow[], key: SortKey, dir: "asc" | "desc"): CrmRow[
     if (key === "status") {
       va = (a.status || "").toLowerCase();
       vb = (b.status || "").toLowerCase();
+      return va.localeCompare(vb) * mult;
+    }
+    if (key === "builderStatus") {
+      va = (a.builderStatus || "").toLowerCase();
+      vb = (b.builderStatus || "").toLowerCase();
       return va.localeCompare(vb) * mult;
     }
     va = String(a[key as "wallet" | "email" | "subTier"] ?? "").toLowerCase();
@@ -132,7 +138,8 @@ export default function AdminCommandCenter() {
       (r) =>
         r.wallet.toLowerCase().includes(q) ||
         (r.email && r.email.toLowerCase().includes(q)) ||
-        (r.subTier && r.subTier.toLowerCase().includes(q)),
+        (r.subTier && r.subTier.toLowerCase().includes(q)) ||
+        (r.builderStatus && r.builderStatus.toLowerCase().includes(q)),
     );
   }, [crmUsers, crmSearch]);
 
@@ -477,6 +484,16 @@ export default function AdminCommandCenter() {
                             <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
                           </button>
                         </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("builderStatus")}
+                          >
+                            Builder status
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
                         <TableHead className="text-right whitespace-nowrap">Manual Pro</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -498,6 +515,15 @@ export default function AdminCommandCenter() {
                               </Badge>
                             </TableCell>
                             <TableCell className="align-top text-xs">{row.status ?? "—"}</TableCell>
+                            <TableCell className="align-top text-xs">
+                              {row.builderStatus === "Linked" ? (
+                                <Badge variant="default" className="text-[10px] bg-emerald-600/90">
+                                  Linked
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">{row.builderStatus ?? "Not linked"}</span>
+                              )}
+                            </TableCell>
                             <TableCell className="align-top text-right">
                               <Switch
                                 checked={manualOn}

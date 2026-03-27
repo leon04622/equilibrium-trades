@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,8 +12,7 @@ import { useWallet, ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield, Wallet, Link2, AlertCircle, Smartphone } from "lucide-react";
-import { TRADE_HANDSHAKE_USER_MESSAGE } from "@/lib/trade-execution-logic";
-import { submitEquilibriumBuilderSignin } from "@/lib/equilibrium-builder-signin";
+import { TRADE_HANDSHAKE_USER_MESSAGE, runEquilibriumLifetimeHandshake } from "@/lib/trade-execution-logic";
 import { isLikelyMobileDevice } from "@/lib/eip712-typed-data";
 
 type Props = {
@@ -42,7 +41,8 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
   } = useWallet();
 
   const mobile = isLikelyMobileDevice();
-  const busySignRef = useRef(false);
+  const busyHandshakeRef = useRef(false);
+  const [handshakeRunning, setHandshakeRunning] = useState(false);
 
   const allReady =
     isConnected &&
@@ -64,56 +64,50 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
     }
   };
 
-  const handleBuilderSign = async () => {
-    if (!signer || !address || busySignRef.current) return;
-    busySignRef.current = true;
+  /** One CTA: EIP-191 Equilibrium sign-in (if needed) + HL approveAgent + approveBuilderFee; then CRM `isBuilderLinked`. */
+  const handleLifetimeHandshake = useCallback(async () => {
+    if (!signer || !address || busyHandshakeRef.current) return;
+    busyHandshakeRef.current = true;
+    setHandshakeRunning(true);
     try {
-      const result = await submitEquilibriumBuilderSignin(signer, address);
+      const result = await runEquilibriumLifetimeHandshake(signer, address, {
+        skipEquilibriumSignIn: builderCodeApproved,
+      });
       if (!result.ok) {
         if (!result.userCancelled) {
-          toast({ title: "Sign-in failed", description: result.error, variant: "destructive" });
+          toast({ title: "Setup incomplete", description: result.error, variant: "destructive" });
         }
         return;
       }
       confirmBuilderCodeApproved();
       await refreshApprovalStatus();
+      await prepareHyperliquidSession();
+      await refetchHlAuth();
       toast({
-        title: "Wallet linked",
-        description: "Complete Hyperliquid approval below to place this trade.",
+        title: "Trading enabled",
+        description: "Builder linked, agent approved, and account ready.",
       });
+      onFinalize(true);
     } finally {
-      busySignRef.current = false;
+      busyHandshakeRef.current = false;
+      setHandshakeRunning(false);
     }
-  };
-
-  const handleHyperliquid = useCallback(async () => {
-    const session = await prepareHyperliquidSession();
-    if (!session.success) {
-      toast({
-        title: "Setup required",
-        description: session.error || "Approve the trading agent in your wallet.",
-        variant: "destructive",
-      });
-      return;
-    }
-    await refetchHlAuth();
-    try {
-      if (address) {
-        await fetch("/api/wallet-user/instant-trading-complete", {
-          method: "POST",
-          headers: { "x-wallet-address": address },
-        });
-      }
-    } catch {
-      /* non-fatal CRM ingest */
-    }
-    toast({
-      title: "Ready to trade",
-      description: "Gas-free order flow is active for this session.",
-    });
-  }, [prepareHyperliquidSession, refetchHlAuth, toast, address]);
+  }, [
+    signer,
+    address,
+    builderCodeApproved,
+    confirmBuilderCodeApproved,
+    refreshApprovalStatus,
+    prepareHyperliquidSession,
+    refetchHlAuth,
+    toast,
+    onFinalize,
+  ]);
 
   const wrongChain = isConnected && chainId !== ARBITRUM_CHAIN_ID;
+  const needsUnifiedHandshake =
+    isConnected && !wrongChain && (!builderCodeApproved || !hyperliquidSessionReady);
+  const handshakeBusy = handshakeRunning || isPreparingHyperliquidSession;
 
   return (
     <Dialog
@@ -141,7 +135,6 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
         </div>
 
         <div className="space-y-4 px-5 pb-6 sm:px-6">
-          {/* Step 1: Wallet */}
           <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
               <Wallet className="h-4 w-4 text-primary" />
@@ -171,7 +164,6 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
             </div>
           </div>
 
-          {/* Step 2: Network */}
           {isConnected && (
             <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
@@ -198,71 +190,46 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
             </div>
           )}
 
-          {/* Step 3: Equilibrium sign-in */}
-          {isConnected && !wrongChain && (
+          {needsUnifiedHandshake && (
             <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
                 <Shield className="h-4 w-4 text-primary" />
               </div>
               <div className="min-w-0 flex-1 space-y-2">
-                <p className="text-sm font-medium">3. Link Sovereign Protocol</p>
-                <p className="text-xs text-muted-foreground">
-                  One plain-message signature — no gas. Verifies your wallet for Equilibrium.
-                </p>
+                <p className="text-sm font-medium">3. One-time trading handshake</p>
+                <Alert className="border-muted py-2">
+                  <AlertDescription className="text-[11px] leading-relaxed text-muted-foreground">
+                    Your wallet will prompt for Equilibrium sign-in (if not done yet), then Hyperliquid{" "}
+                    <strong>approveAgent</strong> and <strong>approveBuilderFee</strong> for the platform builder.
+                    The first Hyperliquid action may include a one-time ~1 USDC activation debit per Hyperliquid rules.
+                  </AlertDescription>
+                </Alert>
+                {mobile && handshakeBusy && (
+                  <div className="flex gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
+                    <Smartphone className="h-4 w-4 shrink-0 text-primary mt-0.5" />
+                    <span className="text-muted-foreground">Confirm each step in your wallet app if the browser shows no prompt.</span>
+                  </div>
+                )}
                 {isCheckingApproval ? (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Checking account…
                   </div>
-                ) : builderCodeApproved ? (
-                  <p className="text-xs text-emerald-600/90">Sovereign link complete</p>
+                ) : allReady ? (
+                  <p className="text-xs text-emerald-600/90">Ready</p>
                 ) : (
                   <Button
                     className="h-12 w-full text-base font-semibold"
-                    disabled={!signer}
-                    onClick={() => void handleBuilderSign()}
+                    disabled={!signer || handshakeBusy}
+                    onClick={() => void handleLifetimeHandshake()}
                   >
-                    Sign to link
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Step 4: HL agent */}
-          {isConnected && !wrongChain && builderCodeApproved && (
-            <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
-                <Shield className="h-4 w-4 text-primary" />
-              </div>
-              <div className="min-w-0 flex-1 space-y-2">
-                <p className="text-sm font-medium">4. Approve trading agent</p>
-                <Alert className="border-muted py-2">
-                  <AlertDescription className="text-[11px] leading-relaxed text-muted-foreground">
-                    Enables gas-free order updates. The agent cannot withdraw your funds.
-                  </AlertDescription>
-                </Alert>
-                {mobile && isPreparingHyperliquidSession && (
-                  <div className="flex gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
-                    <Smartphone className="h-4 w-4 shrink-0 text-primary mt-0.5" />
-                    <span className="text-muted-foreground">Confirm in your wallet app if the browser shows no prompt.</span>
-                  </div>
-                )}
-                {hyperliquidSessionReady ? (
-                  <p className="text-xs text-emerald-600/90">Agent active</p>
-                ) : (
-                  <Button
-                    className="h-12 w-full text-base font-semibold"
-                    disabled={isPreparingHyperliquidSession}
-                    onClick={() => void handleHyperliquid()}
-                  >
-                    {isPreparingHyperliquidSession ? (
+                    {handshakeBusy ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Waiting for wallet…
                       </>
                     ) : (
-                      "Approve in wallet"
+                      "Sign & enable trading"
                     )}
                   </Button>
                 )}
@@ -280,7 +247,7 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
             </Button>
             <p className="flex items-start gap-2 text-[11px] text-muted-foreground">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              You can connect from the header anytime; this flow only runs when you trade.
+              This flow runs when you open a trade; it only needs to succeed once per wallet.
             </p>
           </div>
         </div>

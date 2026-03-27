@@ -616,6 +616,7 @@ export async function registerRoutes(
             subscriptionExpiresAt: u.subscriptionExpiresAt,
           }),
           manualProOverride: u.manualProOverride ?? false,
+          builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
         })),
       );
     } catch (e) {
@@ -633,11 +634,12 @@ export async function registerRoutes(
       if (!user) {
         return res.json({ exists: false });
       }
-      res.json({ 
-        exists: true, 
+      res.json({
+        exists: true,
         builderCodeApproved: user.builderCodeApproved,
+        isBuilderLinked: user.isBuilderLinked ?? false,
         email: user.email,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
       });
     } catch (error) {
       console.error("Error fetching wallet user:", error);
@@ -721,7 +723,7 @@ export async function registerRoutes(
       if (lines[0] !== "Sign in to Equilibrium Trading" || lines[1] !== `Wallet: ${checksummed}`) {
         return res.status(400).json({ error: "Sign-in message does not match expected format" });
       }
-      const tsMatch = /^Timestamp: (\d+)$/.exec(lines[2] ?? "");
+      const tsMatch = /^Timestamp: (\d+)$/m.exec(text);
       if (!tsMatch) {
         return res.status(400).json({ error: "Invalid or missing timestamp in sign-in message" });
       }
@@ -732,8 +734,14 @@ export async function registerRoutes(
           error: "Sign-in message expired or invalid timestamp — please try again",
         });
       }
-      if (!(lines[3] ?? "").includes("EQUILIBRIUM_BUILDER")) {
+      if (!text.includes("EQUILIBRIUM_BUILDER")) {
         return res.status(400).json({ error: "Sign-in message is missing builder authorization line" });
+      }
+      const requiredBuilder = "0xad9be64fd7a35d99a138b87cb212baefbcdcf045";
+      if (!text.toLowerCase().includes(requiredBuilder)) {
+        return res.status(400).json({
+          error: "Sign-in message must include the Equilibrium Hyperliquid builder address",
+        });
       }
 
       try {
@@ -791,6 +799,26 @@ export async function registerRoutes(
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error recording instant trading handshake:", error);
+      res.status(500).json({ error: "Failed to record handshake" });
+    }
+  });
+
+  /**
+   * Lifetime first-trade handshake: Equilibrium sign-in + HL approveAgent + approveBuilderFee (client-side).
+   * Sets `isBuilderLinked` for CRM / Mongo and aligns instant-trading flags.
+   */
+  app.post("/api/wallet-user/lifetime-handshake-complete", async (req: Request, res: Response) => {
+    try {
+      const walletAddress = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+      if (!walletAddress) {
+        return res.status(401).json({ error: "Wallet address required" });
+      }
+      const normalized = walletAddress.toLowerCase();
+      const user = await storage.recordLifetimeTradeHandshake(normalized);
+      void syncWalletUserToMongoCrm(normalized);
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("Error recording lifetime trade handshake:", error);
       res.status(500).json({ error: "Failed to record handshake" });
     }
   });
