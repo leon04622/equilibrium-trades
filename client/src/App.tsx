@@ -40,6 +40,7 @@ import { AdminGuard } from "@/components/admin-guard";
 import AdminCommandCenter from "@/pages/AdminPanel";
 import NotFound from "@/pages/not-found";
 import { JournalView } from "@/components/JournalView";
+import { UserTierSync } from "@/components/user-tier-sync";
 
 function App() {
   const style = {
@@ -52,6 +53,7 @@ function App() {
       <ThemeProvider>
         <AppErrorBoundary>
           <WalletProvider>
+            <UserTierSync />
             <TradingProvider>
               <TradeHandshakeProvider>
                 <ChatProvider>

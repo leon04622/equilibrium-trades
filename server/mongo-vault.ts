@@ -118,15 +118,53 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
     subscriptionTier: user.subscriptionTier,
     subscriptionActive: user.subscriptionActive,
     subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+    /** Mirror of subscription end — used by vault / user-status readers. */
+    accessExpires: user.subscriptionExpiresAt ?? null,
     manualProOverride: user.manualProOverride ?? false,
     status: crmSubscriptionStatusFromWallet(user),
     isBuilderLinked: user.isBuilderLinked ?? false,
   };
   await coll.updateOne(
     { $or: [{ wallet }, { walletAddress: wallet }] },
-    { $set: doc, $setOnInsert: { source: "equilibrium_app" } },
+    {
+      $set: doc,
+      $setOnInsert: { source: "equilibrium_app", subTier: "Free", accessExpires: null },
+    },
     { upsert: true },
   );
+}
+
+/** Read persisted tier from Mongo when Postgres has no `wallet_users` row yet. */
+export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): Promise<{
+  subscriptionTier: string;
+  subscriptionActive: boolean;
+  subscriptionExpiresAt: Date | null;
+  subTier: string;
+} | null> {
+  if (!vaultDb) return null;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = walletAddress.trim().toLowerCase();
+  const doc = await coll.findOne({ $or: [{ wallet: w }, { walletAddress: w }] });
+  if (!doc) return null;
+  const tierRaw = String(doc.subscriptionTier ?? "free").toLowerCase();
+  const active = Boolean(doc.subscriptionActive);
+  const expRaw = doc.accessExpires ?? doc.subscriptionExpiresAt;
+  let subscriptionExpiresAt: Date | null = null;
+  if (expRaw instanceof Date) subscriptionExpiresAt = expRaw;
+  else if (expRaw != null && expRaw !== "") {
+    const d = new Date(String(expRaw));
+    subscriptionExpiresAt = Number.isNaN(d.getTime()) ? null : d;
+  }
+  const subTier =
+    doc.subTier != null && String(doc.subTier).trim() !== ""
+      ? String(doc.subTier)
+      : crmDisplayTier(tierRaw);
+  return {
+    subscriptionTier: tierRaw,
+    subscriptionActive: active,
+    subscriptionExpiresAt,
+    subTier,
+  };
 }
 
 function mongoDocToCrmRow(u: Document) {

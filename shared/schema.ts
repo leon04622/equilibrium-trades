@@ -291,6 +291,16 @@ export const adminVideoCreateSchema = z
 
 export type AdminVideoCreateInput = z.infer<typeof adminVideoCreateSchema>;
 
+/** Admin dashboard + payment webhooks — persist tier to Postgres + Mongo CRM sync. */
+export const adminUpdateTierBodySchema = z.object({
+  walletAddress: z.string().trim().regex(/^0x[a-fA-F0-9]{40}$/i, "Invalid wallet address"),
+  newTier: z.string().trim().min(1),
+  /** ISO-8601 end of access; omit for open-ended manual grants. */
+  accessExpires: z.union([z.string(), z.null()]).optional(),
+});
+
+export type AdminUpdateTierBody = z.infer<typeof adminUpdateTierBodySchema>;
+
 // Wallet Users - Database table for persistent storage
 export const walletUsers = pgTable("wallet_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

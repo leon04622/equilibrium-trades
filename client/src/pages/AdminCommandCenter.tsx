@@ -153,11 +153,9 @@ export default function AdminCommandCenter() {
 
   const manualProMutation = useMutation({
     mutationFn: async ({ wallet, enable }: { wallet: string; enable: boolean }) => {
-      const { data, status } = await api.patch(`/api/admin/users/${encodeURIComponent(wallet)}/subscription`, {
-        walletAddress: wallet,
-        subscriptionTier: enable ? "pro" : "free",
-        subscriptionActive: enable,
-        manualProOverride: enable,
+      const { data, status } = await api.patch("/api/admin/update-tier", {
+        walletAddress: wallet.trim(),
+        newTier: enable ? "Pro" : "Free",
       });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) {
@@ -165,10 +163,16 @@ export default function AdminCommandCenter() {
       }
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       void queryClient.invalidateQueries({ queryKey: ["fortress-crm-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+      toast({
+        title: "User updated",
+        description: vars.enable ? "Pro access saved to the database." : "User set to Free in the database.",
+      });
     },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const {

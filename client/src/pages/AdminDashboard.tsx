@@ -300,30 +300,38 @@ export default function AdminDashboard() {
 
   const grantProMutation = useMutation({
     mutationFn: async (wallet: string) => {
-      const enc = encodeURIComponent(wallet);
-      const { data, status } = await api.patch(`/api/users/${enc}/subscription`, { isSubscribed: true });
+      const { data, status } = await api.patch("/api/admin/update-tier", {
+        walletAddress: wallet.trim(),
+        newTier: "Pro",
+      });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) throw new Error((data as { error?: string })?.error || "Update failed");
-      return data;
+      return data as { success?: boolean };
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
-      toast({ title: "Pro granted" });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+      toast({ title: "User updated", description: "Pro access saved to the database." });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const removeProMutation = useMutation({
     mutationFn: async (wallet: string) => {
-      const enc = encodeURIComponent(wallet);
-      const { data, status } = await api.patch(`/api/users/${enc}/subscription`, { removePro: true });
+      const { data, status } = await api.patch("/api/admin/update-tier", {
+        walletAddress: wallet.trim(),
+        newTier: "Free",
+      });
       if (status === 401 || status === 403) throw new Error("Unauthorized");
       if (status < 200 || status >= 300) throw new Error((data as { error?: string })?.error || "Update failed");
-      return data;
+      return data as { success?: boolean };
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
-      toast({ title: "Pro removed", description: "User set to Free (manual override cleared)." });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+      toast({ title: "User updated", description: "User set to Free in the database." });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });

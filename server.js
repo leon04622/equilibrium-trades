@@ -25,6 +25,8 @@
  *   MONGO_CRM_COLLECTION   — default `crm_users` when MONGO_USERS_COLLECTION unset
  *   MONGO_VIDEOS_COLLECTION, MONGO_SUPPORT_COLLECTION — optional collection names
  *   MONGO_TRADE_JOURNAL_COLLECTION — optional; default trade_journal (execution log + coach flags per wallet)
+ *   EQUILIBRIUM_BILLING_SYNC_SECRET — optional; `x-equilibrium-billing-secret` for POST /api/billing/sync-tier (Stripe / payment callbacks)
+ *   Subscription reads: GET /api/user-status/:wallet (Postgres + Stripe + Mongo). Admin tier: PATCH /api/admin/update-tier (master or sovereign wallet).
  */
 import "dotenv/config";
 

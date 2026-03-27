@@ -22,9 +22,10 @@ export function useSubscription() {
   const { address, isConnected } = useWallet();
 
   const { data: subscription, isLoading, error, refetch } = useQuery<SubscriptionStatus>({
-    queryKey: ["/api/stripe/subscription", address],
+    queryKey: ["/api/user-status", address],
     enabled: isConnected && !!address,
-    staleTime: 30000,
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
       const r = await checkSubscription(address!);

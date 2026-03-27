@@ -11,10 +11,12 @@ function isPaidTier(t: string | undefined): boolean {
 }
 
 /**
- * Resolves Pro ($50/mo) vs Mentoring ($500/mo, includes Pro) via `/api/stripe/subscription/:wallet`.
+ * Resolves Pro ($50/mo) vs Mentoring ($500/mo, includes Pro) via `/api/user-status/:wallet`
+ * (Postgres + Stripe + Mongo CRM — same rules as legacy `/api/stripe/subscription`).
  */
 export async function checkSubscription(walletAddress: string): Promise<SubscriptionCheckResult> {
-  const res = await fetch(`/api/stripe/subscription/${walletAddress}`);
+  const enc = encodeURIComponent(walletAddress);
+  const res = await fetch(`/api/user-status/${enc}`, { credentials: "include" });
   if (!res.ok) {
     return {
       tier: "free",

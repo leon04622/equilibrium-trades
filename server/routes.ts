@@ -29,7 +29,12 @@ import {
 } from "./master-admin";
 import { issueCommandCenterWsToken } from "./command-center-ws-token";
 import { pushAdminLog } from "./admin-log-bus";
-import { tryConnectMongoVault, upsertMongoCrmUserFromWallet, type MongoVaultHandle } from "./mongo-vault";
+import {
+  tryConnectMongoVault,
+  upsertMongoCrmUserFromWallet,
+  fetchMongoCrmSubscriptionSnapshot,
+  type MongoVaultHandle,
+} from "./mongo-vault";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -82,6 +87,151 @@ async function syncWalletUserToMongoCrm(walletAddress: string): Promise<void> {
   } catch (e) {
     console.error("[routes] Mongo CRM user sync:", e);
   }
+}
+
+function mongoSubscriptionSnapshotToPayload(
+  mongo: NonNullable<Awaited<ReturnType<typeof fetchMongoCrmSubscriptionSnapshot>>>,
+): {
+  tier: "free" | "pro" | "mentoring" | "elite";
+  active: boolean;
+  expiresAt: string | null;
+  subTier: string;
+} {
+  const t = mongo.subscriptionTier.toLowerCase();
+  let tier: "free" | "pro" | "mentoring" | "elite" = "free";
+  if (t === "pro") tier = "pro";
+  else if (t === "mentoring" || t === "elite") tier = "mentoring";
+  const exp = mongo.subscriptionExpiresAt;
+  const expMs = exp instanceof Date ? exp.getTime() : NaN;
+  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
+  const active = mongo.subscriptionActive && tier !== "free" && expOk;
+  return {
+    tier,
+    active,
+    expiresAt: exp instanceof Date ? exp.toISOString() : null,
+    subTier: mongo.subTier,
+  };
+}
+
+/** Single source of truth for subscription UI (Postgres → Stripe → Mongo CRM fallback). */
+async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise<{
+  tier: "free" | "pro" | "mentoring" | "elite";
+  active: boolean;
+  expiresAt: string | null;
+  subTier: string;
+}> {
+  let walletAddress = walletAddressRaw.trim();
+  try {
+    walletAddress = decodeURIComponent(walletAddress);
+  } catch {
+    /* ignore */
+  }
+  walletAddress = walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(walletAddress)) {
+    return { tier: "free", active: false, expiresAt: null, subTier: "Free" };
+  }
+
+  if (isAdminAddress(walletAddress)) {
+    return { tier: "mentoring", active: true, expiresAt: null, subTier: "Mentor" };
+  }
+
+  const stripeSubscription = await stripeService.getActiveSubscriptionByWalletAddress(walletAddress);
+  if (stripeSubscription) {
+    const user = await storage.getWalletUser(walletAddress);
+    if (user && (user.subscriptionTier !== stripeSubscription.tier || !user.subscriptionActive)) {
+      await storage.updateWalletUserSubscription(
+        walletAddress,
+        stripeSubscription.tier,
+        true,
+        stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null,
+      );
+    }
+    void syncWalletUserToMongoCrm(walletAddress);
+    return {
+      tier: stripeSubscription.tier,
+      active: !!stripeSubscription.active,
+      expiresAt: stripeSubscription.expiresAt ?? null,
+      subTier: crmTierLabel(stripeSubscription.tier),
+    };
+  }
+
+  const user = await storage.getWalletUser(walletAddress);
+  if (!user) {
+    const mongo = await fetchMongoCrmSubscriptionSnapshot(walletAddress);
+    if (mongo) return mongoSubscriptionSnapshotToPayload(mongo);
+    return { tier: "free", active: false, expiresAt: null, subTier: "Free" };
+  }
+
+  if (user.manualProOverride && user.subscriptionTier !== "free") {
+    return {
+      tier: user.subscriptionTier as "pro" | "mentoring" | "elite",
+      active: true,
+      expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
+      subTier: crmTierLabel(user.subscriptionTier),
+    };
+  }
+
+  if (user.subscriptionActive && user.subscriptionTier !== "free") {
+    return {
+      tier: user.subscriptionTier as "pro" | "mentoring" | "elite",
+      active: true,
+      expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
+      subTier: crmTierLabel(user.subscriptionTier),
+    };
+  }
+
+  return { tier: "free", active: false, expiresAt: null, subTier: crmTierLabel("free") };
+}
+
+function parseAdminNewTierInput(raw: string): {
+  subscriptionTier: "free" | "pro" | "mentoring" | "elite";
+  subscriptionActive: boolean;
+  manualProOverride: boolean;
+} | null {
+  const s = raw.trim().toLowerCase();
+  if (s === "free" || s === "none") {
+    return { subscriptionTier: "free", subscriptionActive: false, manualProOverride: false };
+  }
+  if (s === "pro" || s === "50") {
+    return { subscriptionTier: "pro", subscriptionActive: true, manualProOverride: true };
+  }
+  if (s === "mentor" || s === "mentoring" || s === "500" || s === "elite") {
+    return { subscriptionTier: "mentoring", subscriptionActive: true, manualProOverride: true };
+  }
+  return null;
+}
+
+async function persistUserAccessTier(
+  paramWallet: string,
+  subscriptionTier: "free" | "pro" | "mentoring" | "elite",
+  subscriptionActive: boolean,
+  expiresAt: Date | null,
+  manualProOverride: boolean,
+) {
+  const normalized = paramWallet.trim().toLowerCase();
+  let user = await storage.getWalletUser(normalized);
+  if (!user) {
+    await storage.createWalletUser({
+      walletAddress: normalized,
+      subscriptionTier,
+      subscriptionActive,
+      builderCodeApproved: false,
+      manualProOverride,
+    });
+  }
+  await storage.updateWalletUserSubscription(
+    normalized,
+    subscriptionTier,
+    subscriptionActive,
+    expiresAt,
+  );
+  await storage.setManualProOverride(normalized, manualProOverride);
+  user = await storage.getWalletUser(normalized);
+  if (!user) {
+    throw new Error(`persistUserAccessTier: no row after upsert for ${normalized}`);
+  }
+  void syncWalletUserToMongoCrm(normalized);
+  return user;
 }
 
 // ── Simple in-memory cache ──
@@ -999,60 +1149,118 @@ export async function registerRoutes(
     }
   });
 
-  // Get subscription status for a wallet
+  /** Postgres + Stripe + Mongo CRM — primary read for gating vault / signals after wallet connect. */
+  app.get("/api/user-status/:walletAddress", async (req: Request, res: Response) => {
+    try {
+      const payload = await buildWalletSubscriptionPayload(req.params.walletAddress);
+      res.json(payload);
+    } catch (error) {
+      console.error("GET /api/user-status:", error);
+      res.status(500).json({ error: "Failed to load user status" });
+    }
+  });
+
+  /** Legacy path — same effective data as `/api/user-status` (omits `subTier`). */
   app.get("/api/stripe/subscription/:walletAddress", async (req: Request, res: Response) => {
     try {
-      const { walletAddress } = req.params;
-      
-      // Admin wallets get full product access (same as Mentoring tier)
-      if (isAdminAddress(walletAddress)) {
-        return res.json({ tier: "mentoring", active: true, expiresAt: null });
-      }
-
-      // Check Stripe directly for real-time subscription status
-      const stripeSubscription = await stripeService.getActiveSubscriptionByWalletAddress(walletAddress);
-      if (stripeSubscription) {
-        // Keep walletUsers table in sync
-        const user = await storage.getWalletUser(walletAddress);
-        if (user && (user.subscriptionTier !== stripeSubscription.tier || !user.subscriptionActive)) {
-          await storage.updateWalletUserSubscription(
-            walletAddress,
-            stripeSubscription.tier,
-            true,
-            stripeSubscription.expiresAt ? new Date(stripeSubscription.expiresAt) : null
-          );
-        }
-        void syncWalletUserToMongoCrm(walletAddress);
-        return res.json(stripeSubscription);
-      }
-
-      const user = await storage.getWalletUser(walletAddress);
-      if (!user) {
-        return res.json({ tier: 'free', active: false, expiresAt: null });
-      }
-
-      // Admin "Grant Pro" bypass: honor tier even if subscriptionActive was cleared in legacy rows
-      if (user.manualProOverride && user.subscriptionTier !== "free") {
-        return res.json({
-          tier: user.subscriptionTier,
-          active: true,
-          expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
-        });
-      }
-
-      // DB-backed Pro/Mentoring (admin grant) when Stripe has no active subscription
-      if (user.subscriptionActive && user.subscriptionTier !== 'free') {
-        return res.json({
-          tier: user.subscriptionTier,
-          active: true,
-          expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
-        });
-      }
-
-      res.json({ tier: 'free', active: false, expiresAt: null });
+      const payload = await buildWalletSubscriptionPayload(req.params.walletAddress);
+      res.json({
+        tier: payload.tier,
+        active: payload.active,
+        expiresAt: payload.expiresAt,
+      });
     } catch (error) {
       console.error("Error fetching subscription status:", error);
       res.status(500).json({ error: "Failed to fetch subscription status" });
+    }
+  });
+
+  /** Master admin (env) or sovereign `0x1155…` — persists to Postgres + Mongo CRM. */
+  app.patch("/api/admin/update-tier", async (req: Request, res: Response) => {
+    try {
+      const adminWallet = resolveWalletAddressFromRequest(req)?.trim();
+      if (!adminWallet) {
+        return res.status(401).json({ error: "Send x-wallet-address or Authorization: Bearer <0x…>" });
+      }
+      const master = requireMasterAdminWallet(req);
+      if (!isFortressSovereignAddress(adminWallet) && !master.ok) {
+        return res.status(master.status).json({ error: master.error });
+      }
+
+      const { adminUpdateTierBodySchema } = await import("@shared/schema");
+      const parsed = adminUpdateTierBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+      }
+      const { walletAddress, newTier, accessExpires } = parsed.data;
+      const mapped = parseAdminNewTierInput(newTier);
+      if (!mapped) {
+        return res.status(400).json({ error: "newTier must be Free, Pro, or Mentor (or pro / mentoring)" });
+      }
+      let expiresAt: Date | null = null;
+      if (accessExpires != null && String(accessExpires).trim() !== "") {
+        const d = new Date(String(accessExpires));
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ error: "accessExpires must be a valid ISO date" });
+        }
+        expiresAt = d;
+      }
+
+      const user = await persistUserAccessTier(
+        walletAddress,
+        mapped.subscriptionTier,
+        mapped.subscriptionActive,
+        expiresAt,
+        mapped.manualProOverride,
+      );
+      res.json({
+        success: true,
+        user,
+        subTier: crmTierLabel(user.subscriptionTier ?? undefined),
+      });
+    } catch (error) {
+      console.error("PATCH /api/admin/update-tier:", error);
+      res.status(500).json({ error: "Failed to update tier" });
+    }
+  });
+
+  /** Payment provider / automation — header `x-equilibrium-billing-secret: $EQUILIBRIUM_BILLING_SYNC_SECRET`. */
+  app.post("/api/billing/sync-tier", async (req: Request, res: Response) => {
+    try {
+      const want = process.env.EQUILIBRIUM_BILLING_SYNC_SECRET?.trim();
+      const got = String(req.headers["x-equilibrium-billing-secret"] ?? "").trim();
+      if (!want || got !== want) {
+        return res.status(401).json({ error: "Invalid or missing x-equilibrium-billing-secret" });
+      }
+      const { adminUpdateTierBodySchema } = await import("@shared/schema");
+      const parsed = adminUpdateTierBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+      }
+      const { walletAddress, newTier, accessExpires } = parsed.data;
+      const mapped = parseAdminNewTierInput(newTier);
+      if (!mapped) {
+        return res.status(400).json({ error: "Invalid newTier" });
+      }
+      let expiresAt: Date | null = null;
+      if (accessExpires != null && String(accessExpires).trim() !== "") {
+        const d = new Date(String(accessExpires));
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ error: "Invalid accessExpires" });
+        }
+        expiresAt = d;
+      }
+      const user = await persistUserAccessTier(
+        walletAddress,
+        mapped.subscriptionTier,
+        mapped.subscriptionActive,
+        expiresAt,
+        mapped.manualProOverride,
+      );
+      res.json({ success: true, user });
+    } catch (error) {
+      console.error("POST /api/billing/sync-tier:", error);
+      res.status(500).json({ error: "Failed to sync tier" });
     }
   });
 
