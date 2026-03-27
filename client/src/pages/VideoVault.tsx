@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GraduationCap, Loader2, Lock, Play, Sparkles } from "lucide-react";
+import { GraduationCap, Loader2, Lock, Play, Sparkles, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,6 @@ import {
 } from "@/lib/video-vault";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 import ReactPlayer from "react-player";
-import { cn } from "@/lib/utils";
 
 export type VaultItem = {
   id: string;
@@ -93,29 +92,62 @@ function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
 }
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadError(null);
+  }, [url]);
+
+  const origin =
+    typeof window !== "undefined" && window.location?.origin ? window.location.origin : undefined;
+
   return (
-    <div className="relative w-full overflow-hidden rounded-lg bg-black pt-[56.25%]">
+    <div className="relative isolate w-full overflow-hidden rounded-lg bg-black pt-[56.25%]">
       <div className="absolute inset-0">
-        <ReactPlayer
-          key={url}
-          url={url}
-          width="100%"
-          height="100%"
-          controls
-          playing={false}
-          playsinline
-          pip={false}
-          config={{
-            youtube: { playerVars: { rel: 0, playsinline: 1 } },
-            vimeo: { playerOptions: { playsinline: true } },
-            file: {
-              attributes: {
-                playsInline: true,
-                controlsList: "nodownload",
+        {loadError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-zinc-300">
+            <p>{loadError}</p>
+            <Button variant="outline" size="sm" asChild>
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                Open in new tab
+              </a>
+            </Button>
+          </div>
+        ) : (
+          <ReactPlayer
+            key={url}
+            url={url}
+            width="100%"
+            height="100%"
+            style={{ position: "absolute", top: 0, left: 0 }}
+            controls
+            playing={false}
+            playsinline
+            pip={false}
+            onError={() =>
+              setLoadError(
+                "This video could not be loaded in the player (blocked URL, format, or network).",
+              )
+            }
+            config={{
+              youtube: {
+                playerVars: {
+                  rel: 0,
+                  playsinline: 1,
+                  ...(origin ? { origin } : {}),
+                },
               },
-            },
-          }}
-        />
+              vimeo: { playerOptions: { playsinline: true } },
+              file: {
+                attributes: {
+                  playsInline: true,
+                  controlsList: "nodownload",
+                  preload: "metadata",
+                },
+              },
+            }}
+          />
+        )}
       </div>
       <span className="sr-only">{title}</span>
     </div>
@@ -296,21 +328,36 @@ export default function VideoVault() {
         </div>
       </div>
 
-      <Dialog open={!!active} onOpenChange={(o) => !o && setActive(null)}>
+      <Dialog
+        open={!!active}
+        onOpenChange={(open) => {
+          if (!open) setActive(null);
+        }}
+      >
         <DialogContent
-          className={cn(
-            "max-w-4xl w-[calc(100vw-1rem)] gap-4 p-4 sm:p-6",
-            // Radix centers with translate; that stacking context can break embedded iframes.
-            "fixed inset-0 left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col items-center justify-center border-0 bg-transparent p-3 shadow-none sm:rounded-none sm:p-6",
-            "data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-left-0 data-[state=closed]:slide-out-to-top-0",
-          )}
+          hideClose
+          className="flex max-h-[min(90dvh,920px)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-4 overflow-y-auto p-4 sm:p-6"
         >
           {active && (
-            <div className="flex max-h-[min(90dvh,920px)] w-full max-w-4xl flex-col gap-4 overflow-y-auto rounded-lg border bg-background p-4 shadow-lg sm:p-6">
-              <DialogHeader>
-                <DialogTitle className="pr-8 leading-snug">{active.title}</DialogTitle>
-                <DialogDescription>{active.description}</DialogDescription>
-              </DialogHeader>
+            <>
+              <div className="flex items-start gap-3">
+                <DialogHeader className="min-w-0 flex-1 space-y-2 text-left">
+                  <DialogTitle className="leading-snug pr-1">{active.title}</DialogTitle>
+                  <DialogDescription className="line-clamp-4 sm:line-clamp-none">
+                    {active.description}
+                  </DialogDescription>
+                </DialogHeader>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 rounded-full border shadow-sm"
+                  aria-label="Close video"
+                  onClick={() => setActive(null)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
               {canPlayVideos ? (
                 active.videoUrl.trim() ? (
                   <PlayerFrame url={active.videoUrl} title={active.title} />
@@ -334,7 +381,7 @@ export default function VideoVault() {
                   </Button>
                 </div>
               )}
-            </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
