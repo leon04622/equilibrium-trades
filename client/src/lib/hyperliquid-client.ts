@@ -11,6 +11,7 @@ import {
 } from "@/lib/hyperliquid-platform-config";
 import { isUserRejectedWalletError } from "@/lib/wallet-errors";
 import { signTypedDataHyperliquid } from "@/lib/eip712-typed-data";
+import { fetchApexHlOnboardingSnapshot } from "@/lib/hyperliquid-onboarding";
 
 type HlWalletAuthStep = "ok" | "user_cancelled" | "failed";
 
@@ -241,6 +242,19 @@ export async function ensureHyperliquidTradingSession(
 
     if (isBuilderFeeConfigured()) {
       const feeKey = builderFeeApprovedKey(userAddress);
+      if (!localStorage.getItem(feeKey)) {
+        try {
+          const snap = await fetchApexHlOnboardingSnapshot(userAddress, null);
+          if (snap.builderFeeOk) {
+            localStorage.setItem(feeKey, "1");
+          }
+        } catch (e) {
+          console.warn(
+            "[Hyperliquid] Could not read maxBuilderFee from Info API; may prompt approveBuilderFee",
+            e,
+          );
+        }
+      }
       if (!localStorage.getItem(feeKey)) {
         const feeResult = await approveBuilderFee(signer);
         if (feeResult === "ok") {
