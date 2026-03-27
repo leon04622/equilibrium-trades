@@ -84,13 +84,13 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
-/** Educational Vault — lessons loaded from the API (`tutorial_videos` in PostgreSQL), grouped by category → academy section. */
+/** Educational Vault — lessons from GET /api/videos, grouped by admin category → Beginner Patterns / SMA Masterclass / Live Sessions. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
   const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
-  /** Same database rows as Admin Command Center; refetched for all visitors (playback stays Pro). */
+  /** Same /api/videos list as Admin Command Center; refetched for all visitors (playback stays Pro). */
   const {
     data: apiVideos = [],
     isLoading: listLoading,
@@ -147,8 +147,9 @@ export default function VideoVault() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Pro-only library synced from the server database (same entries as the Command Center). Grouped by Beginner
-            Patterns, SMA Masterclass, and Live Sessions.
+            Pro-only library loaded from <code className="text-xs">/api/videos</code> (same entries as Command Center).
+            Sections follow the category you set when publishing (Beginner Patterns, SMA Masterclass, Live Trading
+            Sessions).
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}

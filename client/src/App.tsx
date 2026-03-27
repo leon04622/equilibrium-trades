@@ -30,7 +30,7 @@ import Candles from "@/pages/candles";
 import Learn from "@/pages/learn";
 import Signals from "@/pages/signals";
 import Heatmap from "@/pages/heatmap";
-import VideoVault from "@/pages/VideoVault";
+import EducationalVault from "@/pages/EducationalVault";
 import Portfolio from "@/pages/portfolio";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
@@ -118,7 +118,7 @@ function TradingLayout() {
               <Route path="/learn" element={<Learn />} />
               <Route path="/signals" element={<Signals />} />
               <Route path="/heatmap" element={<Heatmap />} />
-              <Route path="/videos" element={<VideoVault />} />
+              <Route path="/videos" element={<EducationalVault />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/subscribe" element={<Pricing />} />

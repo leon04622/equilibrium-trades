@@ -29,6 +29,7 @@ import {
 } from "./master-admin";
 import { issueCommandCenterWsToken } from "./command-center-ws-token";
 import { pushAdminLog } from "./admin-log-bus";
+import { tryConnectMongoVault, type MongoVaultHandle } from "./mongo-vault";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -38,6 +39,8 @@ import {
 } from "./admin-equilibrium-auth";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 import { isFortressSovereignAddress } from "./fortress-admin";
+
+let mongoVaultHandle: MongoVaultHandle | null = null;
 
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
@@ -72,6 +75,9 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
 
 /** POST /api/videos and POST /api/admin/videos — sovereign wallet only (`x-wallet-address` or Bearer wallet). */
 async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
+  if (mongoVaultHandle) {
+    return mongoVaultHandle.handlePostVideo(req, res);
+  }
   const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
@@ -113,6 +119,9 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
 }
 
 async function deleteCommandCenterVideo(req: Request, res: Response): Promise<void> {
+  if (mongoVaultHandle) {
+    return mongoVaultHandle.handleDeleteVideo(req, res);
+  }
   const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
@@ -136,6 +145,8 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  mongoVaultHandle = await tryConnectMongoVault();
+
   app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
     const walletAddress = req.headers["x-wallet-address"] as string | undefined;
     res.json({
@@ -509,6 +520,9 @@ export async function registerRoutes(
 
   // Tutorial Videos API — explicit JSON shape so clients always receive camelCase fields.
   app.get("/api/videos", async (req: Request, res: Response) => {
+    if (mongoVaultHandle) {
+      return mongoVaultHandle.handleGetVideos(req, res);
+    }
     try {
       const videos = await storage.getAllVideos();
       res.json(
@@ -548,6 +562,9 @@ export async function registerRoutes(
 
   /** CRM projection for Command Center — sovereign wallet only. */
   app.get("/api/crm/users", async (req: Request, res: Response) => {
+    if (mongoVaultHandle) {
+      return mongoVaultHandle.handleGetCrmUsers(req, res);
+    }
     const auth = requireMasterAdminWallet(req);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     try {
@@ -916,6 +933,9 @@ export async function registerRoutes(
   // Get messages for a conversation — wallet users own their conversation, guests own their session, admins can access all
   app.get("/api/support/messages/:conversationId", async (req: Request, res: Response) => {
     try {
+      if (mongoVaultHandle) {
+        return mongoVaultHandle.handleGetSupportMessagesConversation(req, res);
+      }
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       const sessionId = req.headers["x-session-id"] as string | undefined;
       const conversationId = req.params.conversationId.toLowerCase();
@@ -940,6 +960,9 @@ export async function registerRoutes(
   // Get all conversations — master admin wallet only (Equilibrium Command Center / inbox)
   app.get("/api/support/conversations", async (req: Request, res: Response) => {
     try {
+      if (mongoVaultHandle) {
+        return mongoVaultHandle.handleGetSupportConversations(req, res);
+      }
       const walletAddress = resolveWalletAddressFromRequest(req);
       if (!isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Master admin wallet required" });
@@ -954,6 +977,9 @@ export async function registerRoutes(
 
   /** Master admin: full support inbox (same rows as `support_tickets` / legacy name support_messages). */
   app.get("/api/support", async (req: Request, res: Response) => {
+    if (mongoVaultHandle) {
+      return mongoVaultHandle.handleGetSupportInbox(req, res);
+    }
     try {
       const auth = requireMasterAdminWallet(req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -969,6 +995,9 @@ export async function registerRoutes(
   // Send a message — end-users / guests, or master admin (support replies from bubble)
   app.post("/api/support/messages", async (req: Request, res: Response) => {
     try {
+      if (mongoVaultHandle) {
+        return mongoVaultHandle.handleSupportMessagesPost(req, res);
+      }
       const { insertSupportMessageSchema } = await import("@shared/schema");
       const walletAddress =
         resolveWalletAddressFromRequest(req) || (req.headers["x-wallet-address"] as string | undefined);
@@ -1015,6 +1044,9 @@ export async function registerRoutes(
   /** Preferred user support path: wallet + timestamp + body → support_tickets. */
   async function handleSupportSendRequest(req: Request, res: Response): Promise<void> {
     try {
+      if (mongoVaultHandle) {
+        return await mongoVaultHandle.handleSupportSend(req, res);
+      }
       const { supportSendBodySchema, insertSupportMessageSchema } = await import("@shared/schema");
       const parsed = supportSendBodySchema.safeParse(req.body);
       if (!parsed.success) {
@@ -1184,6 +1216,9 @@ export async function registerRoutes(
   // Mark messages as read — master admin only
   app.post("/api/support/messages/:conversationId/read", async (req: Request, res: Response) => {
     try {
+      if (mongoVaultHandle) {
+        return mongoVaultHandle.handleMarkSupportRead(req, res);
+      }
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       if (!isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Master admin wallet required" });

@@ -185,11 +185,23 @@ export default function AdminCommandCenter() {
       clearVideoForm();
       void queryClient.invalidateQueries({ queryKey: ["fortress-videos"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
-      toast({ title: "Success", description: "Video saved to the library." });
+      toast({
+        title: "Video Added Successfully",
+        className:
+          "border-emerald-500/55 bg-emerald-950/95 text-emerald-50 shadow-lg shadow-emerald-900/20",
+      });
       void refetchVideos();
     },
-    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const saveVideoToLibrary = async () => {
+    try {
+      await addVideo.mutateAsync();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    }
+  };
 
   const removeVideo = useMutation({
     mutationFn: async (id: string) => {
@@ -217,7 +229,8 @@ export default function AdminCommandCenter() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Admin Command Center</h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-            Sovereign wallet only. Videos, CRM, and support tickets are served from PostgreSQL — same data as the
+            Sovereign wallet only. With <code className="text-[10px]">MONGODB_URI</code>, videos, CRM, and support are
+            stored in MongoDB; otherwise PostgreSQL. Same <code className="text-[10px]">/api/videos</code> feed as the
             Educational Vault.
           </p>
           <p className="text-[10px] text-muted-foreground/80 font-mono mt-2 break-all">
@@ -305,7 +318,7 @@ export default function AdminCommandCenter() {
                 />
               </div>
               <Button
-                onClick={() => void addVideo.mutate()}
+                onClick={() => void saveVideoToLibrary()}
                 disabled={addVideo.isPending}
                 className="gap-2"
               >
@@ -319,7 +332,7 @@ export default function AdminCommandCenter() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Published lessons</CardTitle>
-                <CardDescription>Stored in tutorial_videos — visible on /videos</CardDescription>
+                <CardDescription>From GET /api/videos — visible on /videos (grouped by category)</CardDescription>
               </div>
               <Button variant="ghost" size="icon" onClick={() => void refetchVideos()} aria-label="Refresh">
                 <RefreshCw className={cn("h-4 w-4", videosLoading && "animate-spin")} />
@@ -456,7 +469,7 @@ export default function AdminCommandCenter() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Support desk</CardTitle>
-                <CardDescription>All rows from support_tickets (newest first)</CardDescription>
+                <CardDescription>GET /api/support — all tickets (MongoDB when MONGODB_URI is set)</CardDescription>
               </div>
               <Button variant="ghost" size="icon" onClick={() => void refetchSupport()} aria-label="Refresh support">
                 <RefreshCw className={cn("h-4 w-4", supportLoading && "animate-spin")} />

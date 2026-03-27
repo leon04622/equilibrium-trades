@@ -1,0 +1,456 @@
+import type { Request, Response } from "express";
+import { randomUUID } from "crypto";
+import { MongoClient, ObjectId, type Db, type Collection, type Document } from "mongodb";
+import { adminVideoCreateSchema, insertSupportMessageSchema, supportSendBodySchema } from "@shared/schema";
+import type { InsertSupportMessage, SupportMessage } from "@shared/schema";
+import { isFortressSovereignAddress } from "./fortress-admin";
+import {
+  resolveWalletAddressFromRequest,
+  requireMasterAdminWallet,
+  isMasterAdminAddress,
+} from "./master-admin";
+import { pushAdminLog } from "./admin-log-bus";
+import { emitSupportMessage } from "./support-events";
+
+const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION || "vault_videos";
+const CRM_COLL = process.env.MONGO_CRM_COLLECTION || "crm_users";
+const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
+
+export type MongoVaultHandle = {
+  handleGetVideos(req: Request, res: Response): Promise<void>;
+  handlePostVideo(req: Request, res: Response): Promise<void>;
+  handleDeleteVideo(req: Request, res: Response): Promise<void>;
+  handleGetCrmUsers(req: Request, res: Response): Promise<void>;
+  handleGetSupportInbox(req: Request, res: Response): Promise<void>;
+  handleSupportSend(req: Request, res: Response): Promise<void>;
+  handleSupportMessagesPost(req: Request, res: Response): Promise<void>;
+  handleGetSupportMessagesConversation(req: Request, res: Response): Promise<void>;
+  handleGetSupportConversations(req: Request, res: Response): Promise<void>;
+  handleMarkSupportRead(req: Request, res: Response): Promise<void>;
+};
+
+function videoDocToApi(doc: Document & { _id: ObjectId }) {
+  const created = doc.createdAt instanceof Date ? doc.createdAt : new Date(doc.createdAt || Date.now());
+  return {
+    id: doc._id.toString(),
+    title: String(doc.title ?? ""),
+    description: String(doc.description ?? ""),
+    duration: String(doc.duration ?? ""),
+    category: String(doc.category ?? ""),
+    youtubeId: doc.youtubeId != null ? String(doc.youtubeId) : null,
+    videoPath: doc.videoPath != null ? String(doc.videoPath) : null,
+    thumbnailPath: doc.thumbnailPath != null ? String(doc.thumbnailPath) : null,
+    academySection: doc.academySection != null ? String(doc.academySection) : null,
+    createdAt: created.toISOString(),
+  };
+}
+
+function rowToSupportMessage(doc: Document): SupportMessage {
+  const createdAt =
+    doc.createdAt instanceof Date ? doc.createdAt : new Date(doc.createdAt || Date.now());
+  const clientSentAt =
+    doc.clientSentAt == null
+      ? null
+      : doc.clientSentAt instanceof Date
+        ? doc.clientSentAt
+        : new Date(doc.clientSentAt);
+  return {
+    id: String(doc.id || doc._id),
+    senderType: String(doc.senderType),
+    senderWallet: doc.senderWallet != null ? String(doc.senderWallet) : null,
+    senderName: doc.senderName != null ? String(doc.senderName) : null,
+    message: String(doc.message),
+    isRead: Boolean(doc.isRead),
+    conversationId: String(doc.conversationId).toLowerCase(),
+    walletAddress: doc.walletAddress != null ? String(doc.walletAddress) : null,
+    clientSentAt,
+    createdAt,
+  };
+}
+
+function createHandle(db: Db): MongoVaultHandle {
+  const videos: Collection<Document> = db.collection(VIDEOS_COLL);
+  const crm: Collection<Document> = db.collection(CRM_COLL);
+  const tickets: Collection<Document> = db.collection(SUPPORT_COLL);
+
+  return {
+    async handleGetVideos(_req: Request, res: Response): Promise<void> {
+      try {
+        const docs = await videos.find({}).sort({ createdAt: -1 }).toArray();
+        res.json(docs.map((d) => videoDocToApi(d as Document & { _id: ObjectId })));
+      } catch (e) {
+        console.error("[mongo-vault] GET /api/videos:", e);
+        res.status(500).json({ error: "Failed to fetch videos" });
+      }
+    },
+
+    async handlePostVideo(req: Request, res: Response): Promise<void> {
+      const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
+      if (!walletAddress) {
+        res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+        return;
+      }
+      if (!isFortressSovereignAddress(walletAddress)) {
+        res.status(403).json({ error: "Sovereign admin wallet required" });
+        return;
+      }
+      try {
+        const parsed = adminVideoCreateSchema.safeParse(
+          req.body && typeof req.body === "object" ? req.body : {},
+        );
+        if (!parsed.success) {
+          res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
+          return;
+        }
+        const row = parsed.data;
+        if (!row.youtubeId?.trim() && !row.videoPath?.trim()) {
+          res.status(400).json({ error: "Could not resolve video URL (YouTube, Vimeo, or direct link)" });
+          return;
+        }
+        const now = new Date();
+        const insertDoc = {
+          title: row.title,
+          description: row.description,
+          duration: row.duration,
+          category: row.category,
+          youtubeId: row.youtubeId ?? null,
+          videoPath: row.videoPath ?? null,
+          thumbnailPath: row.thumbnailPath ?? null,
+          academySection: row.academySection ?? null,
+          createdAt: now,
+        };
+        const r = await videos.insertOne(insertDoc);
+        res.json(videoDocToApi({ ...insertDoc, _id: r.insertedId }));
+      } catch (e) {
+        console.error("[mongo-vault] POST /api/videos:", e);
+        res.status(500).json({ error: "Failed to create video" });
+      }
+    },
+
+    async handleDeleteVideo(req: Request, res: Response): Promise<void> {
+      const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
+      if (!walletAddress) {
+        res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+        return;
+      }
+      if (!isFortressSovereignAddress(walletAddress)) {
+        res.status(403).json({ error: "Sovereign admin wallet required" });
+        return;
+      }
+      try {
+        const raw = req.params.id;
+        let deleted = 0;
+        if (ObjectId.isValid(raw)) {
+          try {
+            const dr = await videos.deleteOne({ _id: new ObjectId(raw) });
+            deleted = dr.deletedCount;
+          } catch {
+            /* ignore invalid hex */
+          }
+        }
+        if (!deleted) {
+          const dr = await videos.deleteOne({ id: raw });
+          deleted = dr.deletedCount;
+        }
+        if (deleted) res.json({ success: true });
+        else res.status(404).json({ error: "Video not found" });
+      } catch (e) {
+        console.error("[mongo-vault] DELETE /api/videos/:id:", e);
+        res.status(500).json({ error: "Failed to delete video" });
+      }
+    },
+
+    async handleGetCrmUsers(req: Request, res: Response): Promise<void> {
+      const auth = requireMasterAdminWallet(req);
+      if (!auth.ok) {
+        res.status(auth.status).json({ error: auth.error });
+        return;
+      }
+      try {
+        const rows = await crm.find({}).toArray();
+        const out = rows.map((u) => ({
+          wallet: String(u.wallet ?? u.walletAddress ?? ""),
+          email: u.email != null && u.email !== "" ? String(u.email) : null,
+          joinDate:
+            u.joinDate != null
+              ? u.joinDate instanceof Date
+                ? u.joinDate.toISOString()
+                : String(u.joinDate)
+              : u.createdAt instanceof Date
+                ? u.createdAt.toISOString()
+                : u.createdAt != null
+                  ? String(u.createdAt)
+                  : null,
+          subTier: String(u.subTier ?? u.subscriptionTier ?? "free"),
+        }));
+        res.json(out.filter((r) => r.wallet));
+      } catch (e) {
+        console.error("[mongo-vault] GET /api/crm/users:", e);
+        res.status(500).json({ error: "Failed to fetch CRM users" });
+      }
+    },
+
+    async handleGetSupportInbox(req: Request, res: Response): Promise<void> {
+      try {
+        const auth = requireMasterAdminWallet(req);
+        if (!auth.ok) {
+          res.status(auth.status).json({ error: auth.error });
+          return;
+        }
+        const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 2000);
+        const docs = await tickets.find({}).sort({ createdAt: -1 }).limit(limit).toArray();
+        res.json(docs.map((d) => rowToSupportMessage(d)));
+      } catch (err) {
+        console.error("[mongo-vault] GET /api/support:", err);
+        res.status(500).json({ error: "Failed to fetch support messages" });
+      }
+    },
+
+    async handleSupportSend(req: Request, res: Response): Promise<void> {
+      try {
+        const parsed = supportSendBodySchema.safeParse(req.body);
+        if (!parsed.success) {
+          pushAdminLog({
+            channel: "support",
+            level: "warn",
+            message: "POST support send validation failed",
+            meta: { issues: parsed.error.flatten() },
+          });
+          res.status(400).json({ error: "Invalid body", details: parsed.error.errors });
+          return;
+        }
+
+        const bodyWallet = parsed.data.walletAddress.trim();
+        const conversationId = (parsed.data.conversationId?.trim() || bodyWallet).toLowerCase();
+        const headerWallet = (req.headers["x-wallet-address"] as string | undefined)?.trim();
+        const sessionId = (req.headers["x-session-id"] as string | undefined)?.trim();
+        const asAdmin = isMasterAdminAddress(headerWallet);
+
+        if (!asAdmin) {
+          const owner = (headerWallet || sessionId || "").toLowerCase();
+          if (!owner || owner !== conversationId) {
+            pushAdminLog({
+              channel: "support",
+              level: "warn",
+              message: "support/send denied (conversation owner mismatch)",
+              meta: { conversationId },
+            });
+            res.status(403).json({ error: "Access denied" });
+            return;
+          }
+          if (headerWallet && headerWallet.toLowerCase() !== bodyWallet.toLowerCase()) {
+            res.status(403).json({ error: "walletAddress must match connected wallet" });
+            return;
+          }
+        }
+
+        let clientSentAt: Date;
+        if (parsed.data.clientTimestamp) {
+          const d = new Date(parsed.data.clientTimestamp);
+          clientSentAt = Number.isNaN(d.getTime()) ? new Date() : d;
+        } else {
+          clientSentAt = new Date();
+        }
+
+        const messageData = {
+          conversationId,
+          senderType: asAdmin ? ("admin" as const) : ("user" as const),
+          senderWallet: asAdmin ? null : bodyWallet.toLowerCase(),
+          senderName: asAdmin
+            ? "Support Team"
+            : headerWallet
+              ? `User ${headerWallet.slice(0, 6)}…${headerWallet.slice(-4)}`
+              : "Guest",
+          message: parsed.data.message,
+          isRead: false,
+          walletAddress: asAdmin ? null : bodyWallet.toLowerCase(),
+          clientSentAt,
+        };
+
+        const validated = insertSupportMessageSchema.safeParse(messageData);
+        if (!validated.success) {
+          pushAdminLog({
+            channel: "support",
+            level: "warn",
+            message: "support/send insert validation failed",
+            meta: { details: validated.error.errors },
+          });
+          res.status(400).json({ error: "Invalid message payload", details: validated.error.errors });
+          return;
+        }
+
+        pushAdminLog({
+          channel: "support",
+          level: "info",
+          message: "support/send persisting ticket (Mongo)",
+          meta: { conversationId, bytes: parsed.data.message.length },
+        });
+
+        const message = await insertSupportTicket(tickets, validated.data);
+        emitSupportMessage(message);
+        res.json(message);
+      } catch (error) {
+        console.error("[mongo-vault] support/send:", error);
+        pushAdminLog({ channel: "support", level: "error", message: String(error) });
+        res.status(500).json({ error: "Failed to send message" });
+      }
+    },
+
+    async handleSupportMessagesPost(req: Request, res: Response): Promise<void> {
+      try {
+        const walletAddress =
+          resolveWalletAddressFromRequest(req) || (req.headers["x-wallet-address"] as string | undefined);
+        const sessionId = req.headers["x-session-id"] as string | undefined;
+        const asAdmin = isMasterAdminAddress(walletAddress);
+        const conversationId = String(req.body.conversationId || "").toLowerCase();
+
+        if (!conversationId) {
+          res.status(400).json({ error: "conversationId is required" });
+          return;
+        }
+
+        if (!asAdmin) {
+          const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
+          if (!ownerIdentifier || ownerIdentifier !== conversationId) {
+            res.status(403).json({ error: "Can only send to your own conversation" });
+            return;
+          }
+        }
+
+        const messageData = {
+          ...req.body,
+          senderType: asAdmin ? "admin" : "user",
+          senderWallet: asAdmin ? null : (walletAddress?.toLowerCase() || null),
+          conversationId,
+          walletAddress: asAdmin ? null : (walletAddress?.toLowerCase() ?? null),
+          clientSentAt: req.body.clientSentAt ? new Date(req.body.clientSentAt) : null,
+        };
+
+        const validated = insertSupportMessageSchema.safeParse(messageData);
+        if (!validated.success) {
+          res.status(400).json({ error: "Invalid input", details: validated.error.errors });
+          return;
+        }
+        const message = await insertSupportTicket(tickets, validated.data);
+        emitSupportMessage(message);
+        res.json(message);
+      } catch (error) {
+        console.error("[mongo-vault] POST /api/support/messages:", error);
+        res.status(500).json({ error: "Failed to send message" });
+      }
+    },
+
+    async handleGetSupportMessagesConversation(req: Request, res: Response): Promise<void> {
+      try {
+        const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+        const sessionId = req.headers["x-session-id"] as string | undefined;
+        const conversationId = req.params.conversationId.toLowerCase();
+        const master = isMasterAdminAddress(walletAddress);
+
+        if (!master) {
+          const ownerIdentifier = (walletAddress || sessionId || "").toLowerCase();
+          if (!ownerIdentifier || ownerIdentifier !== conversationId) {
+            res.status(403).json({ error: "Access denied" });
+            return;
+          }
+        }
+
+        const docs = await tickets
+          .find({ conversationId })
+          .sort({ createdAt: 1 })
+          .toArray();
+        res.json(docs.map((d) => rowToSupportMessage(d)));
+      } catch (error) {
+        console.error("[mongo-vault] GET support messages:", error);
+        res.status(500).json({ error: "Failed to fetch messages" });
+      }
+    },
+
+    async handleGetSupportConversations(req: Request, res: Response): Promise<void> {
+      try {
+        const walletAddress = resolveWalletAddressFromRequest(req);
+        if (!isMasterAdminAddress(walletAddress)) {
+          res.status(403).json({ error: "Master admin wallet required" });
+          return;
+        }
+        const all = await tickets.find({}).sort({ createdAt: -1 }).toArray();
+        const messages = all.map((d) => rowToSupportMessage(d));
+        const conversationMap = new Map<string, SupportMessage[]>();
+        for (const msg of messages) {
+          const cid = msg.conversationId.toLowerCase();
+          if (!conversationMap.has(cid)) conversationMap.set(cid, []);
+          conversationMap.get(cid)!.push(msg);
+        }
+        const out = Array.from(conversationMap.entries()).map(([conversationId, msgs]) => ({
+          conversationId,
+          lastMessage: msgs[0],
+          unreadCount: msgs.filter((m) => !m.isRead && m.senderType === "user").length,
+        }));
+        res.json(out);
+      } catch (error) {
+        console.error("[mongo-vault] GET /api/support/conversations:", error);
+        res.status(500).json({ error: "Failed to fetch conversations" });
+      }
+    },
+
+    async handleMarkSupportRead(req: Request, res: Response): Promise<void> {
+      try {
+        const walletAddress = req.headers["x-wallet-address"] as string | undefined;
+        if (!isMasterAdminAddress(walletAddress)) {
+          res.status(403).json({ error: "Master admin wallet required" });
+          return;
+        }
+        const cid = req.params.conversationId.toLowerCase();
+        await tickets.updateMany({ conversationId: cid }, { $set: { isRead: true } });
+        res.json({ success: true });
+      } catch (error) {
+        console.error("[mongo-vault] mark read:", error);
+        res.status(500).json({ error: "Failed to mark messages as read" });
+      }
+    },
+  };
+}
+
+async function insertSupportTicket(
+  coll: Collection<Document>,
+  message: InsertSupportMessage,
+): Promise<SupportMessage> {
+  const id = randomUUID();
+  const now = new Date();
+  const doc = {
+    id,
+    senderType: message.senderType,
+    senderWallet: message.senderWallet?.toLowerCase() || null,
+    senderName: message.senderName || null,
+    message: message.message,
+    isRead: message.isRead || false,
+    conversationId: message.conversationId.toLowerCase(),
+    walletAddress: message.walletAddress?.toLowerCase() ?? null,
+    clientSentAt: message.clientSentAt ?? null,
+    createdAt: now,
+  };
+  await coll.insertOne(doc);
+  return rowToSupportMessage(doc);
+}
+
+let cachedClient: MongoClient | null = null;
+
+export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
+  const uri = process.env.MONGODB_URI?.trim();
+  if (!uri) return null;
+  try {
+    if (!cachedClient) {
+      cachedClient = new MongoClient(uri);
+      await cachedClient.connect();
+      console.log("[mongo-vault] Connected to MongoDB (Admin / Educational Vault / Support)");
+    }
+    const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
+    const db = cachedClient.db(dbName);
+    return createHandle(db);
+  } catch (e) {
+    console.error("[mongo-vault] MongoDB connection failed:", e);
+    cachedClient = null;
+    return null;
+  }
+}
+
