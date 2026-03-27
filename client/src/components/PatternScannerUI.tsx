@@ -290,7 +290,9 @@ function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
 /** Institutional-style pattern scanner — Apex geometric engine, 30s refresh, MTF SMMA context. */
 export function PatternScannerUI() {
   const { address } = useWallet();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
+  const forceNocacheRef = useRef(false);
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() => [...SCAN_ALL_TIMEFRAMES]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [draftAllMarkets, setDraftAllMarkets] = useState(true);
