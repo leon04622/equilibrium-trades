@@ -113,8 +113,9 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
     });
     res.json(video);
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     console.error("POST /api/videos (unified):", error);
-    res.status(500).json({ error: "Failed to create video" });
+    res.status(500).json({ error: "Failed to create video", detail });
   }
 }
 

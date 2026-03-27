@@ -108,22 +108,31 @@ function createHandle(db: Db): MongoVaultHandle {
           return;
         }
         const now = new Date();
-        const insertDoc = {
-          title: row.title,
-          description: row.description,
-          duration: row.duration,
-          category: row.category,
-          youtubeId: row.youtubeId ?? null,
-          videoPath: row.videoPath ?? null,
-          thumbnailPath: row.thumbnailPath ?? null,
-          academySection: row.academySection ?? null,
+        const insertDoc: Record<string, unknown> = {
+          title: String(row.title),
+          description: String(row.description),
+          duration: String(row.duration ?? ""),
+          category: String(row.category),
+          youtubeId: row.youtubeId?.trim() ? String(row.youtubeId).trim() : null,
+          videoPath: row.videoPath?.trim() ? String(row.videoPath).trim() : null,
+          thumbnailPath: row.thumbnailPath?.trim() ? String(row.thumbnailPath).trim() : null,
+          academySection: row.academySection ? String(row.academySection) : null,
           createdAt: now,
         };
         const r = await videos.insertOne(insertDoc);
-        res.json(videoDocToApi({ ...insertDoc, _id: r.insertedId }));
+        res.json(
+          videoDocToApi({
+            ...insertDoc,
+            _id: r.insertedId,
+          } as Document & { _id: ObjectId }),
+        );
       } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
         console.error("[mongo-vault] POST /api/videos:", e);
-        res.status(500).json({ error: "Failed to create video" });
+        res.status(500).json({
+          error: "Failed to create video",
+          detail,
+        });
       }
     },
 

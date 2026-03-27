@@ -57,7 +57,8 @@ function useSovereignApi(address: string | null | undefined): AxiosInstance {
     const client = axios.create({
       baseURL: "/",
       headers: { "Content-Type": "application/json" },
-      validateStatus: (s) => s < 500,
+      /** So 4xx/5xx still return `data` — we parse errors in each mutation (axios default hides body on 500). */
+      validateStatus: () => true,
     });
     client.interceptors.request.use((config) => {
       if (address) {
@@ -206,8 +207,11 @@ export default function AdminCommandCenter() {
         throw new Error((data as { error?: string })?.error || "Unauthorized");
       }
       if (status < 200 || status >= 300) {
-        const body = data as { error?: string; details?: unknown };
-        let msg = body?.error || "Save failed";
+        const body = data as { error?: string; detail?: string; details?: unknown };
+        let msg =
+          (typeof body?.detail === "string" && body.detail) ||
+          body?.error ||
+          `Save failed (${status})`;
         if (body?.details != null) {
           msg += ` — ${typeof body.details === "string" ? body.details : JSON.stringify(body.details)}`;
         }
