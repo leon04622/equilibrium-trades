@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, type ChangeEvent } from "react";
 import { Link } from "react-router-dom";
 import axios, { type AxiosInstance } from "axios";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,11 +8,11 @@ import {
   Trash2,
   Video,
   Users,
-  MessageSquareText,
   ArrowUpDown,
   Shield,
+  Upload,
 } from "lucide-react";
-import type { SupportMessage, TutorialVideo } from "@shared/schema";
+import type { TutorialVideo } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { useWallet } from "@/lib/wallet-context";
 import { useToast } from "@/hooks/use-toast";
+import { useUpload } from "@/hooks/use-upload";
 import { parseVideosApiList } from "@/lib/video-vault";
 import { FORTRESS_SOVEREIGN_WALLET } from "@/lib/fortress-admin";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,7 @@ export default function AdminCommandCenter() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const api = useSovereignApi(address);
+  const { uploadFile, isUploading: isVideoFileUploading, error: videoUploadHookError } = useUpload();
 
   const [tab, setTab] = useState("videos");
   const [crmSort, setCrmSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
@@ -100,7 +102,9 @@ export default function AdminCommandCenter() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("SMA Masterclass");
   const [description, setDescription] = useState("");
-  const [videoUrl, setVideoUrl] = useState("");
+  /** Playable URL after upload (absolute) or optional direct https MP4. */
+  const [videoPlayUrl, setVideoPlayUrl] = useState("");
+  const [uploadedFileLabel, setUploadedFileLabel] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
 
   const { data: crmUsers = [], isLoading: crmLoading, isError: crmError, error: crmErrorObj, refetch: refetchCrm } = useQuery({
@@ -141,61 +145,61 @@ export default function AdminCommandCenter() {
     },
   });
 
-  const {
-    data: supportFeed = [],
-    isLoading: supportLoading,
-    isError: supportError,
-    error: supportErrorObj,
-    refetch: refetchSupport,
-  } = useQuery({
-    queryKey: ["fortress-support", address],
-    enabled: !!address,
-    refetchInterval: tab === "support" ? 2500 : false,
-    queryFn: async () => {
-      const { data, status } = await api.get<SupportMessage[] | { error?: string }>("/api/support", {
-        params: { limit: 800 },
-      });
-      if (status === 401 || status === 403) {
-        throw new Error(
-          (data as { error?: string })?.error ||
-            "Unauthorized — ensure x-wallet-address is sent (reload after connecting).",
-        );
-      }
-      if (status === 503) {
-        throw new Error((data as { error?: string })?.error || "Support API unavailable (503).");
-      }
-      if (status !== 200 || !Array.isArray(data)) {
-        const errMsg = (data as { error?: string })?.error;
-        throw new Error(errMsg || `Support feed failed (${status}). Response was not a JSON array.`);
-      }
-      return data;
-    },
-  });
-
-  const supportSorted = useMemo(() => {
-    return [...supportFeed].sort(
-      (a, b) =>
-        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
-    );
-  }, [supportFeed]);
-
   const clearVideoForm = useCallback(() => {
     setTitle("");
     setCategory("SMA Masterclass");
     setDescription("");
-    setVideoUrl("");
+    setVideoPlayUrl("");
+    setUploadedFileLabel("");
     setThumbnailUrl("");
   }, []);
+
+  const handleVideoFile = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const okType =
+        /^video\//.test(file.type) || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+      if (!okType) {
+        toast({
+          title: "Unsupported file",
+          description: "Use MP4, WebM, or MOV.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const res = await uploadFile(file);
+      if (res?.objectPath) {
+        const abs = `${window.location.origin}${res.objectPath}`;
+        setVideoPlayUrl(abs);
+        setUploadedFileLabel(file.name);
+        toast({
+          title: "Upload complete",
+          description: `${file.name} is ready. Add a title and click Save to library.`,
+        });
+      } else {
+        toast({
+          title: "Upload failed",
+          description:
+            "The file did not upload. Use the same site URL as your API (not a separate dev port) and confirm /api/uploads works.",
+          variant: "destructive",
+        });
+      }
+    },
+    [uploadFile, toast],
+  );
 
   const addVideo = useMutation({
     mutationFn: async () => {
       if (!title.trim()) throw new Error("Title is required");
-      if (!videoUrl.trim()) throw new Error("Video URL is required");
+      const url = videoPlayUrl.trim();
+      if (!url) throw new Error("Upload a video file first (MP4 / WebM / MOV).");
       const { data, status } = await api.post("/api/videos", {
         title: title.trim(),
         category: category.trim(),
         description: description.trim() || title.trim(),
-        videoUrl: videoUrl.trim(),
+        videoUrl: url,
         thumbnailUrl: thumbnailUrl.trim() || undefined,
       });
       if (status === 401 || status === 403) {
@@ -259,9 +263,8 @@ export default function AdminCommandCenter() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Admin Command Center</h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-            Sovereign wallet only. Set <code className="text-[10px]">MONGO_VAULT_URI</code> or{" "}
-            <code className="text-[10px]">MONGODB_URI</code> (a <code className="text-[10px]">mongodb+srv://</code> URL)
-            on the server for MongoDB; otherwise videos/CRM/support use PostgreSQL. Check{" "}
+            Sovereign wallet only. Publish lessons to the Educational Vault (file upload) and browse CRM. Optional:{" "}
+            <code className="text-[10px]">MONGO_VAULT_URI</code> / Mongo for vault data; otherwise PostgreSQL.{" "}
             <code className="text-[10px]">GET /health</code> → <code className="text-[10px]">mongoVault.connected</code>.
           </p>
           <p className="text-[10px] text-muted-foreground/80 font-mono mt-2 break-all">
@@ -274,7 +277,7 @@ export default function AdminCommandCenter() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+        <TabsList className="grid w-full grid-cols-2 max-w-md">
           <TabsTrigger value="videos" className="gap-1.5">
             <Video className="h-4 w-4 shrink-0" />
             Videos
@@ -283,10 +286,6 @@ export default function AdminCommandCenter() {
             <Users className="h-4 w-4 shrink-0" />
             User CRM
           </TabsTrigger>
-          <TabsTrigger value="support" className="gap-1.5">
-            <MessageSquareText className="h-4 w-4 shrink-0" />
-            Support
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="videos" className="space-y-6">
@@ -294,8 +293,8 @@ export default function AdminCommandCenter() {
             <CardHeader>
               <CardTitle>Add video</CardTitle>
               <CardDescription>
-                POST <code className="text-xs">/api/videos</code> — YouTube / Vimeo / https MP4, or after upload paste{" "}
-                <code className="text-xs">/api/uploads/files/…</code>.
+                Upload an MP4, WebM, or MOV — files are stored on this server under{" "}
+                <code className="text-xs">/api/uploads/files/…</code> and saved to the library.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 max-w-xl">
@@ -331,32 +330,71 @@ export default function AdminCommandCenter() {
                   rows={3}
                 />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="v-url">Video URL</Label>
-                <Input
-                  id="v-url"
-                  value={videoUrl}
-                  onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="https://…"
-                />
+                <Label>Video file</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    id="v-file"
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,video/ogg,.mp4,.webm,.mov,.m4v,.ogv"
+                    className="max-w-xs cursor-pointer"
+                    disabled={isVideoFileUploading || addVideo.isPending}
+                    onChange={(e) => void handleVideoFile(e)}
+                  />
+                  {isVideoFileUploading ? (
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Uploading…
+                    </span>
+                  ) : uploadedFileLabel ? (
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                      <Upload className="h-3.5 w-3.5" />
+                      {uploadedFileLabel}
+                    </span>
+                  ) : null}
+                </div>
+                {videoUploadHookError ? (
+                  <p className="text-xs text-destructive">{videoUploadHookError.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    After upload, the lesson uses a direct link to your file on this site (not embedded from elsewhere).
+                  </p>
+                )}
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="v-thumb">Thumbnail URL (optional)</Label>
+                <Label htmlFor="v-thumb">Thumbnail image URL (optional)</Label>
                 <Input
                   id="v-thumb"
                   value={thumbnailUrl}
                   onChange={(e) => setThumbnailUrl(e.target.value)}
-                  placeholder="https://…"
+                  placeholder="https://… (optional cover image)"
                 />
               </div>
-              <Button
-                onClick={() => void saveVideoToLibrary()}
-                disabled={addVideo.isPending}
-                className="gap-2"
-              >
-                {addVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Save to library
-              </Button>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!videoPlayUrl.trim()}
+                  onClick={() => {
+                    setVideoPlayUrl("");
+                    setUploadedFileLabel("");
+                  }}
+                >
+                  Clear uploaded file
+                </Button>
+                <Button
+                  onClick={() => void saveVideoToLibrary()}
+                  disabled={addVideo.isPending || isVideoFileUploading}
+                  className="gap-2"
+                >
+                  {addVideo.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save to library
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -510,84 +548,6 @@ export default function AdminCommandCenter() {
                       ))}
                     </TableBody>
                   </Table>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="support">
-          <Card className="border-border/80 bg-card/50">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Support desk</CardTitle>
-                <CardDescription>GET /api/support — all tickets (MongoDB when MONGODB_URI is set)</CardDescription>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => void refetchSupport()} aria-label="Refresh support">
-                <RefreshCw className={cn("h-4 w-4", supportLoading && "animate-spin")} />
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {supportError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
-                  <p className="font-medium text-destructive">Could not load support inbox</p>
-                  <p className="text-muted-foreground">
-                    {supportErrorObj instanceof Error ? supportErrorObj.message : String(supportErrorObj)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    If this says the response was not an array, your browser may be hitting a static host without the
-                    API, or a proxy returned HTML instead of JSON. Open <code className="text-[10px]">/health</code> on
-                    the same origin.
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => void refetchSupport()}>
-                    Retry
-                  </Button>
-                </div>
-              ) : supportLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading…
-                </div>
-              ) : supportSorted.length === 0 ? (
-                <div className="text-sm text-muted-foreground text-center py-8 space-y-2">
-                  <p>No messages yet.</p>
-                  <p className="text-xs max-w-md mx-auto">
-                    User chat uses <code className="text-[10px]">POST /api/support</code>. With MongoDB, tickets live in
-                    the <code className="text-[10px]">support_tickets</code> collection; with Postgres, in the{" "}
-                    <code className="text-[10px]">support_tickets</code> table. Multiple server instances need a shared
-                    database or messages will not appear here.
-                  </p>
-                </div>
-              ) : (
-                <ScrollArea className="h-[min(560px,65vh)] pr-3">
-                  <ul className="space-y-3">
-                    {supportSorted.map((m) => (
-                      <li
-                        key={m.id}
-                        className={cn(
-                          "rounded-lg border px-3 py-2 text-sm",
-                          m.senderType === "admin"
-                            ? "border-primary/25 bg-primary/5"
-                            : "border-border/70 bg-muted/20",
-                        )}
-                      >
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <Badge variant="outline" className="text-[10px]">
-                            {m.senderType}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground font-mono truncate max-w-[220px]">
-                            {m.conversationId}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground ml-auto">
-                            {m.createdAt
-                              ? new Date(m.createdAt).toLocaleString()
-                              : ""}
-                          </span>
-                        </div>
-                        <p className="text-sm whitespace-pre-wrap break-words">{m.message}</p>
-                      </li>
-                    ))}
-                  </ul>
                 </ScrollArea>
               )}
             </CardContent>

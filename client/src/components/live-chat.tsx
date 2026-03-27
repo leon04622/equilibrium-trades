@@ -289,7 +289,6 @@ export function LiveChat() {
       if (!isMasterAdmin) {
         toast({ title: "Sent", description: "Your message was delivered to support." });
       }
-      void queryClient.invalidateQueries({ queryKey: ["fortress-support"] });
     },
     onError: (err: Error) => {
       toast({
