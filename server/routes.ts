@@ -48,6 +48,7 @@ import {
   setScannerHealthMonitoringEnabled,
   GLOBAL_SCANNER_GOLD_PROXY_INFO,
 } from "./global-scanner";
+import { getDefaultPatternScanTickerList } from "./scanner-controller";
 import {
   createAdminEquilibriumChallenge,
   verifyAdminEquilibriumSignature,
@@ -420,8 +421,8 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
     }
   }
   if (list.length === 0) {
-    list = ["BTC", "ETH", "SOL"];
-    console.warn("[pattern-scan] HL universe still empty after retries — using minimal fallback list");
+    list = getDefaultPatternScanTickerList();
+    console.warn("[pattern-scan] HL universe still empty after retries — using default ticker list (DB-independent)");
   }
   const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
   const enforceMax = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
@@ -846,7 +847,10 @@ export async function registerRoutes(
   /** Full HL perp + active spot list for pattern scanner watchlist UI */
   app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
     try {
-      const tickers = await buildGlobalScannerTickerList();
+      let tickers = await buildGlobalScannerTickerList();
+      if (tickers.length === 0) {
+        tickers = getDefaultPatternScanTickerList();
+      }
       res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO });
     } catch (error) {
       console.error("Error building scanner markets list:", error);

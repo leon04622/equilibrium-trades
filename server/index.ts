@@ -10,7 +10,7 @@ import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
 import { getDatabaseStatus, ensurePostgresCoreTables } from './db';
-import { getMongoVaultHealth, pingMongoVault } from "./mongo-vault";
+import { getMongoVaultHealth, pingMongoVault, resolveMongoVaultUri } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
 
 const app = express();
@@ -202,6 +202,30 @@ async function initStripe() {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[system/status] Mongo ping failed:", msg);
       return res.status(503).json({ database: "disconnected", error: "Database ping failed" });
+    }
+  });
+
+  /** Plain-English Mongo diagnostic (visit in browser). */
+  app.get("/api/debug-db", async (_req, res) => {
+    if (!resolveMongoVaultUri()) {
+      return res.status(200).json({
+        status: "Disconnected",
+        detail: "No valid MONGODB_URI (or MONGO_VAULT_URI) in environment",
+      });
+    }
+    const mv = getMongoVaultHealth();
+    if (!mv.connected) {
+      return res.status(200).json({
+        status: "Disconnected",
+        detail: "Handshake failed after startup retries — check Atlas IP allowlist, credentials, and logs",
+      });
+    }
+    try {
+      await pingMongoVault();
+      return res.status(200).json({ status: "Connected" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return res.status(200).json({ status: "Disconnected", detail: msg });
     }
   });
 

@@ -3,6 +3,7 @@
  * Hyperliquid-only candles: there is no OANDA XAU/USD feed here — gold exposure uses HL perp PAXG and spot XAUT-style pairs when listed.
  */
 import { getPerpUniverseCoinNames, getSpotTickers } from "./hyperliquid";
+import { getDefaultPatternScanTickerList } from "./scanner-controller";
 
 export const GLOBAL_SCANNER_BATCH_SIZE = 5;
 export const GLOBAL_SCANNER_BATCH_DELAY_MS = 2000;
@@ -36,6 +37,10 @@ export async function buildGlobalScannerTickerList(): Promise<string[]> {
   if (list.length === 0) {
     await sleep(500);
     list = await buildGlobalScannerTickerListOnce();
+  }
+  if (list.length === 0) {
+    list = getDefaultPatternScanTickerList();
+    console.warn("[global-scanner] HL universe empty — using hardcoded default ticker list (not DB).");
   }
   return list;
 }

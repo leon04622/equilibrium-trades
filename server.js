@@ -4,37 +4,29 @@
  * Loads the compiled application from `dist/index.cjs` (same bundle as `npm start`).
  * Run `npm run build` before using this file in production.
  *
- * ── MongoDB (vault, CRM, scanner watchlist, support) ──
- * Set **`MONGODB_URI`** (or `MONGO_VAULT_URI`) to a `mongodb://` or `mongodb+srv://` URL.
- * If neither is set, the server logs: **`CRITICAL: MONGODB_URI is undefined.`**
- * Atlas: allow your host IP or `0.0.0.0/0` until networking is locked down.
+ * ── MongoDB (`MONGODB_URI`) ──
+ * The server connects using **`MONGODB_URI`** (preferred) or **`MONGO_VAULT_URI`**.
+ * On failure it **retries the handshake up to 5 times** with backoff (see `server/mongo-vault.ts`).
+ * If the variable is missing: **`CRITICAL: MONGODB_URI is undefined.`** is logged.
  *
- * **`GET /api/system/status`** — returns `{ database: "connected" }` when Mongo is up
- * (HTTP 503 + `{ database: "disconnected" }` when not). The pattern scanner UI uses this
- * to avoid showing a false “Mongo not configured” warning when the DB is healthy.
+ * **Diagnostics**
+ * - `GET /api/debug-db` → `{ status: "Connected" }` or `{ status: "Disconnected", detail: "…" }`
+ * - `GET /api/system/status` → `{ database: "connected" | "disconnected" }` (JSON for app use)
  *
- * Default collections (override with env): CRM documents in **`users`**, vault in **`videos`**
- * (`MONGO_USERS_COLLECTION`, `MONGO_VIDEOS_COLLECTION`).
+ * Atlas: Network Access → allow **`0.0.0.0/0`** (or your host egress IPs) until locked down.
  *
- * ── Data & CRM ──
- * • PostgreSQL (`DATABASE_URL`): wallet_users, subscriptions, support_tickets, tutorial_videos, etc.
- * • MongoDB: optional vault + unified CRM user store with wallet, tier, scanner watchlist fields, etc.
+ * ── Pattern scanner (DB-independent) ──
+ * Default tickers when Hyperliquid universe is empty: **BTC, ETH, SOL, XRP, AVAX, LINK, PAXG**
+ * (`server/scanner-controller.ts`). Mongo is **only** for optional CRM watchlist persistence.
  *
- * Sovereign admin: `0x115560812df8e7515eecc957b6796531e936edd9` — `server/fortress-admin.ts`
+ * Candle depth default **200** per TF (required for **21/200 SMMA**); optional env
+ * **`PATTERN_SCAN_CANDLE_LIMIT`** may be **≥200** only (`server/scanner-controller.ts`).
  *
- * Environment (see also `.env.example`):
- *   DATABASE_URL           — PostgreSQL URI (not Mongo)
- *   MONGODB_URI            — primary Mongo URL (standardized)
- *   MONGO_VAULT_URI        — alternate Mongo URL if you split vault from other services
- *   MONGODB_DB_NAME        — default `equilibrium`
- *   MONGO_USERS_COLLECTION — default `users`
- *   MONGO_VIDEOS_COLLECTION — default `videos`
- *   MONGO_SUPPORT_COLLECTION — optional collection name
- *   MONGO_TRADE_JOURNAL_COLLECTION — optional; default trade_journal
- *   EQUILIBRIUM_BILLING_SYNC_SECRET — optional; `x-equilibrium-billing-secret` for POST /api/billing/sync-tier
+ * Sovereign admin: `0x115560812df8e7515eecc957b6796531e936edd9`
  *
- * Pattern scanner (`/api/signals/patterns`): full HL perp + active spot list (`server/global-scanner.ts`).
- * Optional cap: `PATTERN_SCAN_ENFORCE_MAX_COINS=1` with `PATTERN_SCAN_MAX_COINS`.
+ * Environment (see `.env.example`):
+ *   DATABASE_URL, MONGODB_URI, MONGO_VAULT_URI, MONGODB_DB_NAME,
+ *   MONGO_USERS_COLLECTION, MONGO_VIDEOS_COLLECTION, PATTERN_SCAN_CANDLE_LIMIT (≥200), …
  */
 import "dotenv/config";
 

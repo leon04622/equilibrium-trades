@@ -684,18 +684,28 @@ export async function pingMongoVault(): Promise<void> {
   await db.admin().ping();
 }
 
-/** Prefer MONGO_VAULT_URI so Mongo never conflicts with legacy MONGODB-as-Postgres-alias in db.ts. */
+/** Prefer MONGODB_URI (standard); MONGO_VAULT_URI is optional alternate. */
 export function resolveMongoVaultUri(): string {
-  const a = process.env.MONGO_VAULT_URI?.trim() || "";
-  const b = process.env.MONGODB_URI?.trim() || "";
-  const uri = a || b;
+  const primary = process.env.MONGODB_URI?.trim() || "";
+  const alt = process.env.MONGO_VAULT_URI?.trim() || "";
+  const uri = primary || alt;
   if (!uri || !/^mongodb(\+srv)?:\/\//i.test(uri)) return "";
   return uri;
 }
 
+const MONGO_CONNECT_MAX_ATTEMPTS = 5;
+
 export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
   mongoVaultBackendActive = false;
   vaultDb = null;
+  if (cachedClient) {
+    try {
+      await cachedClient.close();
+    } catch {
+      /* ignore */
+    }
+    cachedClient = null;
+  }
   const uri = resolveMongoVaultUri();
   if (!uri) {
     const hasRawEnv = !!(process.env.MONGODB_URI?.trim() || process.env.MONGO_VAULT_URI?.trim());
@@ -708,26 +718,45 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
     }
     return null;
   }
-  try {
-    if (!cachedClient) {
+
+  for (let attempt = 1; attempt <= MONGO_CONNECT_MAX_ATTEMPTS; attempt++) {
+    try {
       cachedClient = new MongoClient(uri, {
         serverSelectionTimeoutMS: 15_000,
         retryWrites: true,
       });
       await cachedClient.connect();
-      console.log("[mongo-vault] Connected to MongoDB (Admin / Educational Vault / Support)");
+      console.log(
+        `[mongo-vault] Connected to MongoDB (attempt ${attempt}/${MONGO_CONNECT_MAX_ATTEMPTS}) — vault / CRM / support`,
+      );
+      const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
+      const db = cachedClient.db(dbName);
+      vaultDb = db;
+      mongoVaultBackendActive = true;
+      return createHandle(db);
+    } catch (e) {
+      console.error(`[mongo-vault] MongoDB connection failed (attempt ${attempt}/${MONGO_CONNECT_MAX_ATTEMPTS}):`, e);
+      mongoVaultBackendActive = false;
+      vaultDb = null;
+      if (cachedClient) {
+        try {
+          await cachedClient.close();
+        } catch {
+          /* ignore */
+        }
+        cachedClient = null;
+      }
+      if (attempt < MONGO_CONNECT_MAX_ATTEMPTS) {
+        const delayMs = 2000 * attempt;
+        console.warn(`[mongo-vault] Retrying Mongo handshake in ${delayMs}ms…`);
+        await sleep(delayMs);
+      }
     }
-    const dbName = process.env.MONGODB_DB_NAME?.trim() || "equilibrium";
-    const db = cachedClient.db(dbName);
-    vaultDb = db;
-    mongoVaultBackendActive = true;
-    return createHandle(db);
-  } catch (e) {
-    console.error("[mongo-vault] MongoDB connection failed:", e);
-    mongoVaultBackendActive = false;
-    vaultDb = null;
-    cachedClient = null;
-    return null;
   }
+  return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 

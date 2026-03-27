@@ -15,6 +15,7 @@ import {
   isGoldScannerTicker,
   type ScannerHealthErrorRow,
 } from "./global-scanner";
+import { PATTERN_SCAN_CANDLE_LIMIT } from "./scanner-controller";
 import {
   calculateSMAFromCandles,
   detectCrossover,
@@ -467,7 +468,7 @@ export async function analyzeEducationalUniversal(
   candles: HyperliquidCandle[],
   mtfBundle?: Record<string, HyperliquidCandle[]>,
 ): Promise<EducationalPatternSignal | null> {
-  if (candles.length < 200) return null;
+  if (candles.length < PATTERN_SCAN_CANDLE_LIMIT) return null;
   const currentSMA = calculateSMAFromCandles(candles);
   if (!currentSMA) return null;
 
@@ -657,7 +658,12 @@ async function scanOneCoinMtf(
   timeframes: string[],
 ): Promise<{ signals: EducationalPatternSignal[]; diag: CoinScanDiagnostics }> {
   const intervals = intervalsForPatternScan(timeframes);
-  const bundle = await fetchMtfCandleBundle(coin, 200, intervals, { throttleSequential: true });
+  const bundle = await fetchMtfCandleBundle(
+    coin,
+    PATTERN_SCAN_CANDLE_LIMIT,
+    intervals,
+    { throttleSequential: true },
+  );
   const m1 = bundle["1m"] || [];
   const lastTs = m1.length > 0 ? m1[m1.length - 1]!.t : undefined;
   const diag: CoinScanDiagnostics = { coin, len1m: m1.length, candle1mLastTs: lastTs };
@@ -665,7 +671,7 @@ async function scanOneCoinMtf(
   const tfLimit = pLimit(9);
   const tasks = timeframes.map(
     (tf) => () =>
-      bundle[tf] && bundle[tf]!.length >= 200
+      bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_CANDLE_LIMIT
         ? analyzeEducationalUniversal(coin, tf, bundle[tf]!, bundle)
         : Promise.resolve(null),
   );
@@ -710,7 +716,7 @@ export async function scanForEducationalPatterns(
         try {
           const { signals, diag } = await scanOneCoinMtf(coin, uniqueTf);
           if (monitoring && wants1m) {
-            if (diag.len1m < 200 && coin !== "BTC") {
+            if (diag.len1m < PATTERN_SCAN_CANDLE_LIMIT && coin !== "BTC") {
               alt1mThinOrEmpty++;
             }
             if (diag.candle1mLastTs != null) {
