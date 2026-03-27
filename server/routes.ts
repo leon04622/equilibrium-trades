@@ -78,6 +78,7 @@ import {
 } from "./trade-journal-store";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
+let mongoBackgroundReconnectBusy = false;
 
 const PATTERN_SCAN_CACHE_TTL_MS = 90_000;
 const PATTERN_SCAN_CACHE_MAX_KEYS = 8;
@@ -510,8 +511,14 @@ export async function registerRoutes(
     void (async () => {
       if (getMongoVaultHealth().connected) return;
       if (!resolveMongoVaultUri()) return;
-      console.warn("[mongo-vault] Still disconnected — retrying Mongo handshake (5s interval)…");
-      mongoVaultHandle = await tryConnectMongoVault({ maxAttempts: 1 });
+      if (mongoBackgroundReconnectBusy) return;
+      mongoBackgroundReconnectBusy = true;
+      try {
+        console.warn("[mongo-vault] Still disconnected — retrying Mongo handshake (5s interval)…");
+        mongoVaultHandle = await tryConnectMongoVault({ maxAttempts: 1 });
+      } finally {
+        mongoBackgroundReconnectBusy = false;
+      }
     })();
   }, 5000);
 

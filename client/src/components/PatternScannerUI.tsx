@@ -421,9 +421,9 @@ export function PatternScannerUI() {
           <AlertTitle>Scan request failed</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              A full-universe pass can take several minutes; hosts often cut off around 60–120s. Results below are
-              cleared so you are not looking at stale data from an older run. Try again with fewer timeframes, or ask
-              ops to raise the HTTP timeout. {error instanceof Error ? error.message : ""}
+              The scan runs ~50 high-volume markets × your selected timeframes; hosts often cut off around 60–120s.
+              Results below are cleared so you are not looking at stale data. Try fewer timeframes (1d is off by
+              default) or ask ops to raise the HTTP timeout. {error instanceof Error ? error.message : ""}
             </span>
             <Button
               variant="outline"

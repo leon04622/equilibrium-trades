@@ -61,7 +61,12 @@ export function prioritizeScanTimeframes(timeframes: string[]): string[] {
   const raw = timeframes.filter(Boolean);
   const uniq = [...new Set(raw)];
   if (uniq.length === 0) return [...UNIVERSAL_SCAN_TIMEFRAMES];
-  return SCAN_TF_ORDER.filter((tf) => uniq.includes(tf));
+  const allowed = new Set<string>([...UNIVERSAL_SCAN_TIMEFRAMES]);
+  const ordered = SCAN_TF_ORDER.filter((tf) => uniq.includes(tf));
+  const orderedSet = new Set<string>(ordered);
+  const rest = uniq.filter((tf) => !orderedSet.has(tf) && allowed.has(tf));
+  const out = [...ordered, ...rest];
+  return out.length > 0 ? out : [...UNIVERSAL_SCAN_TIMEFRAMES];
 }
 
 /** Serialize candleSnapshot calls so full-universe scans do not trip Hyperliquid rate limits. */
