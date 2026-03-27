@@ -667,12 +667,16 @@ export async function registerRoutes(
   app.get("/api/hyperliquid/candles/:coin", async (req: Request, res: Response) => {
     try {
       const { interval, startTime, endTime, limit } = req.query;
+      const parsedLimit = limit != null && limit !== "" ? parseInt(String(limit), 10) : NaN;
+      const effectiveLimit = Number.isFinite(parsedLimit)
+        ? Math.min(Math.max(parsedLimit, 1), 5000)
+        : 200;
       const candles = await getCandles(
         req.params.coin,
         (interval as string) || "1m",
         startTime ? parseInt(startTime as string) : undefined,
         endTime ? parseInt(endTime as string) : undefined,
-        limit ? parseInt(limit as string) : 500
+        effectiveLimit,
       );
       res.json(candles);
     } catch (error) {
@@ -1447,6 +1451,52 @@ export async function registerRoutes(
     } catch (error) {
       console.error("PATCH /api/admin/update-tier:", error);
       res.status(500).json({ error: "Failed to update tier" });
+    }
+  });
+
+  /**
+   * Hard-write Pro/Mentor/Free to Postgres + Mongo CRM (upsert). Same persistence as `/api/admin/update-tier`.
+   * Master admin (env) or sovereign fortress wallet.
+   */
+  app.patch("/api/admin/set-access", async (req: Request, res: Response) => {
+    try {
+      const adminWallet = resolveWalletAddressFromRequest(req)?.trim();
+      if (!adminWallet) {
+        return res.status(401).json({ error: "Send x-wallet-address or Authorization: Bearer <0x…>" });
+      }
+      const master = requireMasterAdminWallet(req);
+      if (!isFortressSovereignAddress(adminWallet) && !master.ok) {
+        return res.status(master.status).json({ error: master.error });
+      }
+
+      const { adminSetAccessBodySchema } = await import("@shared/schema");
+      const parsed = adminSetAccessBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid body", details: parsed.error.flatten() });
+      }
+      const { walletAddress, targetTier } = parsed.data;
+      const t = targetTier.trim();
+      const normalizedTier = t.toLowerCase() === "mentor" ? "mentoring" : t;
+      const mapped = parseAdminNewTierInput(normalizedTier);
+      if (!mapped) {
+        return res.status(400).json({ error: "targetTier must be Pro, Mentor, or Free" });
+      }
+
+      const user = await persistUserAccessTier(
+        walletAddress,
+        mapped.subscriptionTier,
+        mapped.subscriptionActive,
+        null,
+        mapped.manualProOverride,
+      );
+      res.json({
+        success: true,
+        user,
+        subTier: crmTierLabel(user.subscriptionTier ?? undefined),
+      });
+    } catch (error) {
+      console.error("PATCH /api/admin/set-access:", error);
+      res.status(500).json({ error: "Failed to set access" });
     }
   });
 

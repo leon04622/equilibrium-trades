@@ -24,8 +24,8 @@ export function useSubscription() {
   const { data: subscription, isLoading, error, refetch } = useQuery<SubscriptionStatus>({
     queryKey: ["/api/user-status", address],
     enabled: isConnected && !!address,
-    // Avoid refetching on every navigation/focus; UserTierSync still invalidates on wallet change.
-    staleTime: 120_000,
+    staleTime: 45_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
     queryFn: async () => {
       const r = await checkSubscription(address!);

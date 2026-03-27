@@ -331,7 +331,8 @@ export async function getCandles(
     const start = startTime || end - defaultRange;
 
     const cacheDisabled = process.env.HL_DISABLE_CANDLE_CACHE === "1";
-    const cacheKey = `${coin}:${interval}`;
+    // Include limit in key so 200 vs 500 candle requests don’t share the wrong slice.
+    const cacheKey = `${coin}:${interval}:${candleCount}`;
     if (!cacheDisabled && !startTime && !endTime) {
       const cached = candleCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -356,7 +357,9 @@ export async function getCandles(
     const data = [...raw].sort((a, b) => a.t - b.t);
 
     if (!cacheDisabled && !startTime && !endTime && data.length > 0) {
-      const ttl = CANDLE_CACHE_TTL[interval] || 4_000;
+      const baseTtl = CANDLE_CACHE_TTL[interval] || 4_000;
+      const bonus = Math.min(300_000, Math.max(0, parseInt(process.env.HL_CANDLE_CACHE_BONUS_MS || "0", 10) || 0));
+      const ttl = Math.min(300_000, baseTtl + bonus);
       candleCache.set(cacheKey, { data, expiresAt: Date.now() + ttl });
     }
 
@@ -364,7 +367,7 @@ export async function getCandles(
   } catch (error) {
     console.error("Error fetching candles:", error);
     // Return stale cache if available rather than empty array
-    const cached = candleCache.get(`${coin}:${interval}`);
+    const cached = candleCache.get(`${coin}:${interval}:${limit}`);
     if (cached) return cached.data;
     return [];
   }

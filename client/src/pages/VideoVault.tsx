@@ -83,6 +83,20 @@ function isUploadedVaultFileUrl(url: string): boolean {
   }
 }
 
+/** react-player and some browsers handle relative media URLs poorly in dialogs — always pass absolute. */
+function absolutePlaybackUrl(raw: string): string {
+  const t = raw.trim();
+  if (!t) return t;
+  try {
+    if (t.startsWith("http://") || t.startsWith("https://")) return t;
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    if (t.startsWith("/") && base) return `${base}${t}`;
+    return new URL(t, base || "http://localhost").href;
+  } catch {
+    return t;
+  }
+}
+
 function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
   return apiVideos.map((v) => {
     const rawSection = v.academySection as string | null | undefined;
@@ -106,6 +120,7 @@ function mapApiToVaultItems(apiVideos: TutorialVideo[]): VaultItem[] {
 
 function PlayerFrame({ url, title }: { url: string; title: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
+  const playUrl = absolutePlaybackUrl(url);
 
   useEffect(() => {
     setLoadError(null);
@@ -118,17 +133,18 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
           <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-zinc-300">
             <p>{loadError}</p>
             <Button variant="outline" size="sm" asChild>
-              <a href={url} target="_blank" rel="noopener noreferrer">
+              <a href={playUrl} target="_blank" rel="noopener noreferrer">
                 Open in new tab
               </a>
             </Button>
           </div>
-        ) : isUploadedVaultFileUrl(url) ? (
+        ) : isUploadedVaultFileUrl(playUrl) ? (
           <video
-            key={url}
+            key={playUrl}
             className="absolute inset-0 h-full w-full bg-black object-contain"
-            src={url}
+            src={playUrl}
             controls
+            muted
             playsInline
             preload="auto"
             title={title}
@@ -140,13 +156,14 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
           />
         ) : (
           <ReactPlayer
-            key={url}
-            url={url}
+            key={playUrl}
+            url={playUrl}
             width="100%"
             height="100%"
             style={{ position: "absolute", top: 0, left: 0 }}
             controls
             playing={false}
+            muted
             playsinline
             pip={false}
             onError={() =>
@@ -386,7 +403,7 @@ export default function VideoVault() {
               </div>
               {canPlayVideos ? (
                 active.videoUrl.trim() ? (
-                  <PlayerFrame url={active.videoUrl} title={active.title} />
+                  <PlayerFrame key={active.id} url={active.videoUrl} title={active.title} />
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-8 rounded-lg border border-dashed">
                     No playable URL for this lesson. Re-save the video in Command Center with a YouTube link, Vimeo, or

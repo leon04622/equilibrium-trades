@@ -301,6 +301,15 @@ export const adminUpdateTierBodySchema = z.object({
 
 export type AdminUpdateTierBody = z.infer<typeof adminUpdateTierBodySchema>;
 
+/** Command Center “Grant access” — same persistence as PATCH /api/admin/update-tier (Postgres upsert + Mongo CRM). */
+export const adminSetAccessBodySchema = z.object({
+  walletAddress: z.string().trim().regex(/^0x[a-fA-F0-9]{40}$/i, "Invalid wallet address"),
+  /** Pro | Mentor | Free (any casing; Mentor = mentoring tier) */
+  targetTier: z.string().trim().min(1),
+});
+
+export type AdminSetAccessBody = z.infer<typeof adminSetAccessBodySchema>;
+
 // Wallet Users - Database table for persistent storage
 export const walletUsers = pgTable("wallet_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

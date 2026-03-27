@@ -13,6 +13,7 @@ export function UserTierSync() {
   useEffect(() => {
     if (!isConnected || !address) return;
     void queryClient.invalidateQueries({ queryKey: ["/api/user-status", address] });
+    void queryClient.refetchQueries({ queryKey: ["/api/user-status", address] });
   }, [isConnected, address, queryClient]);
 
   return null;

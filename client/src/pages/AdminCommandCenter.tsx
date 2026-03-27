@@ -13,6 +13,7 @@ import {
   Upload,
   MessageSquare,
   Activity,
+  Check,
 } from "lucide-react";
 import type { TutorialVideo, SupportMessage } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,6 +130,7 @@ export default function AdminCommandCenter() {
     key: "joinDate",
     dir: "desc",
   });
+  const [accessSavedWallet, setAccessSavedWallet] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("SMA Masterclass");
@@ -188,6 +190,37 @@ export default function AdminCommandCenter() {
       });
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const setAccessMutation = useMutation({
+    mutationFn: async ({ wallet, targetTier }: { wallet: string; targetTier: "Pro" | "Mentor" | "Free" }) => {
+      const { data, status } = await api.patch("/api/admin/set-access", {
+        walletAddress: wallet.trim(),
+        targetTier,
+      });
+      if (status === 401 || status === 403) throw new Error("Unauthorized");
+      if (status < 200 || status >= 300) {
+        throw new Error((data as { error?: string })?.error || "Failed to save access");
+      }
+      return { wallet };
+    },
+    onSuccess: ({ wallet }) => {
+      setAccessSavedWallet(wallet);
+      window.setTimeout(() => {
+        setAccessSavedWallet((w) => (w === wallet ? null : w));
+      }, 3500);
+      void queryClient.invalidateQueries({ queryKey: ["fortress-crm-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+      void queryClient.refetchQueries({ queryKey: ["/api/user-status"] });
+      toast({
+        title: "Access saved",
+        description: "Tier written to the database (Postgres + CRM sync).",
+        className:
+          "border-emerald-500/55 bg-emerald-950/95 text-emerald-50 shadow-lg shadow-emerald-900/20",
+      });
+    },
+    onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
   const {
@@ -560,12 +593,14 @@ export default function AdminCommandCenter() {
                             <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
                           </button>
                         </TableHead>
+                        <TableHead className="text-right whitespace-nowrap min-w-[140px]">Grant access</TableHead>
                         <TableHead className="text-right whitespace-nowrap">Manual Pro</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sortedCrm.map((row) => {
                         const manualOn = !!row.manualProOverride;
+                        const showSaved = accessSavedWallet === row.wallet;
                         return (
                           <TableRow key={row.wallet}>
                             <TableCell className="font-mono text-xs align-top break-all max-w-[180px]">
@@ -594,6 +629,49 @@ export default function AdminCommandCenter() {
                                 </Badge>
                               ) : (
                                 <span className="text-muted-foreground">{row.builderStatus ?? "Not linked"}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-top text-right">
+                              {showSaved ? (
+                                <span className="inline-flex items-center justify-end gap-1 text-emerald-500 text-xs font-medium">
+                                  <Check className="h-4 w-4 shrink-0" aria-hidden />
+                                  Saved
+                                </span>
+                              ) : (
+                                <div className="flex flex-wrap justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-[10px]"
+                                    disabled={setAccessMutation.isPending}
+                                    onClick={() => setAccessMutation.mutate({ wallet: row.wallet, targetTier: "Pro" })}
+                                  >
+                                    Pro
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-[10px]"
+                                    disabled={setAccessMutation.isPending}
+                                    onClick={() =>
+                                      setAccessMutation.mutate({ wallet: row.wallet, targetTier: "Mentor" })
+                                    }
+                                  >
+                                    Mentor
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[10px]"
+                                    disabled={setAccessMutation.isPending}
+                                    onClick={() => setAccessMutation.mutate({ wallet: row.wallet, targetTier: "Free" })}
+                                  >
+                                    Free
+                                  </Button>
+                                </div>
                               )}
                             </TableCell>
                             <TableCell className="align-top text-right">
