@@ -12,15 +12,15 @@ import {
 import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
 
-const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION || "vault_videos";
+const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION || "videos";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
-/** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `crm_users`). */
+/** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
 export function mongoCrmUsersCollectionName(): string {
   return (
     process.env.MONGO_USERS_COLLECTION?.trim() ||
     process.env.MONGO_CRM_COLLECTION?.trim() ||
-    "crm_users"
+    "users"
   );
 }
 
@@ -48,7 +48,7 @@ export function mongoScannerAllMarketsFromDoc(value: unknown): boolean {
   return true;
 }
 
-/** Pattern scanner: `scannerAllMarkets` + `scannerWatchlistCoins` on `crm_users`. */
+/** Pattern scanner: `scannerAllMarkets` + `scannerWatchlistCoins` on the CRM users collection. */
 export async function fetchMongoScannerWatchlistPrefs(
   walletAddress: string,
 ): Promise<ScannerWatchlistPrefs | null> {
@@ -647,6 +647,13 @@ export function getMongoVaultHealth(): { uriConfigured: boolean; connected: bool
   };
 }
 
+/** Live ping — use for /api/system/status when the client is already marked connected. */
+export async function pingMongoVault(): Promise<void> {
+  const db = getVaultDb();
+  if (!db) throw new Error("Mongo vault DB handle is not available");
+  await db.admin().ping();
+}
+
 /** Prefer MONGO_VAULT_URI so Mongo never conflicts with legacy MONGODB-as-Postgres-alias in db.ts. */
 export function resolveMongoVaultUri(): string {
   const a = process.env.MONGO_VAULT_URI?.trim() || "";
@@ -660,10 +667,23 @@ export async function tryConnectMongoVault(): Promise<MongoVaultHandle | null> {
   mongoVaultBackendActive = false;
   vaultDb = null;
   const uri = resolveMongoVaultUri();
-  if (!uri) return null;
+  if (!uri) {
+    const hasRawEnv = !!(process.env.MONGODB_URI?.trim() || process.env.MONGO_VAULT_URI?.trim());
+    if (!hasRawEnv) {
+      console.error("CRITICAL: MONGODB_URI is undefined.");
+    } else {
+      console.error(
+        "CRITICAL: MONGODB_URI / MONGO_VAULT_URI is set but not a valid Mongo URL — use mongodb:// or mongodb+srv://",
+      );
+    }
+    return null;
+  }
   try {
     if (!cachedClient) {
-      cachedClient = new MongoClient(uri);
+      cachedClient = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 15_000,
+        retryWrites: true,
+      });
       await cachedClient.connect();
       console.log("[mongo-vault] Connected to MongoDB (Admin / Educational Vault / Support)");
     }

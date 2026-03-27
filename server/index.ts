@@ -10,7 +10,7 @@ import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
 import { getDatabaseStatus, ensurePostgresCoreTables } from './db';
-import { getMongoVaultHealth } from "./mongo-vault";
+import { getMongoVaultHealth, pingMongoVault } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
 
 const app = express();
@@ -189,6 +189,21 @@ async function initStripe() {
   });
 
   await registerRoutes(httpServer, app);
+
+  app.get("/api/system/status", async (_req, res) => {
+    const mv = getMongoVaultHealth();
+    if (!mv.connected) {
+      return res.status(503).json({ database: "disconnected" });
+    }
+    try {
+      await pingMongoVault();
+      return res.json({ database: "connected" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[system/status] Mongo ping failed:", msg);
+      return res.status(503).json({ database: "disconnected", error: "Database ping failed" });
+    }
+  });
 
   attachCommandCenterDebugWs(httpServer);
   attachSupportChatWs(httpServer);

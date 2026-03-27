@@ -276,6 +276,11 @@ type WatchlistApi = {
   mongoConfigured: boolean;
 };
 
+type SystemStatusApi = {
+  database: "connected" | "disconnected" | string;
+  error?: string;
+};
+
 type PatternScanSource = "query" | "watchlist" | "universe";
 
 type PatternScanPayload = {
@@ -324,6 +329,35 @@ export function PatternScannerUI() {
     },
   });
 
+  const {
+    data: systemStatus,
+    isError: systemStatusIsError,
+    isPending: systemStatusPending,
+    isSuccess: systemStatusSuccess,
+  } = useQuery<SystemStatusApi>({
+    queryKey: ["/api/system/status"],
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: 2,
+    queryFn: async () => {
+      const r = await fetch("/api/system/status");
+      const data = (await r.json()) as SystemStatusApi;
+      if (!r.ok) {
+        throw new Error(data.error || "System status unavailable");
+      }
+      return data;
+    },
+  });
+
+  const dbConnected = systemStatus?.database === "connected";
+  const systemStatusReady = systemStatusSuccess;
+  /** Prefer live /api/system/status; while it loads, fall back to watchlist flags from the API. */
+  const mongoOperational =
+    dbConnected || (systemStatusPending && !!watchlistPref?.mongoConfigured);
+  const showMongoDbWarning =
+    !!address?.trim() &&
+    (systemStatusIsError || (systemStatusReady && !dbConnected));
+
   const { data: marketsData } = useQuery<{ tickers: string[]; goldNote?: string }>({
     queryKey: ["/api/scanner/markets"],
     staleTime: 120_000,
@@ -336,6 +370,11 @@ export function PatternScannerUI() {
 
   useEffect(() => {
     if (!watchlistPref) return;
+    if (!mongoOperational) {
+      setDraftAllMarkets(true);
+      setDraftCoins([]);
+      return;
+    }
     if (!watchlistPref.mongoConfigured) {
       setDraftAllMarkets(true);
       setDraftCoins([]);
@@ -343,9 +382,9 @@ export function PatternScannerUI() {
     }
     setDraftAllMarkets(watchlistPref.allMarkets);
     setDraftCoins(watchlistPref.coins?.length ? [...watchlistPref.coins] : []);
-  }, [watchlistPref]);
+  }, [watchlistPref, mongoOperational]);
 
-  const canCustomizeWatchlist = !!(address?.trim() && watchlistPref?.mongoConfigured);
+  const canCustomizeWatchlist = !!(address?.trim() && mongoOperational);
 
   const {
     data: scanPayload,
@@ -684,9 +723,10 @@ export function PatternScannerUI() {
             <code className="text-[10px]">/api/scanner/markets</code>). Connect with Mongo if you want to store an optional
             CRM watchlist record (it does not limit what gets scanned).
           </p>
-          {!watchlistPref?.mongoConfigured && address ? (
+          {showMongoDbWarning ? (
             <p className="text-[10px] text-muted-foreground">
-              Mongo not configured — watchlist save is unavailable. Scans are unchanged.
+              Database unavailable — watchlist save is unavailable. Scans are unchanged. Set{" "}
+              <code className="text-[9px]">MONGODB_URI</code> on the server and confirm Atlas network access.
             </p>
           ) : null}
 

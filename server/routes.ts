@@ -316,7 +316,7 @@ async function persistUserAccessTier(
   if (!user) {
     throw new Error(`persistUserAccessTier: no row after upsert for ${normalized}`);
   }
-  void syncWalletUserToMongoCrm(normalized);
+  await syncWalletUserToMongoCrm(normalized);
   return user;
 }
 
