@@ -14,7 +14,11 @@ import {
   getPerpExchangeAggregates,
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus } from "./sma-detection";
-import { scanForEducationalPatterns } from "./universal-scanner";
+import {
+  scanForEducationalPatterns,
+  type EducationalPatternSignal,
+  type PatternScanMeta,
+} from "./universal-scanner";
 import { gradeTrade } from "./trade-grading";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey, getUncachableStripeClient } from "./stripeClient";
@@ -68,6 +72,38 @@ import {
 } from "./trade-journal-store";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
+
+const PATTERN_SCAN_CACHE_TTL_MS = 90_000;
+const PATTERN_SCAN_CACHE_MAX_KEYS = 8;
+const patternScanResultCache = new Map<
+  string,
+  { patterns: EducationalPatternSignal[]; meta: PatternScanMeta; at: number }
+>();
+
+function patternScanCacheKey(walletKey: string, coinsParam: string, coins: string[], timeframes: string[]): string {
+  const coinPart = coinsParam.trim() || [...coins].sort().join(",");
+  const tfPart = [...timeframes].sort().join(",");
+  return `${walletKey}|${coinPart}|${tfPart}`;
+}
+
+function prunePatternScanCache(): void {
+  const now = Date.now();
+  for (const [k, v] of patternScanResultCache) {
+    if (now - v.at > PATTERN_SCAN_CACHE_TTL_MS) patternScanResultCache.delete(k);
+  }
+  while (patternScanResultCache.size > PATTERN_SCAN_CACHE_MAX_KEYS) {
+    let oldestK: string | null = null;
+    let oldestAt = Infinity;
+    for (const [k, v] of patternScanResultCache) {
+      if (v.at < oldestAt) {
+        oldestAt = v.at;
+        oldestK = k;
+      }
+    }
+    if (oldestK) patternScanResultCache.delete(oldestK);
+    else break;
+  }
+}
 
 function crmTierLabel(tier: string | undefined): "Free" | "Pro" | "Mentor" {
   const t = (tier || "free").toLowerCase();
@@ -618,6 +654,7 @@ export async function registerRoutes(
       const coinsParam = req.query.coins as string;
       const timeframesParam = req.query.timeframes as string;
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
+      const skipCache = req.query.nocache === "1" || req.query.nocache === "true";
 
       let coins: string[];
       if (coinsParam?.trim()) {
@@ -637,7 +674,30 @@ export async function registerRoutes(
         ? timeframesParam.split(",").map((t) => t.trim()).filter(Boolean)
         : [...SCAN_ALL_TIMEFRAMES];
 
-      const patterns = await scanForEducationalPatterns(coins, timeframes);
+      const walletKey = wallet?.toLowerCase() ?? "anon";
+      const cacheKey = patternScanCacheKey(walletKey, coinsParam || "", coins, timeframes);
+
+      if (!skipCache) {
+        prunePatternScanCache();
+        const hit = patternScanResultCache.get(cacheKey);
+        if (hit && Date.now() - hit.at <= PATTERN_SCAN_CACHE_TTL_MS) {
+          res.setHeader("X-Pattern-Scan-Coins", String(hit.meta.coinCount));
+          res.setHeader("X-Pattern-Scan-Duration-Ms", String(hit.meta.durationMs));
+          res.setHeader("X-Pattern-Scan-Signals", String(hit.meta.signalCount));
+          res.setHeader("X-Pattern-Scan-Cached", "1");
+          return res.json(hit.patterns);
+        }
+      }
+
+      const { patterns, meta } = await scanForEducationalPatterns(coins, timeframes);
+      if (!skipCache) {
+        patternScanResultCache.set(cacheKey, { patterns, meta, at: Date.now() });
+        prunePatternScanCache();
+      }
+      res.setHeader("X-Pattern-Scan-Coins", String(meta.coinCount));
+      res.setHeader("X-Pattern-Scan-Duration-Ms", String(meta.durationMs));
+      res.setHeader("X-Pattern-Scan-Signals", String(meta.signalCount));
+      res.setHeader("X-Pattern-Scan-Cached", "0");
       res.json(patterns);
     } catch (error) {
       console.error("Error scanning for educational patterns:", error);

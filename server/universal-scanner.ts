@@ -674,6 +674,12 @@ async function scanOneCoinMtf(
   return { signals, diag };
 }
 
+export interface PatternScanMeta {
+  coinCount: number;
+  durationMs: number;
+  signalCount: number;
+}
+
 /**
  * Multi-coin scan: queue tickers in batches (5 every 2s) so Hyperliquid rate limits are not tripped on 1m/5m.
  * Every timeframe uses the same `getCandles` path as higher TFs (`fetchMtfCandleBundle` with `throttleSequential`).
@@ -681,7 +687,7 @@ async function scanOneCoinMtf(
 export async function scanForEducationalPatterns(
   coins: string[],
   timeframes: string[] = [...UNIVERSAL_SCAN_TIMEFRAMES],
-): Promise<EducationalPatternSignal[]> {
+): Promise<{ patterns: EducationalPatternSignal[]; meta: PatternScanMeta }> {
   const uniqueTf =
     timeframes.filter(Boolean).length > 0
       ? [...new Set(timeframes.filter(Boolean))]
@@ -747,5 +753,9 @@ export async function scanForEducationalPatterns(
   }
 
   flat.sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
-  return flat;
+  const durationMs = Date.now() - startedAt;
+  return {
+    patterns: flat,
+    meta: { coinCount: coins.length, durationMs, signalCount: flat.length },
+  };
 }

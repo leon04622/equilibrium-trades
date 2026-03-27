@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo, useCallback } from "react";
+import { useState, useEffect, useMemo, memo, useCallback, useRef } from "react";
 import {
   Zap,
   TrendingUp,
@@ -269,6 +269,16 @@ type WatchlistApi = {
   mongoConfigured: boolean;
 };
 
+type PatternScanPayload = {
+  patterns: PatternSignal[];
+  meta: {
+    coinCount: number;
+    durationMs: number;
+    signalCount: number;
+    cached: boolean;
+  };
+};
+
 function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
   if (!wallet?.trim()) return {};
   return {
@@ -312,34 +322,54 @@ export function PatternScannerUI() {
 
   useEffect(() => {
     if (!watchlistPref) return;
+    if (!watchlistPref.mongoConfigured) {
+      setDraftAllMarkets(true);
+      setDraftCoins([]);
+      return;
+    }
     setDraftAllMarkets(watchlistPref.allMarkets);
     setDraftCoins(watchlistPref.coins?.length ? [...watchlistPref.coins] : []);
   }, [watchlistPref]);
+
+  const canCustomizeWatchlist = !!(address?.trim() && watchlistPref?.mongoConfigured);
 
   const watchlistScanKey = watchlistPref
     ? `${watchlistPref.allMarkets}:${[...(watchlistPref.coins || [])].sort().join(",")}`
     : `anon:${address ?? ""}`;
 
   const {
-    data: signals = [],
+    data: scanPayload,
     isLoading,
     refetch,
     isFetching,
     isError,
     error,
-  } = useQuery<PatternSignal[]>({
+  } = useQuery<PatternScanPayload>({
     queryKey: ["/api/signals/patterns", tfParam, address ?? "", watchlistScanKey],
     queryFn: async () => {
-      const response = await fetch(`/api/signals/patterns?timeframes=${encodeURIComponent(tfParam)}`, {
+      const qs =
+        `timeframes=${encodeURIComponent(tfParam)}` + (forceNocacheRef.current ? "&nocache=1" : "");
+      forceNocacheRef.current = false;
+      const response = await fetch(`/api/signals/patterns?${qs}`, {
         headers: scannerAuthHeaders(address),
       });
       if (!response.ok) throw new Error("Failed to fetch patterns");
-      return response.json();
+      const meta = {
+        coinCount: Number(response.headers.get("X-Pattern-Scan-Coins") || 0),
+        durationMs: Number(response.headers.get("X-Pattern-Scan-Duration-Ms") || 0),
+        signalCount: Number(response.headers.get("X-Pattern-Scan-Signals") || 0),
+        cached: response.headers.get("X-Pattern-Scan-Cached") === "1",
+      };
+      const patterns = (await response.json()) as PatternSignal[];
+      return { patterns, meta };
     },
-    refetchInterval: 30_000,
+    refetchInterval: (query) => (query.state.status === "error" ? false : 30_000),
     staleTime: 0,
     retry: 1,
   });
+
+  const signals = isError ? [] : (scanPayload?.patterns ?? []);
+  const scanMeta = isError ? null : (scanPayload?.meta ?? null);
 
   const saveWatchlistMutation = useMutation({
     mutationFn: async () => {
@@ -432,7 +462,10 @@ export function PatternScannerUI() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => refetch()}
+              onClick={() => {
+                forceNocacheRef.current = true;
+                void refetch();
+              }}
               disabled={isFetching}
               className="h-7 text-xs px-2"
               data-testid="button-refresh-signals"
@@ -450,16 +483,43 @@ export function PatternScannerUI() {
           <AlertTitle>Scan request failed</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              The pattern scan did not finish successfully (timeout or server error). Zero results here does not mean
-              there are no patterns — try Scan again or narrow timeframes.{" "}
-              {error instanceof Error ? error.message : ""}
+              A full-universe pass can take several minutes; hosts often cut off around 60–120s. Results below are
+              cleared so you are not looking at stale data from an older run. Try again with fewer timeframes, or ask
+              ops to raise the HTTP timeout. {error instanceof Error ? error.message : ""}
             </span>
-            <Button variant="outline" size="sm" className="shrink-0" onClick={() => refetch()} disabled={isFetching}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                forceNocacheRef.current = true;
+                void refetch();
+              }}
+              disabled={isFetching}
+            >
               Retry
             </Button>
           </AlertDescription>
         </Alert>
       )}
+
+      <Alert className="border-slate-500/40 bg-slate-500/5">
+        <BarChart3 className="h-4 w-4 text-slate-600" />
+        <AlertTitle className="text-slate-700 dark:text-slate-300">Why so few patterns?</AlertTitle>
+        <AlertDescription className="text-muted-foreground text-xs sm:text-sm">
+          We scan the whole Hyperliquid list, but each row needs roughly <strong>200 closed bars</strong> per timeframe,
+          valid <strong>21/200 SMMA</strong>, and patterns that pass <strong>strict geometry + trend filters</strong> (Apex
+          pole, flag rules, no hallucinated bull flags into bearish structure). Most pairs at any moment produce{" "}
+          <strong>no qualifying label</strong> — that is expected, not a sign the universe scan is truncated.
+          {scanMeta && scanMeta.coinCount > 0 ? (
+            <>
+              {" "}
+              Your last successful response covered <strong>{scanMeta.coinCount}</strong> tickers
+              {scanMeta.cached ? " (served from a short server cache)" : ""}.
+            </>
+          ) : null}
+        </AlertDescription>
+      </Alert>
 
       <Alert className="border-violet-500/40 bg-violet-500/5 hidden md:block">
         <Zap className="h-4 w-4 text-violet-600" />
@@ -501,10 +561,19 @@ export function PatternScannerUI() {
           ))}
         </div>
         <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
-          Full scan every <strong>30s</strong> (1m scalpers). Server pulls 200 candles per TF per coin (batched 5 tickers /
-          2s). Tap to exclude a TF.
+          Auto-refresh <strong>30s</strong> when healthy. Server pulls 200 candles per TF per coin (batched 5 tickers / 2s).
+          Tap a TF to exclude it. Use <strong>Scan</strong> for a fresh pass (<code className="text-[9px]">nocache</code>
+          ).
         </span>
       </div>
+
+      {scanMeta && scanMeta.coinCount > 0 && !isError ? (
+        <p className="text-[10px] md:text-xs text-muted-foreground font-mono px-0.5">
+          Scan coverage: {scanMeta.coinCount} markets · {(scanMeta.durationMs / 1000).toFixed(1)}s server time ·{" "}
+          {scanMeta.signalCount} labeled setups
+          {scanMeta.cached ? " · cached (≤90s)" : ""}
+        </p>
+      ) : null}
 
       <Card className="border-border/80">
         <CardHeader className="pb-2 pt-4 px-4 md:px-6">
@@ -519,46 +588,48 @@ export function PatternScannerUI() {
           ) : null}
           {!address ? (
             <p className="text-xs text-muted-foreground">
-              Connect your wallet to save &quot;All markets&quot; or a custom list — stored in the MongoDB users
-              collection when the vault is connected.
+              Wallet optional — the server scans <strong>all Hyperliquid perps plus active spot</strong> by default.
+              Connect and enable Mongo to save an optional custom watchlist.
             </p>
           ) : !watchlistPref?.mongoConfigured ? (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              MongoDB is not connected on this server — full-universe scans still run, but preferences will not persist
-              after refresh.
+              MongoDB is not connected — every run still uses the <strong>full HL universe</strong>. A custom ticker list
+              and persistence require <code className="text-[10px]">MONGO_VAULT_URI</code>.
             </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Turn off &quot;All markets&quot; to scan only selected tickers (saved to your CRM user document).
+            </p>
+          )}
+
+          {canCustomizeWatchlist ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="scanner-all-markets"
+                  checked={draftAllMarkets}
+                  onCheckedChange={(v) => setDraftAllMarkets(v)}
+                />
+                <Label htmlFor="scanner-all-markets" className="text-xs font-medium cursor-pointer">
+                  All markets (HL perps + active spot)
+                </Label>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-8 w-fit text-xs"
+                disabled={
+                  saveWatchlistMutation.isPending || (!draftAllMarkets && draftCoins.length === 0)
+                }
+                onClick={() => saveWatchlistMutation.mutate()}
+              >
+                {saveWatchlistMutation.isPending ? "Saving…" : "Save watchlist"}
+              </Button>
+            </div>
           ) : null}
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="scanner-all-markets"
-                checked={draftAllMarkets}
-                onCheckedChange={(v) => setDraftAllMarkets(v)}
-                disabled={!address}
-              />
-              <Label htmlFor="scanner-all-markets" className="text-xs font-medium cursor-pointer">
-                All markets (HL perps + active spot)
-              </Label>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-8 w-fit text-xs"
-              disabled={
-                !address ||
-                !watchlistPref?.mongoConfigured ||
-                saveWatchlistMutation.isPending ||
-                (!draftAllMarkets && draftCoins.length === 0)
-              }
-              onClick={() => saveWatchlistMutation.mutate()}
-            >
-              {saveWatchlistMutation.isPending ? "Saving…" : "Save watchlist"}
-            </Button>
-          </div>
-
-          {!draftAllMarkets ? (
+          {canCustomizeWatchlist && !draftAllMarkets ? (
             <div className="space-y-2">
               <Label className="text-xs">Tickers</Label>
               <Input
@@ -748,7 +819,13 @@ export function PatternScannerUI() {
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">No Patterns Detected</p>
                   <p className="text-muted-foreground mb-4">Apex found no qualifying structures on selected TFs.</p>
-                  <Button onClick={() => refetch()} disabled={isFetching}>
+                  <Button
+                    onClick={() => {
+                      forceNocacheRef.current = true;
+                      void refetch();
+                    }}
+                    disabled={isFetching}
+                  >
                     <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
                     Scan Again
                   </Button>
