@@ -16,7 +16,7 @@ interface Trade {
 export function RecentTrades({ coin }: RecentTradesProps) {
   const { data: rawTrades, isLoading } = useQuery<Trade[]>({
     queryKey: [`/api/hyperliquid/trades/${coin}`],
-    refetchInterval: 2000,
+    refetchInterval: 3000,
   });
   
   // Safely handle non-array responses

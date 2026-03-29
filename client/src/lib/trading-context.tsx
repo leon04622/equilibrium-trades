@@ -185,6 +185,9 @@ const STORAGE_KEYS = {
   indicators: "equilibrium_indicators",
 };
 
+/** Coalesce Hyperliquid WS account + order snapshots for UI (perps overview / equity strip). */
+const HL_ACCOUNT_UI_THROTTLE_MS = 3000;
+
 // Load from localStorage with default fallback
 function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
@@ -330,10 +333,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [walletConnected, walletAddress]);
 
-  // WebSocket: open orders + clearinghouse state (1:1 with L1). userEvents debounced refetch as safety net.
+  // WebSocket: open orders + clearinghouse state — UI updates throttled to reduce main-thread churn (chart/scanner).
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
     let cancelled = false;
+    let openUiTimer: ReturnType<typeof setTimeout> | null = null;
+    let chUiTimer: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
       try {
@@ -342,9 +347,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         const user = walletAddress as `0x${string}`;
         const subs: Array<{ unsubscribe: () => Promise<void> }> = [];
 
-        const sOpen = await subClient.openOrders({ user }, (evt) => {
-          if (cancelled) return;
-          const raw = (evt.orders ?? []) as unknown[];
+        let lastOpenUi = 0;
+        let pendingOpenRaw: unknown[] | null = null;
+
+        const flushOpenOrders = () => {
+          openUiTimer = null;
+          if (cancelled || pendingOpenRaw === null) return;
+          const raw = pendingOpenRaw;
+          pendingOpenRaw = null;
           setOpenOrders(convertRawFrontendOrdersToHl(raw));
           setHlFrontendOpenOrdersRaw(
             Array.isArray(raw)
@@ -354,12 +364,32 @@ export function TradingProvider({ children }: { children: ReactNode }) {
               : [],
           );
           setHlAccountSyncAt(Date.now());
+          lastOpenUi = Date.now();
+        };
+
+        const sOpen = await subClient.openOrders({ user }, (evt) => {
+          if (cancelled) return;
+          const raw = (evt.orders ?? []) as unknown[];
+          pendingOpenRaw = raw;
+          const now = Date.now();
+          if (now - lastOpenUi >= HL_ACCOUNT_UI_THROTTLE_MS) {
+            flushOpenOrders();
+            return;
+          }
+          if (!openUiTimer) {
+            openUiTimer = setTimeout(flushOpenOrders, HL_ACCOUNT_UI_THROTTLE_MS - (now - lastOpenUi));
+          }
         });
         subs.push(sOpen);
 
-        const sCh = await subClient.clearinghouseState({ user }, (evt) => {
-          if (cancelled) return;
-          const ch = evt.clearinghouseState as unknown as AccountState;
+        let lastChUi = 0;
+        let pendingCh: AccountState | null = null;
+
+        const flushClearinghouse = () => {
+          chUiTimer = null;
+          if (cancelled || !pendingCh) return;
+          const ch = pendingCh;
+          pendingCh = null;
           applyMarginSummaryFromAccountState(ch, {
             setAccountValue,
             setMarginUsed,
@@ -385,6 +415,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             })),
           );
           setHlAccountSyncAt(Date.now());
+          lastChUi = Date.now();
+        };
+
+        const sCh = await subClient.clearinghouseState({ user }, (evt) => {
+          if (cancelled) return;
+          pendingCh = evt.clearinghouseState as unknown as AccountState;
+          const now = Date.now();
+          if (now - lastChUi >= HL_ACCOUNT_UI_THROTTLE_MS) {
+            flushClearinghouse();
+            return;
+          }
+          if (!chUiTimer) {
+            chUiTimer = setTimeout(flushClearinghouse, HL_ACCOUNT_UI_THROTTLE_MS - (now - lastChUi));
+          }
         });
         subs.push(sCh);
 
@@ -406,6 +450,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (openUiTimer) clearTimeout(openUiTimer);
+      if (chUiTimer) clearTimeout(chUiTimer);
       if (userEventsRefreshTimerRef.current) {
         clearTimeout(userEventsRefreshTimerRef.current);
         userEventsRefreshTimerRef.current = null;

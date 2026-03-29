@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import {
   createChart,
   ColorType,
@@ -21,6 +21,8 @@ import { ChartOrderLines } from "@/components/chart-order-lines";
 import { ApexSovereign } from "@/components/apex-sovereign";
 import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { PremiumFeatureLock } from "@/components/premium-feature-lock";
+import { loadCachedCandles, saveCachedCandles } from "@/lib/chart-candle-storage";
+import { computeSmmaSeries } from "@/lib/smma-worker-client";
 
 interface EducationalPatternSignal {
   id: string;
@@ -77,23 +79,6 @@ function calcSMA(vals: number[], times: Time[], period: number): { time: Time; v
     let s = 0;
     for (let j = 0; j < period; j++) s += vals[i - j];
     out.push({ time: times[i], value: s / period });
-  }
-  return out;
-}
-
-// SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
-// First value = SMA of first `period` bars; then SMMA = (prev * (period-1) + close) / period
-function calcSMMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
-  if (vals.length < period) return [];
-  const out: { time: Time; value: number }[] = [];
-  let prev = 0;
-  for (let i = 0; i < period; i++) prev += vals[i];
-  prev /= period;
-  out.push({ time: times[period - 1], value: prev });
-  for (let i = period; i < vals.length; i++) {
-    const smma = (prev * (period - 1) + vals[i]) / period;
-    out.push({ time: times[i], value: smma });
-    prev = smma;
   }
   return out;
 }
@@ -170,6 +155,8 @@ function PatternChartComponent({
   const stochKSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const isSyncingRef = useRef(false);
+  const smaCardRunRef = useRef(0);
+  const chartSmmaRunRef = useRef(0);
 
   /** Keeps optimistic TP/SL prices until openOrders refresh (Apex Sovereign + order lines contract). */
   const [nativeTpslOverride, setNativeTpslOverride] = useState<{ tp: number | null; sl: number | null }>({
@@ -212,8 +199,9 @@ function PatternChartComponent({
     const ALL_INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
     ALL_INTERVALS.forEach((tf) => {
       if (tf === interval) return;
+      const key = `/api/hyperliquid/candles/${coin}?interval=${tf}&limit=500`;
       queryClient.prefetchQuery({
-        queryKey: [`/api/hyperliquid/candles/${coin}?interval=${tf}&limit=500`],
+        queryKey: [key],
         staleTime: 30000,
       });
     });
@@ -231,11 +219,47 @@ function PatternChartComponent({
     setActiveSignal(null);
   }, [coin, interval]);
 
-  const { data: candles, isLoading: candlesLoading } = useQuery<CandleData[]>({
-    queryKey: [`/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`],
-    refetchInterval: 10000,
+  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`;
+  const cachedCandles = useMemo(() => loadCachedCandles(coin, interval), [coin, interval]);
+
+  const {
+    data: candles,
+    isLoading: candlesLoading,
+    isFetching: candlesFetching,
+    isError: candlesError,
+    isFetched: candlesFetched,
+  } = useQuery<CandleData[]>({
+    // candlesLoading kept for React Query semantics; UI uses cache-aware flags below
+    queryKey: [candleQueryKey],
+    placeholderData: cachedCandles.length > 0 ? (cachedCandles as CandleData[]) : undefined,
+    refetchInterval: 10_000,
     staleTime: 8000,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const attempt = async () => {
+        const res = await fetch(candleQueryKey, { signal, credentials: "include" });
+        if (!res.ok) throw new Error(`candles ${res.status}`);
+        return (await res.json()) as CandleData[];
+      };
+      try {
+        const data = await attempt();
+        saveCachedCandles(coin, interval, data);
+        return data;
+      } catch (first) {
+        if (signal?.aborted) throw first;
+        await new Promise<void>((r) => setTimeout(r, 2000));
+        if (signal?.aborted) throw first;
+        const data = await attempt();
+        saveCachedCandles(coin, interval, data);
+        return data;
+      }
+    },
   });
+
+  const hasRenderableCandles = (candles?.length ?? 0) > 0;
+  const showChartLoadingOverlay = candlesFetching && !hasRenderableCandles;
+  const showNoDataFallback =
+    candlesFetched && !hasRenderableCandles && !candlesFetching && (candlesError || !candlesLoading);
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
     queryKey: [`/api/signals/patterns?timeframes=${encodeURIComponent(interval)}&coins=${encodeURIComponent(coin)}`],
@@ -286,23 +310,26 @@ function PatternChartComponent({
     document.addEventListener("pointercancel", onUp);
   }, [weights]);
 
-  // ── SMA status for signal card ──
-  // Uses exactly 21 and 200 close prices — same formula as Hyperliquid charts.
+  // ── SMA status for signal card (SMMA via worker; same Hyperliquid formula) ──
   useEffect(() => {
-    if (!candles || candles.length < 21) { setSmaStatus(null); return; }
-    const sorted = [...candles].sort((a, b) => a.t - b.t);
-    const closes = sorted.map(c => parsePrice(c.c));
-    const times = sorted.map(c => (c.t / 1000) as Time);
-    const sma21 = calcSMMA(closes, times, 21);
-    // SMMA200: only compute when we have 200+ candles; never approximate with fewer
-    const sma200 = sorted.length >= 200 ? calcSMMA(closes, times, 200) : [];
-    const s21 = sma21.length > 0 ? sma21[sma21.length - 1].value : 0;
-    const s200 = sma200.length > 0 ? sma200[sma200.length - 1].value : null;
-    if (s21 > 0 && s200 !== null) {
-      setSmaStatus({ sma21: s21, sma200: s200, isBullish: s21 > s200 });
-    } else {
+    if (!candles || candles.length < 21) {
       setSmaStatus(null);
+      return;
     }
+    const runId = ++smaCardRunRef.current;
+    const sorted = [...candles].sort((a, b) => a.t - b.t);
+    const closes = sorted.map((c) => parsePrice(c.c));
+    const times = sorted.map((c) => (c.t / 1000) as Time);
+    let cancelled = false;
+    void computeSmmaSeries(closes, times).then((sm) => {
+      if (cancelled || runId !== smaCardRunRef.current) return;
+      const s = sm.smaStatus;
+      if (s) setSmaStatus(s);
+      else setSmaStatus(null);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [candles, parsePrice]);
 
   // Show ALL detected patterns — do NOT gate by MA direction here.
@@ -522,7 +549,7 @@ function PatternChartComponent({
     };
   }, [theme, hideIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Data update — smart setData vs update() ──
+  // ── Data update — smart setData vs update(); SMMA computed in Web Worker (same formula) ──
   useEffect(() => {
     if (!candles || candles.length === 0) return;
     if (!candleSeriesRef.current || !mainChartRef.current) return;
@@ -531,94 +558,122 @@ function PatternChartComponent({
     if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
     const sorted = [...candles].sort((a, b) => a.t - b.t);
-    const closes = sorted.map(c => parsePrice(c.c));
-    const times = sorted.map(c => (c.t / 1000) as Time);
-    const vols = sorted.map(c => parsePrice(c.v));
-    const lastCandle = sorted[sorted.length - 1];
-    const lastTime = times[times.length - 1];
+    const closes = sorted.map((c) => parsePrice(c.c));
+    const times = sorted.map((c) => (c.t / 1000) as Time);
+    const vols = sorted.map((c) => parsePrice(c.v));
+    const lastCandle = sorted[sorted.length - 1]!;
+    const lastTime = times[times.length - 1]!;
 
     const dataKey = `${coin}:${interval}`;
-    const isKeyChange = prevDataKeyRef.current !== dataKey;
-    const isFirstLoad = !chartDataReadyRef.current;
 
-    if (isKeyChange || isFirstLoad) {
-      // ── Full setData: initial load, symbol switch, or interval switch ──
-      console.log("[chart] setData →", dataKey, sorted.length, "candles", isKeyChange ? "(key change)" : "(first load)");
+    const runId = ++chartSmmaRunRef.current;
 
-      try {
-        candleSeriesRef.current.setData(sorted.map((c, i) => ({
-          time: times[i],
-          open: parsePrice(c.o),
-          high: parsePrice(c.h),
-          low: parsePrice(c.l),
-          close: parsePrice(c.c),
-        })));
+    void (async () => {
+      const sm = await computeSmmaSeries(closes, times);
+      if (runId !== chartSmmaRunRef.current) return;
+      if (!candleSeriesRef.current || !mainChartRef.current) return;
+      if (!sma21SeriesRef.current || !sma200SeriesRef.current) return;
+      if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
+      if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
-        volumeSeriesRef.current.setData(sorted.map((c, i) => ({
-          time: times[i],
-          value: vols[i],
-          color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
-        })));
-        setLastVol(vols[vols.length - 1] ?? null);
+      const isKeyChange = prevDataKeyRef.current !== dataKey;
+      const isFirstLoad = !chartDataReadyRef.current;
 
-        if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-        if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMMA(closes, times, 21));
-        // SMMA200: use exactly 200 periods — never approximate (matches Hyperliquid exactly)
-        if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMMA(closes, times, 200));
+      if (isKeyChange || isFirstLoad) {
+        console.log("[chart] setData →", dataKey, sorted.length, "candles", isKeyChange ? "(key change)" : "(first load)");
 
-        if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
-          const rsiData = calcRSI(closes, times, 14);
-          if (rsiData.length > 0) {
-            rsiSeriesRef.current.setData(rsiData);
-            setLastRSI(rsiData[rsiData.length - 1].value);
+        try {
+          candleSeriesRef.current.setData(
+            sorted.map((c, i) => ({
+              time: times[i]!,
+              open: parsePrice(c.o),
+              high: parsePrice(c.h),
+              low: parsePrice(c.l),
+              close: parsePrice(c.c),
+            })),
+          );
+
+          volumeSeriesRef.current.setData(
+            sorted.map((c, i) => ({
+              time: times[i]!,
+              value: vols[i]!,
+              color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+            })),
+          );
+          setLastVol(vols[vols.length - 1] ?? null);
+
+          if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
+          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
+          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
+
+          if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+            const rsiData = calcRSI(closes, times, 14);
+            if (rsiData.length > 0) {
+              rsiSeriesRef.current.setData(rsiData);
+              setLastRSI(rsiData[rsiData.length - 1]!.value);
+            }
+            if (rsiData.length >= 14) {
+              const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+              if (k.length > 0) {
+                stochKSeriesRef.current.setData(k);
+                setLastK(k[k.length - 1]!.value);
+              }
+              if (d.length > 0) {
+                stochDSeriesRef.current.setData(d);
+                setLastD(d[d.length - 1]!.value);
+              }
+            }
           }
-          if (rsiData.length >= 14) {
-            const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
-            if (k.length > 0) { stochKSeriesRef.current.setData(k); setLastK(k[k.length - 1].value); }
-            if (d.length > 0) { stochDSeriesRef.current.setData(d); setLastD(d[d.length - 1].value); }
-          }
+
+          mainChartRef.current.timeScale().fitContent();
+        } catch (e) {
+          console.warn("[chart] setData error:", e);
+          return;
         }
 
-        // Fit content on first data load for this symbol
-        mainChartRef.current.timeScale().fitContent();
-      } catch (e) {
-        console.warn("[chart] setData error:", e);
+        prevDataKeyRef.current = dataKey;
+        prevCandlesLenRef.current = sorted.length;
+        prevLastTimeRef.current = lastCandle.t;
+        chartDataReadyRef.current = true;
         return;
       }
 
-      prevDataKeyRef.current = dataKey;
-      prevCandlesLenRef.current = sorted.length;
-      prevLastTimeRef.current = lastCandle.t;
-      chartDataReadyRef.current = true;
-    } else {
-      // ── Live update: same symbol+interval, use update() to avoid full redraw ──
       const lenChanged = sorted.length !== prevCandlesLenRef.current;
-
-      // Guard: if the new last-candle time is EARLIER than what's already in the series,
-      // it means the API returned slightly stale data. Fall back to setData to recover.
       const timeWentBackward = lastCandle.t < prevLastTimeRef.current;
 
-      // If many new candles arrived at once, OR time went backward, fall back to setData
       if (sorted.length - prevCandlesLenRef.current > 2 || timeWentBackward) {
-        console.log("[chart] setData (fallback) →", coin, sorted.length, "candles", timeWentBackward ? "(time went backward)" : "(bulk update)");
+        console.log(
+          "[chart] setData (fallback) →",
+          coin,
+          sorted.length,
+          "candles",
+          timeWentBackward ? "(time went backward)" : "(bulk update)",
+        );
         try {
-          candleSeriesRef.current.setData(sorted.map((c, i) => ({
-            time: times[i], open: parsePrice(c.o), high: parsePrice(c.h),
-            low: parsePrice(c.l), close: parsePrice(c.c),
-          })));
-          volumeSeriesRef.current.setData(sorted.map((c, i) => ({
-            time: times[i], value: vols[i],
-            color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
-          })));
+          candleSeriesRef.current.setData(
+            sorted.map((c, i) => ({
+              time: times[i]!,
+              open: parsePrice(c.o),
+              high: parsePrice(c.h),
+              low: parsePrice(c.l),
+              close: parsePrice(c.c),
+            })),
+          );
+          volumeSeriesRef.current.setData(
+            sorted.map((c, i) => ({
+              time: times[i]!,
+              value: vols[i]!,
+              color: parsePrice(c.c) >= parsePrice(c.o) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+            })),
+          );
           if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-          if (sorted.length >= 21) sma21SeriesRef.current.setData(calcSMMA(closes, times, 21));
-          if (sorted.length >= 200) sma200SeriesRef.current.setData(calcSMMA(closes, times, 200));
+          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
+          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
           setLastVol(vols[vols.length - 1] ?? null);
         } catch (e) {
           console.warn("[chart] bulk setData error:", e);
         }
       } else {
-        // Single candle update or in-progress bar update
         console.log("[chart] update → last candle", lastTime, lenChanged ? "(new bar)" : "(in-progress bar)");
         try {
           candleSeriesRef.current.update({
@@ -636,31 +691,29 @@ function PatternChartComponent({
           });
           setLastVol(parsePrice(lastCandle.v));
 
-          // Update SMMA last points (incremental — avoids full series redraw)
-          if (sorted.length >= 21) {
-            const s21 = calcSMMA(closes, times, 21);
-            if (s21.length > 0) sma21SeriesRef.current.update(s21[s21.length - 1]);
-          }
-          if (sorted.length >= 200) {
-            const s200 = calcSMMA(closes, times, 200);
-            if (s200.length > 0) sma200SeriesRef.current.update(s200[s200.length - 1]);
-          }
+          if (sorted.length >= 21 && sm.last21) sma21SeriesRef.current.update(sm.last21);
+          if (sorted.length >= 200 && sm.last200) sma200SeriesRef.current.update(sm.last200);
           if (vols.length >= 20) {
             const vs = calcSMA(vols, times, 20);
-            if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]);
+            if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]!);
           }
 
-          // Update indicators
           if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
             const rsiData = calcRSI(closes, times, 14);
             if (rsiData.length > 0) {
-              rsiSeriesRef.current.update(rsiData[rsiData.length - 1]);
-              setLastRSI(rsiData[rsiData.length - 1].value);
+              rsiSeriesRef.current.update(rsiData[rsiData.length - 1]!);
+              setLastRSI(rsiData[rsiData.length - 1]!.value);
             }
             if (rsiData.length >= 14) {
               const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
-              if (k.length > 0) { stochKSeriesRef.current.update(k[k.length - 1]); setLastK(k[k.length - 1].value); }
-              if (d.length > 0) { stochDSeriesRef.current.update(d[d.length - 1]); setLastD(d[d.length - 1].value); }
+              if (k.length > 0) {
+                stochKSeriesRef.current.update(k[k.length - 1]!);
+                setLastK(k[k.length - 1]!.value);
+              }
+              if (d.length > 0) {
+                stochDSeriesRef.current.update(d[d.length - 1]!);
+                setLastD(d[d.length - 1]!.value);
+              }
             }
           }
         } catch (e) {
@@ -670,8 +723,8 @@ function PatternChartComponent({
 
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
-    }
-  }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]); // chartVersion triggers re-run when chart is recreated
+    })();
+  }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]);
 
   useEffect(() => {
     setNativeTpslOverride({ tp: null, sl: null });
@@ -737,7 +790,7 @@ function PatternChartComponent({
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
-        {candlesLoading && (
+        {showChartLoadingOverlay && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2">
               <svg className="animate-spin h-7 w-7 text-[#b2b5be]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -750,7 +803,7 @@ function PatternChartComponent({
         )}
 
         {/* No data fallback */}
-        {!candlesLoading && (!candles || candles.length === 0) && (
+        {showNoDataFallback && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
             <p className="text-[#b2b5be] text-sm">No chart data available</p>
           </div>

@@ -18,7 +18,7 @@ interface OrderBookData {
 export function OrderBook({ coin }: OrderBookProps) {
   const { data: orderBook, isLoading } = useQuery<OrderBookData>({
     queryKey: [`/api/hyperliquid/orderbook/${coin}`],
-    refetchInterval: 1000,
+    refetchInterval: 3000,
   });
 
   if (isLoading) {

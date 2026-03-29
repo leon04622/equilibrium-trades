@@ -84,7 +84,7 @@ export function EmailCaptureModal() {
     try {
       const regOk = await registerWalletForCrm({ walletAddress: address, email: trimmed });
       const patchOk = await saveCrmEmailToServer(address, trimmed);
-      if (!regOk && !patchOk) {
+      if (!regOk.ok && !patchOk) {
         throw new Error("Could not save email");
       }
       try {

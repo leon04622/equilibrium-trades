@@ -6,17 +6,31 @@ export type RegisterWalletBody = {
   email?: string | null;
 };
 
+export type RegisterWalletResult = {
+  ok: boolean;
+  /** Server JSON `success` when present */
+  persisted: boolean;
+};
+
+function walletAuthHeaders(walletAddress: string): Record<string, string> {
+  const w = walletAddress.trim();
+  return {
+    "Content-Type": "application/json",
+    "x-wallet-address": w,
+    Authorization: `Bearer ${w}`,
+  };
+}
+
 /**
  * CRM lead capture: persist wallet (and optional email) to Postgres + Mongo `users` on connect.
- * Call from a root-level component so every session registers before other API calls race.
  */
-export async function registerWalletForCrm(body: RegisterWalletBody): Promise<boolean> {
+export async function registerWalletForCrm(body: RegisterWalletBody): Promise<RegisterWalletResult> {
   const walletAddress = body.walletAddress.trim();
-  if (!walletAddress) return false;
+  if (!walletAddress) return { ok: false, persisted: false };
   try {
     const res = await fetch("/api/wallet-user/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: walletAuthHeaders(walletAddress),
       credentials: "include",
       body: JSON.stringify({
         walletAddress,
@@ -25,9 +39,11 @@ export async function registerWalletForCrm(body: RegisterWalletBody): Promise<bo
           : {}),
       }),
     });
-    return res.ok;
+    if (!res.ok) return { ok: false, persisted: false };
+    const data = (await res.json().catch(() => ({}))) as { success?: boolean };
+    return { ok: true, persisted: data.success !== false };
   } catch {
-    return false;
+    return { ok: false, persisted: false };
   }
 }
 
@@ -38,7 +54,7 @@ export async function saveCrmEmailToServer(walletAddress: string, email: string)
   try {
     const res = await fetch(`/api/wallet-user/${encodeURIComponent(w)}/email`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: walletAuthHeaders(w),
       credentials: "include",
       body: JSON.stringify({ email: em }),
     });
@@ -63,6 +79,6 @@ export function useCrmLeadCapture() {
     }
     if (doneFor.current === address) return;
     doneFor.current = address;
-    void registerWalletForCrm({ walletAddress: address });
+    void registerWalletForCrm({ walletAddress: address }).then(() => {});
   }, [isConnected, address]);
 }

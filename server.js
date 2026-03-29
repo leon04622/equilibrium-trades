@@ -21,6 +21,12 @@
  *   • If still down: background retry every **5s** (single attempt per tick) updates CRM/vault routes.
  *   • CRM: `users` collection; vault: **`tutorial_videos`** (override `MONGO_VIDEOS_COLLECTION`; legacy `videos` merged on GET).
  *   • Signups and admin “Add Video” persist to Mongo; client logout only clears local wallet + React Query cache.
+ *   • `POST /api/wallet-user/register` — idempotent CRM shell; client sends wallet headers + optional email immediately on connect.
+ *
+ * Client performance (bundled UI; see `client/src/components/pattern-chart.tsx`, `trading-context.tsx`):
+ *   • Candle API: 2s delayed retry on failure; last **500** bars cached in **localStorage** per coin/interval to avoid “no data” flicker.
+ *   • SMMA 21/200 math runs in a **Web Worker** (same formula as Hyperliquid); main thread paints only.
+ *   • Hyperliquid account / open-order WS updates are **throttled (~3s)** for equity + perps UI; order book + tape poll at **3s**.
  *
  * Pattern scanner (`server/GlobalScanner.ts`, `server/universal-scanner.ts`):
  *   • Default universe: **top 50 HL perps by 24h volume + PAXG** (gold on Hyperliquid).
