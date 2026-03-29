@@ -214,6 +214,23 @@ export function extractYoutubeVideoIdFromUrl(raw: string): string | undefined {
   }
 }
 
+/** Vimeo watch / player URLs → numeric id for react-player (`https://vimeo.com/:id`). */
+export function extractVimeoVideoIdFromUrl(raw: string): string | undefined {
+  const t = raw.trim();
+  if (t.startsWith("/") && !t.startsWith("//")) return undefined;
+  try {
+    const u = new URL(t);
+    const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host !== "vimeo.com" && host !== "player.vimeo.com") return undefined;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last && /^\d+$/.test(last)) return last;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Admin Command Center / POST /api/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
 export const adminVideoCreateSchema = z
   .object({
@@ -248,8 +265,20 @@ export const adminVideoCreateSchema = z
   })
   .transform((data) => {
     const url = data.videoUrl.trim();
-    const youtubeId = extractYoutubeVideoIdFromUrl(url);
-    const videoPath = youtubeId ? undefined : url;
+    const yt = extractYoutubeVideoIdFromUrl(url);
+    const vim = extractVimeoVideoIdFromUrl(url);
+    let youtubeId: string | undefined;
+    let videoPath: string | undefined;
+    if (yt) {
+      youtubeId = yt;
+      videoPath = undefined;
+    } else if (vim) {
+      youtubeId = undefined;
+      videoPath = `https://vimeo.com/${vim}`;
+    } else {
+      youtubeId = undefined;
+      videoPath = url;
+    }
 
     const rawCat = (data.category || "").trim();
     const catLower = rawCat.toLowerCase();

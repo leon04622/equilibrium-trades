@@ -182,6 +182,7 @@ export default function AdminCommandCenter() {
     },
     onSuccess: (_d, vars) => {
       void queryClient.invalidateQueries({ queryKey: ["fortress-crm-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
       toast({
@@ -210,8 +211,10 @@ export default function AdminCommandCenter() {
         setAccessSavedWallet((w) => (w === wallet ? null : w));
       }, 3500);
       void queryClient.invalidateQueries({ queryKey: ["fortress-crm-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+      void queryClient.refetchQueries({ queryKey: ["/api/user/sync"] });
       void queryClient.refetchQueries({ queryKey: ["/api/user-status"] });
       toast({
         title: "Access saved",

@@ -138,6 +138,28 @@ async function initStripe() {
 
   app.use(express.urlencoded({ extended: false }));
 
+  if (process.env.NODE_ENV === "production") {
+    app.use((_req, res, next) => {
+      res.setHeader(
+        "Content-Security-Policy",
+        [
+          "default-src 'self'",
+          "base-uri 'self'",
+          "object-src 'none'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com data:",
+          "img-src 'self' data: https: blob:",
+          "connect-src 'self' https: wss: data:",
+          "media-src 'self' blob: https: data:",
+          "worker-src 'self' blob:",
+          "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com",
+        ].join("; "),
+      );
+      next();
+    });
+  }
+
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;

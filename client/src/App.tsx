@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { TradingProvider } from "@/lib/trading-context";
 import { WalletProvider } from "@/lib/wallet-context";
+import { AuthProvider } from "@/context/AuthContext";
 import { ChatProvider } from "@/lib/chat-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletConnect } from "@/components/wallet-connect";
@@ -17,6 +18,7 @@ import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { WalletGate } from "@/components/wallet-gate";
 import { WalletCrmSync } from "@/components/wallet-crm-sync";
 import { EmailCaptureModal } from "@/components/email-capture-modal";
+import { useCrmLeadCapture } from "@/hooks/LeadCapture";
 import { BuilderCodeModal } from "@/components/builder-code-modal";
 import { TradeHandshakeProvider } from "@/components/trade-handshake-context";
 import { PaywallModal } from "@/components/paywall-modal";
@@ -42,6 +44,11 @@ import NotFound from "@/pages/not-found";
 import { JournalView } from "@/components/JournalView";
 import { UserTierSync } from "@/components/user-tier-sync";
 
+function CrmPersistenceBootstrap() {
+  useCrmLeadCapture();
+  return null;
+}
+
 function App() {
   const style = {
     "--sidebar-width": "16rem",
@@ -53,6 +60,8 @@ function App() {
       <ThemeProvider>
         <AppErrorBoundary>
           <WalletProvider>
+            <AuthProvider>
+            <CrmPersistenceBootstrap />
             <UserTierSync />
             <TradingProvider>
               <TradeHandshakeProvider>
@@ -94,6 +103,7 @@ function App() {
                 </ChatProvider>
               </TradeHandshakeProvider>
             </TradingProvider>
+            </AuthProvider>
           </WalletProvider>
         </AppErrorBoundary>
       </ThemeProvider>

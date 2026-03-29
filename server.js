@@ -3,14 +3,24 @@
  *
  * Loads `dist/index.cjs` after `npm run build`.
  *
+ * Memory engine (identity + persistence):
+ *   • `GET /api/user/sync` — after wallet connect, the client sends `x-wallet-address` and
+ *     `Authorization: Bearer <0x…>`; the server returns subscription (Postgres + Stripe + Mongo CRM),
+ *     profile (email, join date, builder flags), and a journal snapshot. This is the global handshake
+ *     so Manual Pro / CRM tiers survive refresh.
+ *   • `GET /api/user-status/:wallet` — same subscription merge as sync (lighter payload); kept for
+ *     legacy callers.
+ *
  * Safety (do not change without ops sign-off):
  *   • Admin wallet: 0x115560812df8e7515eecc957b6796531e936edd9 (`server/fortress-admin.ts`)
  *   • Hyperliquid builder fee recipient: 0xad9be64fd7a35d99a138b87cb212baefbcdcf045 (`server/routes.ts` + client HL client)
  *
  * MongoDB (`MONGODB_URI`, optional `MONGO_VAULT_URI`):
+ *   • Successful handshake logs **DATABASE_SYNC_SUCCESS** (see `server/mongo-vault.ts`).
  *   • Startup: up to 5 handshake attempts with backoff (`server/mongo-vault.ts`).
  *   • If still down: background retry every **5s** (single attempt per tick) updates CRM/vault routes.
- *   • Pro/Mentor grants persist to **PostgreSQL `wallet_users` first**; Mongo CRM sync mirrors `subTier` when vault is up.
+ *   • CRM: `users` collection; vault: **`tutorial_videos`** (override `MONGO_VIDEOS_COLLECTION`; legacy `videos` merged on GET).
+ *   • Signups and admin “Add Video” persist to Mongo; client logout only clears local wallet + React Query cache.
  *
  * Pattern scanner (`server/GlobalScanner.ts`, `server/universal-scanner.ts`):
  *   • Default universe: **top 50 HL perps by 24h volume + PAXG** (gold on Hyperliquid).

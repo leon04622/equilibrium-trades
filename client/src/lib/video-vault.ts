@@ -1,5 +1,5 @@
 import type { AcademySection, TutorialVideo } from "@shared/schema";
-import { extractYoutubeVideoIdFromUrl } from "@shared/schema";
+import { extractYoutubeVideoIdFromUrl, extractVimeoVideoIdFromUrl } from "@shared/schema";
 
 const YT_STANDALONE_ID = /^[a-zA-Z0-9_-]{6,}$/;
 
@@ -85,11 +85,15 @@ export function tutorialToPlayUrl(v: Pick<TutorialVideo, "youtubeId" | "videoPat
     const fromUrl = extractYoutubeVideoIdFromUrl(rawId);
     const id = fromUrl ?? (YT_STANDALONE_ID.test(rawId) ? rawId : undefined);
     if (id) return `https://www.youtube.com/watch?v=${id}`;
+    const vim = extractVimeoVideoIdFromUrl(rawId);
+    if (vim) return `https://vimeo.com/${vim}`;
   }
   const p = (v.videoPath || "").trim();
   if (!p) return "";
   const ytFromPath = extractYoutubeVideoIdFromUrl(p);
   if (ytFromPath) return `https://www.youtube.com/watch?v=${ytFromPath}`;
+  const vimFromPath = extractVimeoVideoIdFromUrl(p);
+  if (vimFromPath) return `https://vimeo.com/${vimFromPath}`;
   if (p.startsWith("http://") || p.startsWith("https://")) return p;
   if (typeof window !== "undefined" && p.startsWith("/")) {
     return `${window.location.origin}${p}`;

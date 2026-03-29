@@ -10,26 +10,11 @@ function isPaidTier(t: string | undefined): boolean {
   return t === "pro" || t === "mentoring" || t === "elite";
 }
 
-/**
- * Resolves Pro ($50/mo) vs Mentoring ($500/mo, includes Pro) via `/api/user-status/:wallet`
- * (Postgres + Stripe + Mongo CRM — same rules as legacy `/api/stripe/subscription`).
- */
-export async function checkSubscription(walletAddress: string): Promise<SubscriptionCheckResult> {
-  const enc = encodeURIComponent(walletAddress);
-  const res = await fetch(`/api/user-status/${enc}`, { credentials: "include" });
-  if (!res.ok) {
-    return {
-      tier: "free",
-      active: false,
-      expiresAt: null,
-      isSubscribed: false,
-    };
-  }
-  const data = (await res.json()) as {
-    tier: SubscriptionCheckResult["tier"];
-    active: boolean;
-    expiresAt: string | null;
-  };
+function mapSyncToResult(data: {
+  tier: SubscriptionCheckResult["tier"];
+  active: boolean;
+  expiresAt: string | null;
+}): SubscriptionCheckResult {
   const rawTier = data.tier ?? "free";
   const tier = rawTier === "elite" ? "mentoring" : rawTier;
   const isSubscribed = !!(data.active && isPaidTier(rawTier));
@@ -39,4 +24,49 @@ export async function checkSubscription(walletAddress: string): Promise<Subscrip
     expiresAt: data.expiresAt ?? null,
     isSubscribed,
   };
+}
+
+/**
+ * Same subscription rules as the UI (`GET /api/user/sync`), with fallback to `/api/user-status/:wallet`.
+ */
+export async function checkSubscription(walletAddress: string): Promise<SubscriptionCheckResult> {
+  const free: SubscriptionCheckResult = {
+    tier: "free",
+    active: false,
+    expiresAt: null,
+    isSubscribed: false,
+  };
+
+  try {
+    const syncRes = await fetch("/api/user/sync", {
+      credentials: "include",
+      headers: {
+        "x-wallet-address": walletAddress,
+        Authorization: `Bearer ${walletAddress}`,
+      },
+    });
+    if (syncRes.ok) {
+      const body = (await syncRes.json()) as { subscription?: SubscriptionCheckResult };
+      const s = body.subscription;
+      if (s?.tier != null) {
+        return mapSyncToResult({
+          tier: s.tier,
+          active: !!s.active,
+          expiresAt: s.expiresAt ?? null,
+        });
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  const enc = encodeURIComponent(walletAddress);
+  const res = await fetch(`/api/user-status/${enc}`, { credentials: "include" });
+  if (!res.ok) return free;
+  const data = (await res.json()) as {
+    tier: SubscriptionCheckResult["tier"];
+    active: boolean;
+    expiresAt: string | null;
+  };
+  return mapSyncToResult(data);
 }

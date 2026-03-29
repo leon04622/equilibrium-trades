@@ -126,6 +126,14 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
     setLoadError(null);
   }, [url]);
 
+  if (!playUrl.trim()) {
+    return (
+      <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 rounded-lg bg-black p-4 text-center text-sm text-zinc-300">
+        <p>No playable URL for this lesson. Re-save the video in Command Center with a YouTube, Vimeo, or https link.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="relative isolate w-full shrink-0 overflow-hidden rounded-lg bg-black pt-[56.25%]">
       <div className="absolute inset-0">

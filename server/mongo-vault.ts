@@ -12,7 +12,9 @@ import {
 import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
 
-const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION || "videos";
+/** Default `tutorial_videos` — override with `MONGO_VIDEOS_COLLECTION` if needed. Legacy `videos` is merged on read. */
+const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION?.trim() || "tutorial_videos";
+const LEGACY_VIDEOS_COLL = "videos";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
 /** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
@@ -192,6 +194,52 @@ function crmSubscriptionStatusFromWallet(user: WalletUser): "Active" | "Expired"
   const expMs = exp instanceof Date ? exp.getTime() : exp ? new Date(exp as unknown as string).getTime() : NaN;
   const expOk = !Number.isFinite(expMs) || expMs > Date.now();
   return user.subscriptionActive && expOk ? "Active" : "Expired";
+}
+
+/**
+ * Ensure a CRM row exists for this wallet as soon as they connect (before/without Postgres).
+ * Does not downgrade `subTier` / subscription fields on update — only sets email when provided.
+ */
+export async function upsertMongoCrmContactOnConnect(params: {
+  walletAddress: string;
+  email?: string | null;
+}): Promise<void> {
+  if (!vaultDb) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = params.walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(w)) return;
+  const now = new Date();
+  const setDoc: Record<string, unknown> = {
+    wallet: w,
+    walletAddress: w,
+    updatedAt: now,
+  };
+  const em = params.email != null ? String(params.email).trim() : "";
+  if (em) setDoc.email = em;
+
+  await coll.updateOne(
+    { $or: [{ wallet: w }, { walletAddress: w }] },
+    {
+      $set: setDoc,
+      $setOnInsert: {
+        wallet: w,
+        walletAddress: w,
+        source: "equilibrium_app",
+        joinDate: now,
+        createdAt: now,
+        subTier: "Free",
+        subscriptionTier: "free",
+        subscriptionActive: false,
+        manualProOverride: false,
+        accessExpires: null,
+        subscriptionExpiresAt: null,
+        status: "Active",
+        isBuilderLinked: false,
+        email: em || null,
+      },
+    },
+    { upsert: true },
+  );
 }
 
 /** Upsert CRM / users document when Mongo vault DB is connected (wallet connect, admin, Stripe sync). */
@@ -731,6 +779,7 @@ export async function tryConnectMongoVault(opts?: {
         retryWrites: true,
       });
       await cachedClient.connect();
+      console.log("DATABASE_SYNC_SUCCESS");
       console.log(
         `[mongo-vault] Connected to MongoDB (attempt ${attempt}/${maxAttempts}) — vault / CRM / support`,
       );

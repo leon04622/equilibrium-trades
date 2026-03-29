@@ -6,6 +6,7 @@ import {
   isHyperliquidTradingSessionReady,
   clearHyperliquidTradingSession,
 } from "@/lib/hyperliquid-client";
+import { queryClient } from "@/lib/queryClient";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
 
@@ -283,6 +284,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           await fetch("/api/wallet-user/register", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({ walletAddress: address }),
             signal: ac.signal,
           });
@@ -575,6 +577,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (prev) {
       clearHyperliquidTradingSession(prev);
     }
+    /** Clear cached hydration only — Mongo/Postgres rows are untouched. */
+    void queryClient.removeQueries({ queryKey: ["/api/user/sync"] });
+    void queryClient.removeQueries({ queryKey: ["/api/user-status"] });
     setAddress(null);
     setSigner(null);
     setProvider(null);

@@ -1,6 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
 import { useWallet } from "@/lib/wallet-context";
-import { checkSubscription } from "@/lib/check-subscription";
+import { useUserSync } from "@/context/AuthContext";
 
 export interface SubscriptionStatus {
   tier: "free" | "pro" | "mentoring" | "elite";
@@ -20,22 +19,17 @@ export type PremiumFeature =
 
 export function useSubscription() {
   const { address, isConnected } = useWallet();
+  const { data: sync, isLoading, error, refetch, isFetching } = useUserSync();
 
-  const { data: subscription, isLoading, error, refetch } = useQuery<SubscriptionStatus>({
-    queryKey: ["/api/user-status", address],
-    enabled: isConnected && !!address,
-    staleTime: 15_000,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    queryFn: async () => {
-      const r = await checkSubscription(address!);
-      return {
-        tier: r.tier,
-        active: r.active,
-        expiresAt: r.expiresAt,
-      } satisfies SubscriptionStatus;
-    },
-  });
+  const subscription: SubscriptionStatus | undefined = sync?.subscription
+    ? {
+        tier: sync.subscription.tier,
+        active: sync.subscription.active,
+        expiresAt: sync.subscription.expiresAt,
+      }
+    : undefined;
+
+  const isLoadingEffective = !!(isConnected && address && isLoading);
 
   const isMentoring =
     subscription?.active &&
@@ -65,9 +59,10 @@ export function useSubscription() {
 
   return {
     subscription,
-    isLoading,
+    isLoading: isLoadingEffective,
     error,
     refetch,
+    isFetching,
     isPro,
     /** Active Mentoring ($500/mo) or legacy elite tier from API. */
     isMentoring,

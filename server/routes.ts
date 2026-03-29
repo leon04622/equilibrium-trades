@@ -35,7 +35,9 @@ import { pushAdminLog } from "./admin-log-bus";
 import {
   tryConnectMongoVault,
   upsertMongoCrmUserFromWallet,
+  upsertMongoCrmContactOnConnect,
   fetchMongoCrmSubscriptionSnapshot,
+  findCrmUserDocumentByWallet,
   fetchMongoScannerWatchlistPrefs,
   upsertMongoScannerWatchlistPrefs,
   getVaultDb,
@@ -186,8 +188,10 @@ function crmStatusFromSubscriptionRow(u: {
 
 async function syncWalletUserToMongoCrm(walletAddress: string): Promise<void> {
   try {
-    const u = await storage.getWalletUser(walletAddress);
+    const normalized = walletAddress.trim().toLowerCase();
+    const u = await storage.getWalletUser(normalized);
     if (u) await upsertMongoCrmUserFromWallet(u);
+    else await upsertMongoCrmContactOnConnect({ walletAddress: normalized });
   } catch (e) {
     console.error("[routes] Mongo CRM user sync:", e);
   }
@@ -218,7 +222,11 @@ function mongoSubscriptionSnapshotToPayload(
       subTier: mongo.subTier,
     };
   }
-  const active = mongo.subscriptionActive && tier !== "free" && expOk;
+  const subNorm = String(mongo.subTier ?? "").trim().toLowerCase();
+  const crmLabelPaid =
+    subNorm === "pro" || subNorm === "mentor" || subNorm === "mentoring" || subNorm === "elite";
+  const active =
+    tier !== "free" && expOk && (mongo.subscriptionActive || crmLabelPaid);
   return {
     tier,
     active,
@@ -1295,6 +1303,12 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid input", details: validated.error.errors });
       }
 
+      const wa = validated.data.walletAddress.trim().toLowerCase();
+      await upsertMongoCrmContactOnConnect({
+        walletAddress: wa,
+        email: validated.data.email?.trim() || null,
+      });
+
       // Check if user already exists
       const existing = await storage.getWalletUser(validated.data.walletAddress);
       if (existing) {
@@ -1303,7 +1317,7 @@ export async function registerRoutes(
           try {
             const updated = await storage.updateWalletUserEmail(validated.data.walletAddress, emailIn);
             const finalUser = updated ?? existing;
-            void syncWalletUserToMongoCrm(validated.data.walletAddress);
+            await syncWalletUserToMongoCrm(validated.data.walletAddress);
             return res.json({
               success: true,
               message: "User already registered; email updated for CRM.",
@@ -1313,7 +1327,7 @@ export async function registerRoutes(
             /* fall through */
           }
         }
-        void syncWalletUserToMongoCrm(validated.data.walletAddress);
+        await syncWalletUserToMongoCrm(validated.data.walletAddress);
         return res.json({
           success: true,
           message: "User already registered",
@@ -1322,7 +1336,7 @@ export async function registerRoutes(
       }
 
       const user = await storage.createWalletUser(validated.data);
-      void syncWalletUserToMongoCrm(validated.data.walletAddress);
+      await syncWalletUserToMongoCrm(validated.data.walletAddress);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error registering wallet user:", error);
@@ -1474,16 +1488,98 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid email format" });
       }
 
-      const user = await storage.updateWalletUserEmail(req.params.walletAddress, email);
+      let paramWallet = req.params.walletAddress;
+      try {
+        paramWallet = decodeURIComponent(paramWallet);
+      } catch {
+        /* ignore */
+      }
+      const normalized = paramWallet.trim().toLowerCase();
+
+      await upsertMongoCrmContactOnConnect({ walletAddress: normalized, email: validated.data });
+
+      let user = await storage.getWalletUser(normalized);
       if (!user) {
-        return res.status(404).json({ error: "User not found" });
+        user = await storage.createWalletUser({
+          walletAddress: normalized,
+          email: validated.data,
+          builderCodeApproved: false,
+          isBuilderLinked: false,
+          subscriptionTier: "free",
+          subscriptionActive: false,
+        });
+      } else {
+        const updated = await storage.updateWalletUserEmail(normalized, validated.data);
+        user = updated ?? (await storage.getWalletUser(normalized)) ?? user;
       }
 
-      void syncWalletUserToMongoCrm(req.params.walletAddress);
+      if (!user) {
+        return res.status(500).json({ error: "Could not persist user" });
+      }
+
+      await syncWalletUserToMongoCrm(normalized);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating wallet user email:", error);
       res.status(500).json({ error: "Failed to update email" });
+    }
+  });
+
+  /**
+   * Unified hydration for the connected wallet (header `x-wallet-address` or `Authorization: Bearer 0x…`):
+   * subscription (Postgres + Stripe + Mongo), profile, trade journal rows + stats.
+   */
+  app.get("/api/user/sync", async (req: Request, res: Response) => {
+    try {
+      const wallet = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const payload = await buildWalletSubscriptionPayload(wallet);
+      const user = await storage.getWalletUser(wallet);
+      let joinDate: string | null = null;
+      if (user?.createdAt) {
+        joinDate =
+          user.createdAt instanceof Date ? user.createdAt.toISOString() : String(user.createdAt);
+      } else {
+        const doc = await findCrmUserDocumentByWallet(wallet);
+        if (doc) {
+          const jd = doc.joinDate ?? doc.createdAt;
+          if (jd instanceof Date) joinDate = jd.toISOString();
+          else if (jd != null && jd !== "") {
+            const d = new Date(String(jd));
+            joinDate = Number.isNaN(d.getTime()) ? null : d.toISOString();
+          }
+        }
+      }
+      const [entries, stats] = await Promise.all([
+        listTradeJournalEntries(wallet, 500),
+        getTradeJournalStats(wallet),
+      ]);
+      res.json({
+        wallet,
+        subscription: {
+          tier: payload.tier,
+          active: payload.active,
+          expiresAt: payload.expiresAt,
+          subTier: payload.subTier,
+        },
+        profile: {
+          email: user?.email ?? null,
+          joinDate,
+          builderCodeApproved: user?.builderCodeApproved ?? false,
+          isBuilderLinked: user?.isBuilderLinked ?? false,
+          manualProOverride: user?.manualProOverride ?? false,
+        },
+        journal: {
+          entries,
+          stats,
+          persistedToVault: isTradeJournalBackedByMongo(),
+        },
+      });
+    } catch (error) {
+      console.error("GET /api/user/sync:", error);
+      res.status(500).json({ error: "Failed to sync user" });
     }
   });
 

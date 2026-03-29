@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
 import { CRM_EMAIL_KEY, crmEmailPromptDismissedStorageKey } from "@/components/wallet-crm-sync";
+import { registerWalletForCrm, saveCrmEmailToServer } from "@/hooks/LeadCapture";
 import {
   Dialog,
   DialogContent,
@@ -52,7 +53,10 @@ export function EmailCaptureModal() {
         if (!res.ok || cancelled) return;
         const j = (await res.json()) as { exists?: boolean; email?: string | null };
         if (cancelled) return;
-        if (j.exists && !(j.email && String(j.email).trim())) {
+        const hasEmail = !!(j.email && String(j.email).trim());
+        if (!j.exists || !hasEmail) {
+          await registerWalletForCrm({ walletAddress: address });
+          if (cancelled) return;
           setOpen(true);
         }
       } catch {
@@ -78,20 +82,9 @@ export function EmailCaptureModal() {
     }
     setBusy(true);
     try {
-      let ok = false;
-      const reg = await fetch("/api/wallet-user/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: address, email: trimmed }),
-      });
-      if (reg.ok) ok = true;
-      const patch = await fetch(`/api/wallet-user/${encodeURIComponent(address)}/email`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
-      });
-      if (patch.ok) ok = true;
-      if (!ok) {
+      const regOk = await registerWalletForCrm({ walletAddress: address, email: trimmed });
+      const patchOk = await saveCrmEmailToServer(address, trimmed);
+      if (!regOk && !patchOk) {
         throw new Error("Could not save email");
       }
       try {

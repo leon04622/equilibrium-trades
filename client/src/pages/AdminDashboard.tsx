@@ -310,6 +310,7 @@ export default function AdminDashboard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
       toast({ title: "User updated", description: "Pro access saved to the database." });
@@ -329,6 +330,7 @@ export default function AdminDashboard() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "admin-users"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/user-status"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
       toast({ title: "User updated", description: "User set to Free in the database." });

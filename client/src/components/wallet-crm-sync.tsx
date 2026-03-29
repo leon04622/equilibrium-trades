@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useWallet } from "@/lib/wallet-context";
+import { registerWalletForCrm } from "@/hooks/LeadCapture";
 
 export const CRM_EMAIL_KEY = "equilibrium_crm_email";
 
@@ -9,8 +10,7 @@ export function crmEmailPromptDismissedStorageKey(walletAddress: string): string
 }
 
 /**
- * Ensures `wallet_users` has a row for the connected wallet and optional email (CRM / Command Center).
- * Email is read from localStorage (`equilibrium_crm_email`), e.g. set from Settings.
+ * Ensures CRM + `wallet_users` have a row for the connected wallet; merges email from localStorage when set.
  */
 export function WalletCrmSync() {
   const { address } = useWallet();
@@ -32,14 +32,7 @@ export function WalletCrmSync() {
       }
     })();
 
-    const body: { walletAddress: string; email?: string } = { walletAddress: address };
-    if (email) body.email = email;
-
-    void fetch("/api/wallet-user/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => {});
+    void registerWalletForCrm({ walletAddress: address, email });
   }, [address]);
 
   return null;
