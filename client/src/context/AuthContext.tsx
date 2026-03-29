@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const syncQuery = useQuery({
     queryKey: ["/api/user/sync", address ?? ""],
     enabled: !!address && isConnected,
-    staleTime: 15_000,
+    staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<UserSyncResponse> => {

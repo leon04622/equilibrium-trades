@@ -128,17 +128,24 @@ export default function Trading({ visible = true }: TradingProps) {
   const chartInterval = TF_TO_INTERVAL[timeframe] || "5m";
 
   const { data: eduPatternsRaw } = useQuery({
-    queryKey: ["trade-journal-patterns", coin, chartInterval],
+    queryKey: ["trade-journal-patterns", coin, chartInterval, walletAddr ?? ""],
     queryFn: async () => {
       const u = new URL("/api/signals/patterns", window.location.origin);
       u.searchParams.set("coins", coin);
       u.searchParams.set("timeframes", chartInterval);
-      const res = await fetch(u.toString());
+      const headers: Record<string, string> = {};
+      if (walletAddr?.trim()) {
+        const w = walletAddr.trim();
+        headers["x-wallet-address"] = w;
+        headers.Authorization = `Bearer ${w}`;
+      }
+      const res = await fetch(u.toString(), { headers });
       if (!res.ok) throw new Error("Failed to load patterns");
       return res.json();
     },
     enabled: visible && isConnected && hasAccess("ai_signals") && !coin.startsWith("@"),
-    staleTime: 45_000,
+    staleTime: 12_000,
+    refetchInterval: visible && isConnected && hasAccess("ai_signals") && !coin.startsWith("@") ? 25_000 : false,
   });
 
   const aiPatternStatusForJournal = useMemo(() => {

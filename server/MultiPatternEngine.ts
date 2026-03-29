@@ -16,15 +16,11 @@ import { detectStrictFlagWithVolume } from "./pattern-strict-volume";
 
 export type ScannerMarketBias = "bullish" | "bearish" | "neutral_choppy";
 
-function scoreCandidate(p: DetectedPattern, marketBias: ScannerMarketBias, volumeOk: boolean): number {
+/** Geometry + actionability only — 21/200 SMMA must not demote or suppress counter-trend setups. */
+function scoreCandidate(p: DetectedPattern, _marketBias: ScannerMarketBias, volumeOk: boolean): number {
   const structural = getPatternStructuralBias(p);
-  let tier = 0;
-  if (marketBias === "bullish" && structural === "bullish") tier = 320;
-  else if (marketBias === "bearish" && structural === "bearish") tier = 320;
-  else if (marketBias === "neutral_choppy" && structural !== "neutral") tier = 240;
-  else if (structural === "neutral") tier = 160;
-  else tier = 40;
-  let s = tier + p.confidence;
+  let s = 220 + p.confidence;
+  if (structural !== "neutral") s += 24;
   if (volumeOk) s += 18;
   if (p.status === "breakout_confirmed") s += 45;
   else if (p.status === "breakout_pending") s += 25;

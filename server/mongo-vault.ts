@@ -35,6 +35,11 @@ export function getVaultDb(): Db | null {
 const LEGACY_CRM_USERS_COLLECTION = "crm_users";
 
 function inferSubscriptionTierString(doc: Document): string {
+  if (Boolean(doc.manualProOverride)) {
+    const st = doc.subTier != null ? String(doc.subTier).trim().toLowerCase() : "";
+    if (st === "mentor" || st === "mentoring" || st === "elite") return "mentoring";
+    return "pro";
+  }
   const raw = String(doc.subscriptionTier ?? "").trim().toLowerCase();
   if (raw && raw !== "free") return raw;
   const st = doc.subTier != null ? String(doc.subTier).trim().toLowerCase() : "";

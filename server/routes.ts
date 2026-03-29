@@ -211,17 +211,24 @@ function mongoSubscriptionSnapshotToPayload(
   let tier: "free" | "pro" | "mentoring" | "elite" = "free";
   if (t === "pro") tier = "pro";
   else if (t === "mentoring" || t === "elite") tier = "mentoring";
-  const exp = mongo.subscriptionExpiresAt;
-  const expMs = exp instanceof Date ? exp.getTime() : NaN;
-  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
-  if (mongo.manualProOverride && tier !== "free") {
+  /** Admin “Grant Pro” must stick even if `subscriptionTier` lagged as `free` in CRM. */
+  if (mongo.manualProOverride) {
+    if (tier === "free") {
+      const st = String(mongo.subTier ?? "").trim().toLowerCase();
+      if (st === "mentor" || st === "mentoring" || st === "elite") tier = "mentoring";
+      else tier = "pro";
+    }
+    const expM = mongo.subscriptionExpiresAt;
     return {
       tier,
       active: true,
-      expiresAt: exp instanceof Date ? exp.toISOString() : null,
+      expiresAt: expM instanceof Date ? expM.toISOString() : null,
       subTier: mongo.subTier,
     };
   }
+  const exp = mongo.subscriptionExpiresAt;
+  const expMs = exp instanceof Date ? exp.getTime() : NaN;
+  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
   const subNorm = String(mongo.subTier ?? "").trim().toLowerCase();
   const crmLabelPaid =
     subNorm === "pro" || subNorm === "mentor" || subNorm === "mentoring" || subNorm === "elite";
@@ -257,12 +264,19 @@ function pickBestPaidSubscriptionPayload(
 function subscriptionPayloadFromPostgresUser(
   user: NonNullable<Awaited<ReturnType<typeof storage.getWalletUser>>>,
 ): WalletSubscriptionPayload | null {
-  if (user.manualProOverride && user.subscriptionTier !== "free") {
+  if (user.manualProOverride) {
+    const rawTier = user.subscriptionTier;
+    const paidTier: "pro" | "mentoring" | "elite" =
+      rawTier === "mentoring" || rawTier === "elite"
+        ? "mentoring"
+        : rawTier === "pro"
+          ? "pro"
+          : "pro";
     return {
-      tier: user.subscriptionTier as "pro" | "mentoring" | "elite",
+      tier: paidTier,
       active: true,
       expiresAt: user.subscriptionExpiresAt ? user.subscriptionExpiresAt.toISOString() : null,
-      subTier: crmTierLabel(user.subscriptionTier),
+      subTier: crmTierLabel(paidTier),
     };
   }
   if (user.subscriptionActive && user.subscriptionTier !== "free") {

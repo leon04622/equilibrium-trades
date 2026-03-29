@@ -333,7 +333,7 @@ function PatternChartComponent({
   }, [candles, parsePrice]);
 
   // Show ALL detected patterns — do NOT gate by MA direction here.
-  // The signal card itself shows whether the pattern is tradeable based on MA position.
+  // Server sets tradeable for geometric setups; card copy explains SMMA as context only.
   useEffect(() => {
     const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
     setActiveSignal(currentSignal ?? null);
@@ -847,9 +847,11 @@ function PatternChartComponent({
             <p className="text-[10px] font-medium text-[#e8ecf1] mb-2">{activeSignal.patternName}</p>
 
             {/* Tradeable badge */}
-            <div className={`rounded px-2 py-1 mb-2 ${activeSignal.tradeable ? "bg-green-900/50 border border-green-700/50" : "bg-orange-900/30 border border-orange-700/30"}`}>
+              <div className={`rounded px-2 py-1 mb-2 ${activeSignal.tradeable ? "bg-green-900/50 border border-green-700/50" : "bg-orange-900/30 border border-orange-700/30"}`}>
               <p className={`text-[10px] font-semibold ${activeSignal.tradeable ? "text-green-300" : "text-orange-300"}`}>
-                {activeSignal.tradeable ? "✓ Tradeable — MA filter passed" : "⚠ Study Only — MA filter not met"}
+                {activeSignal.tradeable
+                  ? "✓ Pattern visible — geometry-first scanner"
+                  : "⚠ Context note — review SMMA copy on card"}
               </p>
             </div>
 

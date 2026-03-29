@@ -455,8 +455,6 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
   const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
 
   // ─── DOUBLE TOP (bearish reversal) ───────────────────────────────────────────
-  // Only detect Double Top when the CURRENT timeframe's SMA structure is bearish
-  // (reversal patterns work regardless of multi-TF, but we still need context)
   if (!isBullish && highs.length >= 2) {
     // Find the two highest swing highs (not just the last two) that are separated in time
     const sortedByPrice = [...highs].sort((a, b) => b.price - a.price);

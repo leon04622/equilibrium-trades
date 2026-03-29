@@ -3,6 +3,9 @@
  * Fast-track: short TF work is batched aggressively; slow TF fetches run in parallel per coin (never sequential behind 1d).
  *
  * Hyperliquid-only candles — gold proxy: PAXG (+ XAUT-style when listed).
+ *
+ * Pattern **visibility** is decided in `universal-scanner.ts` / `MultiPatternEngine.ts` (geometry-first).
+ * 21/200 SMMA on charts is separate; do not use SMMA here to suppress setups.
  */
 import { getPerpUniverseCoinNames, getSpotTickers } from "./hyperliquid";
 import { getDefaultPatternScanTickerList, PATTERN_SCAN_TOP_VOLUME_COUNT } from "./scanner-controller";

@@ -22,7 +22,7 @@ import {
   getPatternStructuralBias,
   type DetectedPattern,
 } from "./sma-detection";
-import { is15mTrendBullish, is15mTrendBearish, type ApexGeometricResult } from "./ApexDetectionEngine";
+import { type ApexGeometricResult } from "./ApexDetectionEngine";
 import { gatherMultiPatternCandidates } from "./MultiPatternEngine";
 import { findPivotHighsLows } from "./pattern-shoulders";
 
@@ -72,14 +72,12 @@ export function prioritizeScanTimeframes(timeframes: string[]): string[] {
 const candleFetchLimit = pLimit(28);
 
 /**
- * Candle intervals needed for the requested scan TFs only (not always all nine).
- * 1m high-probability tier needs 15m SMMA — include 15m whenever 1m is scanned.
- * Order: 1m → 5m → … so sequential HL fetches prioritize short TFs.
+ * Candle intervals for the requested scan TFs only (not always all nine).
+ * Order: 1m → 5m → … so HL fetches prioritize short TFs.
  */
 function intervalsForPatternScan(timeframes: string[]): readonly string[] {
   const set = new Set(timeframes.filter(Boolean));
   if (set.size === 0) return [...UNIVERSAL_SCAN_TIMEFRAMES];
-  if (set.has("1m")) set.add("15m");
   return SCAN_TF_ORDER.filter((iv) => set.has(iv));
 }
 
@@ -233,7 +231,6 @@ function buildEducationalSignalFromCandidate(
   row: { p: DetectedPattern; volumeOk: boolean },
   marketBias: MarketBias,
   marketBiasLabel: string,
-  mtfBundle: Record<string, HyperliquidCandle[]> | undefined,
   apexResult: ApexGeometricResult,
   idSalt: number,
 ): EducationalPatternSignal {
@@ -286,29 +283,18 @@ function buildEducationalSignalFromCandidate(
   const sameApex = !!(apexResult.pattern && best.p.name === apexResult.pattern.name);
 
   let apexTier: EducationalPatternSignal["apexTier"] = apexResult.pattern ? "standard" : "no_pattern_apex";
-  if (sameApex && apexResult.pattern?.name === "bull_flag") {
-    if (timeframe === "1m" && mtfBundle && is15mTrendBullish(mtfBundle)) {
-      apexTier = "high_probability_trend_aligned";
-    } else if (
-      (timeframe === "1h" || timeframe === "4h") &&
-      currentSMA.sma21 > currentSMA.sma200 * 1.0001
-    ) {
-      apexTier = "high_probability_trend_aligned";
-    }
-  } else if (sameApex && apexResult.pattern?.name === "bear_flag") {
-    if (timeframe === "1m" && mtfBundle && is15mTrendBearish(mtfBundle)) {
-      apexTier = "high_probability_trend_aligned";
-    } else if (
-      (timeframe === "1h" || timeframe === "4h") &&
-      currentSMA.sma21 < currentSMA.sma200 * 0.9999
-    ) {
+  if (sameApex && apexResult.pattern) {
+    const poleStrong = (apexResult.poleMovePct ?? 0) >= (timeframe === "1m" || timeframe === "3m" || timeframe === "5m" ? 0.35 : 0.9);
+    const actionable =
+      apexResult.pattern.status === "breakout_confirmed" || apexResult.pattern.status === "breakout_pending";
+    if (poleStrong && actionable) {
       apexTier = "high_probability_trend_aligned";
     }
   }
 
   const apexPrefix =
     apexTier === "high_probability_trend_aligned"
-      ? "High Probability — Trend Aligned (1m flag × 15m SMMA). "
+      ? "High Probability — Apex pole + flag geometry (not SMMA-filtered). "
       : "";
 
   const apexNoteForRow = sameApex ? apexResult.note : "";
@@ -378,7 +364,6 @@ export async function analyzeEducationalUniversal(
   coin: string,
   timeframe: string,
   candles: HyperliquidCandle[],
-  mtfBundle?: Record<string, HyperliquidCandle[]>,
 ): Promise<EducationalPatternSignal[]> {
   if (candles.length < PATTERN_SCAN_CANDLE_LIMIT) return [];
   const currentSMA = calculateSMAFromCandles(candles);
@@ -395,10 +380,7 @@ export async function analyzeEducationalUniversal(
     if (!crossover) return [];
     const crossBias = crossover === "bullish_crossover" ? "bullish" : "bearish";
     const price = currentSMA.price;
-    const crossoverTradeable =
-      crossover === "bullish_crossover"
-        ? price > currentSMA.sma21 && price > currentSMA.sma200
-        : price < currentSMA.sma21 && price < currentSMA.sma200;
+    const crossoverTradeable = true;
     const ed = buildDynamicEducation(
       "SMA crossover",
       timeframe,
@@ -424,9 +406,14 @@ export async function analyzeEducationalUniversal(
         whatToWatch: ed.whatToWatch,
         detectedAt: new Date(),
         tradeable: crossoverTradeable,
-        maFilterReason: crossoverTradeable
-          ? "Price confirms the crossover side of both SMMAs."
-          : "Crossover printed; wait for price to hold the directional side of 21/200.",
+        maFilterReason:
+          crossover === "bullish_crossover"
+            ? price > currentSMA.sma21 && price > currentSMA.sma200
+              ? "Crossover shown — price above both 21/200 SMMA (context aligns)."
+              : "Crossover shown — geometry/regime event; SMMA position is advisory only."
+            : price < currentSMA.sma21 && price < currentSMA.sma200
+              ? "Crossover shown — price below both 21/200 SMMA (context aligns)."
+              : "Crossover shown — geometry/regime event; SMMA position is advisory only.",
         marketBiasLabel,
         apexEngineNote: apexResult.note,
         apexScanState: apexResult.scanState,
@@ -443,7 +430,6 @@ export async function analyzeEducationalUniversal(
       row,
       marketBias,
       marketBiasLabel,
-      mtfBundle,
       apexResult,
       i,
     ),
@@ -481,7 +467,7 @@ async function scanOneCoinMtf(
   const tasks = orderedTf.map(
     (tf) => () =>
       bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_CANDLE_LIMIT
-        ? analyzeEducationalUniversal(coin, tf, bundle[tf]!, bundle)
+        ? analyzeEducationalUniversal(coin, tf, bundle[tf]!)
         : Promise.resolve([] as EducationalPatternSignal[]),
   );
   const results = await Promise.all(tasks.map((fn) => tfLimit(fn)));
