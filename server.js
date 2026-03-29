@@ -32,7 +32,7 @@
  *   • Default universe: **top 50 HL perps by 24h volume + PAXG** (gold on Hyperliquid).
  *   • `PATTERN_SCAN_ENFORCE_MAX_COINS=1` cannot shrink below 50 — use `coins=` query for custom lists.
  *   • Fast-track **1m / 3m / 5m** vs higher TFs: parallel candle lanes per coin; client polls fast ~20s / slow ~3m.
- *   • **21 / 200 SMMA** trend guards are unchanged (Apex + SMA detection).
+ *   • **21 / 200 SMMA** on charts is unchanged; scanner geometry is **unfiltered** (SMMA is advisory per signal, not a veto).
  */
 import "dotenv/config";
 

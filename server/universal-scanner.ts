@@ -1,7 +1,6 @@
 /**
- * Universal pattern engine (Equilibrium): MTF fresh candles, 21/200 SMMA + pivot structure bias,
- * strict flags (≥5% pole in 10 bars, ≤50% retrace, volume contraction in flag), H&S family,
- * bias-locked candidate ranking, timeframe-aware education copy.
+ * Universal pattern engine (Equilibrium): MTF candles, full pattern library + Apex + H&S,
+ * **unfiltered geometry** (SMMA is advisory on each signal, not a veto). See `MultiPatternEngine.ts`.
  */
 import pLimit from "p-limit";
 import { getCandles, type HyperliquidCandle } from "./hyperliquid";
@@ -20,16 +19,15 @@ import { PATTERN_SCAN_CANDLE_LIMIT } from "./scanner-controller";
 import {
   calculateSMAFromCandles,
   detectCrossover,
-  collectPatternCandidates,
-  sortPatternCandidatesByActionability,
   getPatternStructuralBias,
   type DetectedPattern,
 } from "./sma-detection";
-import {
-  runApexGeometricFlagScan,
-  is15mTrendBullish,
-  is15mTrendBearish,
-} from "./ApexDetectionEngine";
+import { is15mTrendBullish, is15mTrendBearish, type ApexGeometricResult } from "./ApexDetectionEngine";
+import { gatherMultiPatternCandidates } from "./MultiPatternEngine";
+import { findPivotHighsLows } from "./pattern-shoulders";
+
+export { findPivotHighsLows, detectHeadAndShoulders, detectInverseHeadAndShoulders } from "./pattern-shoulders";
+export { detectStrictFlagWithVolume } from "./pattern-strict-volume";
 
 export const UNIVERSAL_SCAN_TIMEFRAMES = [
   "1m",
@@ -115,38 +113,6 @@ export interface EducationalPatternSignal {
   apexTier?: "high_probability_trend_aligned" | "standard" | "no_pattern_apex";
 }
 
-function vol(c: HyperliquidCandle): number {
-  const v = parseFloat(c.v || "0");
-  return Number.isFinite(v) ? v : 0;
-}
-
-function avgVolume(slice: HyperliquidCandle[]): number {
-  if (slice.length === 0) return 0;
-  return slice.reduce((s, x) => s + vol(x), 0) / slice.length;
-}
-
-/** Pivot highs / lows (fractal) — structural accuracy for triangles, H&S, bias. */
-export function findPivotHighsLows(
-  candles: HyperliquidCandle[],
-  lookback: number,
-): { highs: { price: number; idx: number }[]; lows: { price: number; idx: number }[] } {
-  const highs: { price: number; idx: number }[] = [];
-  const lows: { price: number; idx: number }[] = [];
-  for (let i = lookback; i < candles.length - lookback; i++) {
-    const h = parseFloat(candles[i].h);
-    const l = parseFloat(candles[i].l);
-    let isH = true;
-    let isL = true;
-    for (let j = 1; j <= lookback; j++) {
-      if (parseFloat(candles[i - j].h) >= h || parseFloat(candles[i + j].h) >= h) isH = false;
-      if (parseFloat(candles[i - j].l) <= l || parseFloat(candles[i + j].l) <= l) isL = false;
-    }
-    if (isH) highs.push({ price: h, idx: i });
-    if (isL) lows.push({ price: l, idx: i });
-  }
-  return { highs, lows };
-}
-
 export function inferMarketBias(candles: HyperliquidCandle[]): { bias: MarketBias; label: string } {
   const sma = calculateSMAFromCandles(candles);
   if (!sma) {
@@ -182,181 +148,10 @@ export function inferMarketBias(candles: HyperliquidCandle[]): { bias: MarketBia
   return { bias, label: [sm, ...parts].join(" ") };
 }
 
-/**
- * Pole = 10 bars, ≥5% directional impulse; flag retracement ≤50% of pole height;
- * volume ideally lower in flag than pole (world-class filter).
- */
-export function detectStrictFlagWithVolume(
-  candles: HyperliquidCandle[],
-  isBullish: boolean,
-): { pattern: DetectedPattern; volumeOk: boolean } | null {
-  const n = candles.length;
-  const POLE_LEN = 10;
-  const FLAG_MIN = 8;
-  const FLAG_MAX = 18;
-  if (n < POLE_LEN + FLAG_MIN + 5) return null;
-
-  for (let poleEnd = POLE_LEN; poleEnd <= n - FLAG_MIN - 3; poleEnd++) {
-    const pole = candles.slice(poleEnd - POLE_LEN, poleEnd);
-    const low = Math.min(...pole.map((c) => parseFloat(c.l)));
-    const high = Math.max(...pole.map((c) => parseFloat(c.h)));
-    const poleHeight = high - low;
-    if (poleHeight <= 0) continue;
-    const movePct = isBullish ? (poleHeight / low) * 100 : (poleHeight / high) * 100;
-    if (movePct < 5) continue;
-    const c0 = parseFloat(pole[0].c);
-    const c9 = parseFloat(pole[POLE_LEN - 1].c);
-    if (isBullish && c9 <= c0) continue;
-    if (!isBullish && c9 >= c0) continue;
-
-    for (let flagLen = FLAG_MIN; flagLen <= FLAG_MAX && poleEnd + flagLen < n; flagLen++) {
-      const flag = candles.slice(poleEnd, poleEnd + flagLen);
-      const fh = Math.max(...flag.map((c) => parseFloat(c.h)));
-      const fl = Math.min(...flag.map((c) => parseFloat(c.l)));
-      if (isBullish) {
-        const retrace = (high - fl) / poleHeight;
-        if (retrace > 0.5) continue;
-        if (fl < low * 0.997) continue;
-      } else {
-        const retrace = (fh - low) / poleHeight;
-        if (retrace > 0.5) continue;
-        if (fh > high * 1.003) continue;
-      }
-      const vPole = avgVolume(pole);
-      const vFlag = avgVolume(flag);
-      const volumeOk = vPole > 0 ? vFlag < vPole * 1.08 : true;
-
-      const tail = candles.slice(poleEnd + flagLen);
-      const currentPrice = parseFloat(candles[n - 1].c);
-      const flagUpper = Math.max(...flag.map((c) => parseFloat(c.h)));
-      const flagLower = Math.min(...flag.map((c) => parseFloat(c.l)));
-      const fr = flagUpper - flagLower;
-      let status: DetectedPattern["status"] = "forming";
-      if (isBullish) {
-        const rh = Math.max(...tail.map((c) => parseFloat(c.h)));
-        if (rh > flagUpper * 1.0015) status = "breakout_confirmed";
-        else if (currentPrice > flagUpper) status = "breakout_pending";
-      } else {
-        const rl = Math.min(...tail.map((c) => parseFloat(c.l)));
-        if (rl < flagLower * 0.9985) status = "breakout_confirmed";
-        else if (currentPrice < flagLower) status = "breakout_pending";
-      }
-      const baseConf =
-        status === "breakout_confirmed" ? 68 : status === "breakout_pending" ? 56 : 44;
-      const confidence = Math.min(94, baseConf + (volumeOk ? 14 : 0));
-
-      const pattern: DetectedPattern = {
-        name: isBullish ? "bull_flag" : "bear_flag",
-        displayName: isBullish ? "Bull Flag" : "Bear Flag",
-        status,
-        entryPrice: isBullish
-          ? status === "breakout_confirmed"
-            ? currentPrice
-            : flagUpper
-          : status === "breakout_confirmed"
-            ? currentPrice
-            : flagLower,
-        stopLoss: isBullish ? flagLower - fr * 0.12 : flagUpper + fr * 0.12,
-        takeProfit: isBullish ? flagUpper + poleHeight : flagLower - poleHeight,
-        breakoutLevel: isBullish ? flagUpper : flagLower,
-        currentPrice,
-        confidence,
-      };
-      return { pattern, volumeOk };
-    }
-  }
-  return null;
-}
-
-export function detectHeadAndShoulders(candles: HyperliquidCandle[]): DetectedPattern | null {
-  if (candles.length < 80) return null;
-  const slice = candles.slice(-120);
-  const { highs, lows } = findPivotHighsLows(slice, 3);
-  if (highs.length < 3) return null;
-  const L = highs[highs.length - 3];
-  const H = highs[highs.length - 2];
-  const R = highs[highs.length - 1];
-  if (!(L.idx < H.idx && H.idx < R.idx)) return null;
-  if (!(H.price > L.price && H.price > R.price)) return null;
-  const midSh = (L.price + R.price) / 2;
-  if (Math.abs(L.price - R.price) / midSh > 0.035) return null;
-  const between = slice.slice(L.idx, R.idx + 1);
-  const neckline = Math.min(...between.map((c) => parseFloat(c.l)));
-  if (neckline >= H.price * 0.995) return null;
-  const currentPrice = parseFloat(slice[slice.length - 1].c);
-  let status: DetectedPattern["status"] = "forming";
-  if (currentPrice < neckline * 0.997) status = "breakout_confirmed";
-  else if (currentPrice < neckline) status = "breakout_pending";
-  const height = H.price - neckline;
-  return {
-    name: "head_and_shoulders",
-    displayName: "Head and Shoulders",
-    status,
-    entryPrice: currentPrice,
-    stopLoss: H.price * 1.005,
-    takeProfit: neckline - height,
-    breakoutLevel: neckline,
-    currentPrice,
-    confidence: status === "breakout_confirmed" ? 76 : status === "breakout_pending" ? 62 : 48,
-  };
-}
-
-export function detectInverseHeadAndShoulders(candles: HyperliquidCandle[]): DetectedPattern | null {
-  if (candles.length < 80) return null;
-  const slice = candles.slice(-120);
-  const { highs, lows } = findPivotHighsLows(slice, 3);
-  if (lows.length < 3) return null;
-  const L = lows[lows.length - 3];
-  const H = lows[lows.length - 2];
-  const R = lows[lows.length - 1];
-  if (!(L.idx < H.idx && H.idx < R.idx)) return null;
-  if (!(H.price < L.price && H.price < R.price)) return null;
-  const midSh = (L.price + R.price) / 2;
-  if (Math.abs(L.price - R.price) / midSh > 0.035) return null;
-  const between = slice.slice(L.idx, R.idx + 1);
-  const neckline = Math.max(...between.map((c) => parseFloat(c.h)));
-  if (neckline <= H.price * 1.005) return null;
-  const currentPrice = parseFloat(slice[slice.length - 1].c);
-  let status: DetectedPattern["status"] = "forming";
-  if (currentPrice > neckline * 1.003) status = "breakout_confirmed";
-  else if (currentPrice > neckline) status = "breakout_pending";
-  const height = neckline - H.price;
-  return {
-    name: "inverse_head_and_shoulders",
-    displayName: "Inverse Head and Shoulders",
-    status,
-    entryPrice: currentPrice,
-    stopLoss: H.price * 0.995,
-    takeProfit: neckline + height,
-    breakoutLevel: neckline,
-    currentPrice,
-    confidence: status === "breakout_confirmed" ? 76 : status === "breakout_pending" ? 62 : 48,
-  };
-}
-
 function mapMarketToSignalBias(mb: MarketBias): "bullish" | "bearish" | "neutral" {
   if (mb === "bullish") return "bullish";
   if (mb === "bearish") return "bearish";
   return "neutral";
-}
-
-function scoreCandidate(
-  p: DetectedPattern,
-  marketBias: MarketBias,
-  volumeOk: boolean,
-): number {
-  const structural = getPatternStructuralBias(p);
-  let tier = 0;
-  if (marketBias === "bullish" && structural === "bullish") tier = 320;
-  else if (marketBias === "bearish" && structural === "bearish") tier = 320;
-  else if (marketBias === "neutral_choppy" && structural !== "neutral") tier = 240;
-  else if (structural === "neutral") tier = 160;
-  else tier = 40;
-  let s = tier + p.confidence;
-  if (volumeOk) s += 18;
-  if (p.status === "breakout_confirmed") s += 45;
-  else if (p.status === "breakout_pending") s += 25;
-  return s;
 }
 
 function tfHorizon(tf: string): "scalp" | "intraday" | "swing" | "macro" {
@@ -431,16 +226,116 @@ function buildDynamicEducation(
   return { educationalNote: base.trim(), whatToWatch: watch.trim() };
 }
 
-function upsertByScore(
-  map: Map<string, { p: DetectedPattern; volumeOk: boolean }>,
-  item: { p: DetectedPattern; volumeOk: boolean },
+function buildEducationalSignalFromCandidate(
+  coin: string,
+  timeframe: string,
+  currentSMA: NonNullable<ReturnType<typeof calculateSMAFromCandles>>,
+  row: { p: DetectedPattern; volumeOk: boolean },
   marketBias: MarketBias,
-) {
-  const k = item.p.name;
-  const ex = map.get(k);
-  const sNew = scoreCandidate(item.p, marketBias, item.volumeOk);
-  const sOld = ex ? scoreCandidate(ex.p, marketBias, ex.volumeOk) : -Infinity;
-  if (!ex || sNew > sOld) map.set(k, item);
+  marketBiasLabel: string,
+  mtfBundle: Record<string, HyperliquidCandle[]> | undefined,
+  apexResult: ApexGeometricResult,
+  idSalt: number,
+): EducationalPatternSignal {
+  const best = row;
+  const structural = getPatternStructuralBias(best.p);
+  const counterTrend =
+    (marketBias === "bullish" && structural === "bearish") ||
+    (marketBias === "bearish" && structural === "bullish");
+
+  const patternStatus: EducationalPatternSignal["patternStatus"] =
+    best.p.status === "breakout_confirmed"
+      ? "developed"
+      : best.p.status === "breakout_pending"
+        ? "breakout_watch"
+        : "forming";
+
+  const { educationalNote, whatToWatch } = buildDynamicEducation(
+    best.p.displayName,
+    timeframe,
+    structural,
+    counterTrend,
+    best.volumeOk,
+    patternStatus,
+    marketBiasLabel,
+  );
+
+  const patternName = counterTrend ? `${best.p.displayName} (Counter-Trend)` : best.p.displayName;
+  const bias =
+    structural === "bullish" ? "bullish" : structural === "bearish" ? "bearish" : mapMarketToSignalBias(marketBias);
+
+  const price = currentSMA.price;
+  const { sma21: s21, sma200: s200 } = currentSMA;
+  const tradeable = true;
+  let maFilterReason = "";
+  if (structural === "bullish") {
+    const aligned = price > s21 && price > s200;
+    maFilterReason = aligned
+      ? "Pattern shown — price above both 21/200 SMMA (context aligns)."
+      : "Pattern shown — geometry is valid; SMMA is advisory (price not above both MAs).";
+  } else if (structural === "bearish") {
+    const aligned = price < s21 && price < s200;
+    maFilterReason = aligned
+      ? "Pattern shown — price below both 21/200 SMMA (context aligns)."
+      : "Pattern shown — geometry is valid; SMMA is advisory (price not below both MAs).";
+  } else {
+    maFilterReason = "Neutral geometry — use SMMA and higher timeframe for direction.";
+  }
+
+  const smaRelationship = `${marketBiasLabel} Pattern: ${best.p.displayName}.`;
+  const sameApex = !!(apexResult.pattern && best.p.name === apexResult.pattern.name);
+
+  let apexTier: EducationalPatternSignal["apexTier"] = apexResult.pattern ? "standard" : "no_pattern_apex";
+  if (sameApex && apexResult.pattern?.name === "bull_flag") {
+    if (timeframe === "1m" && mtfBundle && is15mTrendBullish(mtfBundle)) {
+      apexTier = "high_probability_trend_aligned";
+    } else if (
+      (timeframe === "1h" || timeframe === "4h") &&
+      currentSMA.sma21 > currentSMA.sma200 * 1.0001
+    ) {
+      apexTier = "high_probability_trend_aligned";
+    }
+  } else if (sameApex && apexResult.pattern?.name === "bear_flag") {
+    if (timeframe === "1m" && mtfBundle && is15mTrendBearish(mtfBundle)) {
+      apexTier = "high_probability_trend_aligned";
+    } else if (
+      (timeframe === "1h" || timeframe === "4h") &&
+      currentSMA.sma21 < currentSMA.sma200 * 0.9999
+    ) {
+      apexTier = "high_probability_trend_aligned";
+    }
+  }
+
+  const apexPrefix =
+    apexTier === "high_probability_trend_aligned"
+      ? "High Probability — Trend Aligned (1m flag × 15m SMMA). "
+      : "";
+
+  const apexNoteForRow = sameApex ? apexResult.note : "";
+
+  return {
+    id: `${coin}-${timeframe}-${best.p.name}-${idSalt}-${Date.now()}`,
+    coin,
+    timeframe,
+    bias,
+    patternName,
+    patternStatus,
+    sma21: s21,
+    sma200: s200,
+    currentPrice: price,
+    smaRelationship: apexPrefix + smaRelationship,
+    educationalNote: apexNoteForRow ? `${apexPrefix}${apexNoteForRow} ${educationalNote}` : educationalNote,
+    whatToWatch,
+    detectedAt: new Date(),
+    tradeable,
+    maFilterReason,
+    counterTrend,
+    volumeConfirmed: best.volumeOk,
+    marketBiasLabel,
+    apexEngineNote: apexResult.note,
+    apexScanState: apexResult.scanState,
+    apexTier,
+  };
 }
 
 /**
@@ -484,184 +379,75 @@ export async function analyzeEducationalUniversal(
   timeframe: string,
   candles: HyperliquidCandle[],
   mtfBundle?: Record<string, HyperliquidCandle[]>,
-): Promise<EducationalPatternSignal | null> {
-  if (candles.length < PATTERN_SCAN_CANDLE_LIMIT) return null;
+): Promise<EducationalPatternSignal[]> {
+  if (candles.length < PATTERN_SCAN_CANDLE_LIMIT) return [];
   const currentSMA = calculateSMAFromCandles(candles);
-  if (!currentSMA) return null;
-
-  const apexResult = runApexGeometricFlagScan(candles, timeframe);
+  if (!currentSMA) return [];
 
   const { bias: marketBias, label: marketBiasLabel } = inferMarketBias(candles);
   const prev = candles.slice(0, -5);
   const prevSma = calculateSMAFromCandles(prev);
   const crossover = detectCrossover(currentSMA, prevSma);
 
-  const candMap = new Map<string, { p: DetectedPattern; volumeOk: boolean }>();
-  const base = collectPatternCandidates(candles, timeframe, { skipFlags: true });
-  sortPatternCandidatesByActionability(base);
-  for (const p of base) upsertByScore(candMap, { p, volumeOk: false }, marketBias);
+  const { rows, apexResult } = gatherMultiPatternCandidates(candles, timeframe, marketBias);
 
-  if (apexResult.pattern) {
-    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: true }, marketBias);
-  }
-
-  const hs = detectHeadAndShoulders(candles);
-  const ihs = detectInverseHeadAndShoulders(candles);
-  if (hs) upsertByScore(candMap, { p: hs, volumeOk: false }, marketBias);
-  if (ihs) upsertByScore(candMap, { p: ihs, volumeOk: false }, marketBias);
-
-  const merged = [...candMap.values()];
-  if (merged.length === 0) {
-    if (!crossover) return null;
+  if (rows.length === 0) {
+    if (!crossover) return [];
     const crossBias = crossover === "bullish_crossover" ? "bullish" : "bearish";
     const price = currentSMA.price;
     const crossoverTradeable =
       crossover === "bullish_crossover"
         ? price > currentSMA.sma21 && price > currentSMA.sma200
         : price < currentSMA.sma21 && price < currentSMA.sma200;
-    return {
-      id: `${coin}-${timeframe}-${Date.now()}`,
+    const ed = buildDynamicEducation(
+      "SMA crossover",
+      timeframe,
+      crossBias,
+      false,
+      true,
+      "developed",
+      marketBiasLabel,
+    );
+    return [
+      {
+        id: `${coin}-${timeframe}-cross-${Date.now()}`,
+        coin,
+        timeframe,
+        bias: crossBias,
+        patternName: `21/200 SMMA ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"} Crossover`,
+        patternStatus: "developed",
+        sma21: currentSMA.sma21,
+        sma200: currentSMA.sma200,
+        currentPrice: price,
+        smaRelationship: `${marketBiasLabel} Fresh crossover on this timeframe.`,
+        educationalNote: ed.educationalNote,
+        whatToWatch: ed.whatToWatch,
+        detectedAt: new Date(),
+        tradeable: crossoverTradeable,
+        maFilterReason: crossoverTradeable
+          ? "Price confirms the crossover side of both SMMAs."
+          : "Crossover printed; wait for price to hold the directional side of 21/200.",
+        marketBiasLabel,
+        apexEngineNote: apexResult.note,
+        apexScanState: apexResult.scanState,
+        apexTier: "no_pattern_apex",
+      },
+    ];
+  }
+
+  return rows.map((row, i) =>
+    buildEducationalSignalFromCandidate(
       coin,
       timeframe,
-      bias: crossBias,
-      patternName: `21/200 SMMA ${crossover === "bullish_crossover" ? "Bullish" : "Bearish"} Crossover`,
-      patternStatus: "developed",
-      sma21: currentSMA.sma21,
-      sma200: currentSMA.sma200,
-      currentPrice: price,
-      smaRelationship: `${marketBiasLabel} Fresh crossover on this timeframe.`,
-      educationalNote: buildDynamicEducation(
-        "SMA crossover",
-        timeframe,
-        crossBias,
-        false,
-        true,
-        "developed",
-        marketBiasLabel,
-      ).educationalNote,
-      whatToWatch: buildDynamicEducation(
-        "SMA crossover",
-        timeframe,
-        crossBias,
-        false,
-        true,
-        "developed",
-        marketBiasLabel,
-      ).whatToWatch,
-      detectedAt: new Date(),
-      tradeable: crossoverTradeable,
-      maFilterReason: crossoverTradeable
-        ? "Price confirms the crossover side of both SMMAs."
-        : "Crossover printed; wait for price to hold the directional side of 21/200.",
+      currentSMA,
+      row,
+      marketBias,
       marketBiasLabel,
-      apexEngineNote: apexResult.note,
-      apexScanState: apexResult.scanState,
-      apexTier: "no_pattern_apex",
-    };
-  }
-
-  merged.sort(
-    (a, b) => scoreCandidate(b.p, marketBias, b.volumeOk) - scoreCandidate(a.p, marketBias, a.volumeOk),
+      mtfBundle,
+      apexResult,
+      i,
+    ),
   );
-  const best = merged[0]!;
-  const structural = getPatternStructuralBias(best.p);
-  const counterTrend =
-    (marketBias === "bullish" && structural === "bearish") ||
-    (marketBias === "bearish" && structural === "bullish");
-
-  const patternStatus: EducationalPatternSignal["patternStatus"] =
-    best.p.status === "breakout_confirmed"
-      ? "developed"
-      : best.p.status === "breakout_pending"
-        ? "breakout_watch"
-        : "forming";
-
-  const { educationalNote, whatToWatch } = buildDynamicEducation(
-    best.p.displayName,
-    timeframe,
-    structural,
-    counterTrend,
-    best.volumeOk,
-    patternStatus,
-    marketBiasLabel,
-  );
-
-  const patternName = counterTrend ? `${best.p.displayName} (Counter-Trend)` : best.p.displayName;
-  const bias =
-    structural === "bullish" ? "bullish" : structural === "bearish" ? "bearish" : mapMarketToSignalBias(marketBias);
-
-  const price = currentSMA.price;
-  const { sma21: s21, sma200: s200 } = currentSMA;
-  let tradeable = false;
-  let maFilterReason = "";
-  if (structural === "bullish") {
-    tradeable = price > s21 && price > s200;
-    maFilterReason = tradeable
-      ? "Price above both 21 and 200 SMMA — aligned with bullish structure."
-      : "Bullish geometry but price not above both SMMAs — secondary until reclaim.";
-  } else if (structural === "bearish") {
-    tradeable = price < s21 && price < s200;
-    maFilterReason = tradeable
-      ? "Price below both 21 and 200 SMMA — aligned with bearish structure."
-      : "Bearish geometry but price not below both SMMAs — wait for confirmation.";
-  } else {
-    tradeable = false;
-    maFilterReason = "Neutral pattern — use SMMA + higher timeframe for direction.";
-  }
-
-  const smaRelationship = `${marketBiasLabel} Pattern: ${best.p.displayName}.`;
-
-  let apexTier: EducationalPatternSignal["apexTier"] = apexResult.pattern ? "standard" : "no_pattern_apex";
-  if (apexResult.pattern?.name === "bull_flag") {
-    if (timeframe === "1m" && mtfBundle && is15mTrendBullish(mtfBundle)) {
-      apexTier = "high_probability_trend_aligned";
-    } else if (
-      (timeframe === "1h" || timeframe === "4h") &&
-      currentSMA.sma21 > currentSMA.sma200 * 1.0001
-    ) {
-      apexTier = "high_probability_trend_aligned";
-    }
-  } else if (apexResult.pattern?.name === "bear_flag") {
-    if (timeframe === "1m" && mtfBundle && is15mTrendBearish(mtfBundle)) {
-      apexTier = "high_probability_trend_aligned";
-    } else if (
-      (timeframe === "1h" || timeframe === "4h") &&
-      currentSMA.sma21 < currentSMA.sma200 * 0.9999
-    ) {
-      apexTier = "high_probability_trend_aligned";
-    }
-  }
-
-  const apexPrefix =
-    apexTier === "high_probability_trend_aligned"
-      ? "High Probability — Trend Aligned (1m flag × 15m SMMA). "
-      : "";
-
-  return {
-    id: `${coin}-${timeframe}-${Date.now()}`,
-    coin,
-    timeframe,
-    bias,
-    patternName,
-    patternStatus,
-    sma21: s21,
-    sma200: s200,
-    currentPrice: price,
-    smaRelationship: apexPrefix + smaRelationship,
-    educationalNote: apexResult.pattern
-      ? `${apexPrefix}${apexResult.note} ${educationalNote}`
-      : educationalNote,
-    whatToWatch,
-    detectedAt: new Date(),
-    tradeable,
-    maFilterReason,
-    counterTrend,
-    volumeConfirmed: best.volumeOk,
-    marketBiasLabel,
-    apexEngineNote: apexResult.note,
-    apexScanState: apexResult.scanState,
-    apexTier,
-  };
 }
 
 type CoinScanDiagnostics = {
@@ -696,10 +482,10 @@ async function scanOneCoinMtf(
     (tf) => () =>
       bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_CANDLE_LIMIT
         ? analyzeEducationalUniversal(coin, tf, bundle[tf]!, bundle)
-        : Promise.resolve(null),
+        : Promise.resolve([] as EducationalPatternSignal[]),
   );
   const results = await Promise.all(tasks.map((fn) => tfLimit(fn)));
-  const signals = results.filter((x): x is EducationalPatternSignal => x != null);
+  const signals = results.flat();
   return { signals, diag };
 }
 

@@ -1,6 +1,6 @@
 /**
- * Equilibrium Apex Pattern Engine — geometric heuristic (impulse pole + pivot flag + SMMA guard).
- * Flags are only valid after a verified pole; macro 21/200 SMMA blocks contradictory labels.
+ * Equilibrium Apex Pattern Engine — geometric heuristic (impulse pole + pivot flag).
+ * Flags validate on pole + consolidation only; SMMA does not veto bear/bull geometry.
  */
 import type { HyperliquidCandle } from "./hyperliquid";
 import {
@@ -233,17 +233,12 @@ export interface ApexGeometricResult {
 
 /**
  * Impulse-first bull/bear flag: 15-bar pole + pivot flag + retrace cap; **1m/3m/5m use aggressive** thresholds
- * (momentum + tight flag). SMMA 21 vs 200 anti-hallucination guard unchanged.
+ * (momentum + tight flag). SMMA is **not** used to suppress opposite-direction flags — geometry only.
  */
 export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe: string): ApexGeometricResult {
   try {
     if (candles.length < POLE_LEN + MIN_FLAG + 4) {
       return { pattern: null, scanState: "no_pattern", note: "Insufficient history for pole + flag." };
-    }
-
-    const sma = calculateSMAFromCandles(candles);
-    if (!sma) {
-      return { pattern: null, scanState: "no_pattern", note: "SMMA 21/200 unavailable." };
     }
 
     const apx = apexThresholds(timeframe);
@@ -273,7 +268,6 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
 
         const bullPole = validateBullPole(pole, apx.impulseMinPct, apx.bodyRatioMin);
         if (bullPole.ok) {
-          if (sma.sma21 < sma.sma200 * 0.9995) continue;
           const flagLo = Math.min(...flag.map(cLow));
           const flagHi = Math.max(...flag.map(cHigh));
           const retrace = (poleTop - flagLo) / H;
@@ -295,7 +289,6 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
 
         const bearPole = validateBearPole(pole, apx.impulseMinPct, apx.bodyRatioMin);
         if (bearPole.ok) {
-          if (sma.sma21 > sma.sma200 * 1.0005) continue;
           const flagLo = Math.min(...flag.map(cLow));
           const flagHi = Math.max(...flag.map(cHigh));
           const retrace = (flagHi - poleBottom) / H;

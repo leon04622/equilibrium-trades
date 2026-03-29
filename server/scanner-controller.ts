@@ -53,9 +53,8 @@ export function getDefaultPatternScanTickerList(): string[] {
 }
 
 /**
- * Candles fetched per interval per coin. **Minimum 200** is required for 21/200 SMMA + Apex context;
- * lowering below 200 breaks trend-first logic — use env only to raise (e.g. 250), not shrink below 200.
+ * Candles per interval per coin. Default **400** for 1h/4h/1d pole visibility + H&S; minimum **200** (SMMA).
  */
-const parsedLimit = parseInt(process.env.PATTERN_SCAN_CANDLE_LIMIT || "200", 10);
+const parsedLimit = parseInt(process.env.PATTERN_SCAN_CANDLE_LIMIT || "400", 10);
 export const PATTERN_SCAN_CANDLE_LIMIT =
-  Number.isFinite(parsedLimit) && parsedLimit >= 200 ? parsedLimit : 200;
+  Number.isFinite(parsedLimit) && parsedLimit >= 200 ? Math.max(parsedLimit, 200) : 400;
