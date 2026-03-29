@@ -48,6 +48,10 @@ import {
   getScannerHealthMonitoringEnabled,
   setScannerHealthMonitoringEnabled,
   GLOBAL_SCANNER_GOLD_PROXY_INFO,
+  effectivePatternScanVolumeCap,
+  PATTERN_SCAN_FAST_CACHE_TTL_MS,
+  PATTERN_SCAN_SLOW_CACHE_TTL_MS,
+  isFastTrackTimeframe,
 } from "./global-scanner";
 import {
   buildTopVolumePatternScanCoins,
@@ -80,7 +84,6 @@ import {
 let mongoVaultHandle: MongoVaultHandle | null = null;
 let mongoBackgroundReconnectBusy = false;
 
-const PATTERN_SCAN_CACHE_TTL_MS = 90_000;
 const PATTERN_SCAN_CACHE_MAX_KEYS = 8;
 type PatternScanCacheEntry = {
   patterns: EducationalPatternSignal[];
@@ -89,7 +92,15 @@ type PatternScanCacheEntry = {
   coins: string[];
   source: "query" | "watchlist" | "universe" | "top_volume";
   volumeCapMax: number | null;
+  ttlMs: number;
 };
+
+function patternScanCacheTtlForTimeframes(timeframes: string[]): number {
+  const tfs = [...new Set(timeframes.filter(Boolean))];
+  if (tfs.length === 0) return PATTERN_SCAN_SLOW_CACHE_TTL_MS;
+  const anyFast = tfs.some((tf) => isFastTrackTimeframe(tf));
+  return anyFast ? PATTERN_SCAN_FAST_CACHE_TTL_MS : PATTERN_SCAN_SLOW_CACHE_TTL_MS;
+}
 
 const patternScanResultCache = new Map<string, PatternScanCacheEntry>();
 
@@ -103,7 +114,7 @@ function patternScanCoinsPreview(coins: string[]): string {
 function patternVolumeCapMax(): number | null {
   const enforce = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
   const n = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
-  if (enforce && Number.isFinite(n) && n > 0) return n;
+  if (enforce && Number.isFinite(n) && n > 0) return effectivePatternScanVolumeCap(n);
   return null;
 }
 
@@ -137,7 +148,7 @@ function patternScanCacheKey(walletKey: string, coinsParam: string, coins: strin
 function prunePatternScanCache(): void {
   const now = Date.now();
   for (const [k, v] of patternScanResultCache) {
-    if (now - v.at > PATTERN_SCAN_CACHE_TTL_MS) patternScanResultCache.delete(k);
+    if (now - v.at > v.ttlMs) patternScanResultCache.delete(k);
   }
   while (patternScanResultCache.size > PATTERN_SCAN_CACHE_MAX_KEYS) {
     let oldestK: string | null = null;
@@ -417,16 +428,23 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   }
   const maxCoins = parseInt(process.env.PATTERN_SCAN_MAX_COINS || "", 10);
   const enforceMax = process.env.PATTERN_SCAN_ENFORCE_MAX_COINS === "1";
-  if (enforceMax && Number.isFinite(maxCoins) && maxCoins > 0 && list.length > maxCoins) {
+  const effectiveCap = enforceMax && Number.isFinite(maxCoins) && maxCoins > 0 ? effectivePatternScanVolumeCap(maxCoins) : null;
+  if (effectiveCap != null && list.length > effectiveCap) {
     try {
       const tickers = await getAllTickers();
       const vol = new Map(tickers.map((t) => [t.coin, parseFloat(t.dayNtlVlm || "0")]));
-      list = [...list].sort((a, b) => (vol.get(b) ?? 0) - (vol.get(a) ?? 0)).slice(0, maxCoins);
-      console.warn(
-        `[pattern-scan] PATTERN_SCAN_ENFORCE_MAX_COINS=1 active — capping to top ${maxCoins} by 24h volume.`,
-      );
+      list = [...list].sort((a, b) => (vol.get(b) ?? 0) - (vol.get(a) ?? 0)).slice(0, effectiveCap);
+      if (maxCoins < PATTERN_SCAN_TOP_VOLUME_COUNT) {
+        console.warn(
+          `[pattern-scan] PATTERN_SCAN_MAX_COINS=${maxCoins} raised to minimum ${PATTERN_SCAN_TOP_VOLUME_COUNT} (top volume + PAXG).`,
+        );
+      } else {
+        console.warn(
+          `[pattern-scan] PATTERN_SCAN_ENFORCE_MAX_COINS=1 active — capping to top ${effectiveCap} by 24h volume.`,
+        );
+      }
     } catch {
-      list = list.slice(0, maxCoins);
+      list = list.slice(0, effectiveCap);
     }
   }
   return list;
@@ -812,7 +830,7 @@ export async function registerRoutes(
       if (!skipCache) {
         prunePatternScanCache();
         const hit = patternScanResultCache.get(cacheKey);
-        if (hit && Date.now() - hit.at <= PATTERN_SCAN_CACHE_TTL_MS) {
+        if (hit && Date.now() - hit.at <= hit.ttlMs) {
           setPatternScanInsightHeaders(res, {
             coins: hit.coins,
             source: hit.source,
@@ -825,6 +843,7 @@ export async function registerRoutes(
       }
 
       const { patterns, meta } = await scanForEducationalPatterns(coins, timeframes);
+      const scanTtlMs = patternScanCacheTtlForTimeframes(timeframes);
       if (!skipCache) {
         patternScanResultCache.set(cacheKey, {
           patterns,
@@ -833,6 +852,7 @@ export async function registerRoutes(
           coins,
           source: scanSource,
           volumeCapMax,
+          ttlMs: scanTtlMs,
         });
         prunePatternScanCache();
       }
@@ -871,18 +891,24 @@ export async function registerRoutes(
       return;
     }
     if (!getVaultDb()) {
-      res.json({ allMarkets: true, coins: [], mongoConfigured: false });
+      res.json({
+        allMarkets: true,
+        coins: [],
+        mongoConfigured: true,
+        watchlistVaultConnected: false,
+      });
       return;
     }
     const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
     if (!prefs) {
-      res.json({ allMarkets: true, coins: [], mongoConfigured: true });
+      res.json({ allMarkets: true, coins: [], mongoConfigured: true, watchlistVaultConnected: true });
       return;
     }
     res.json({
       allMarkets: prefs.allMarkets,
       coins: prefs.coins,
       mongoConfigured: true,
+      watchlistVaultConnected: true,
     });
   });
 

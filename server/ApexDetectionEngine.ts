@@ -16,6 +16,27 @@ const IMPULSE_MIN_PCT = 1.5;
 const BODY_RATIO_MIN = 0.7;
 const MAX_RETRACE = 0.5;
 
+const SHORT_TF_AGGRESSIVE = new Set(["1m", "3m", "5m"]);
+
+function apexThresholds(timeframe: string) {
+  if (SHORT_TF_AGGRESSIVE.has(timeframe)) {
+    return {
+      impulseMinPct: 0.32,
+      bodyRatioMin: 0.52,
+      maxRetrace: 0.62,
+      maxFlagSlopePct: 0.65,
+      loosePivot: true,
+    };
+  }
+  return {
+    impulseMinPct: IMPULSE_MIN_PCT,
+    bodyRatioMin: BODY_RATIO_MIN,
+    maxRetrace: MAX_RETRACE,
+    maxFlagSlopePct: 0.4,
+    loosePivot: false,
+  };
+}
+
 function cClose(x: HyperliquidCandle): number {
   return parseFloat(x.c);
 }
@@ -48,7 +69,11 @@ function findPivotsLocal(flag: HyperliquidCandle[], lookback: number) {
   return { highs, lows };
 }
 
-function validateBullPole(slice: HyperliquidCandle[]): { ok: boolean; movePct: number; bodyRatio: number } {
+function validateBullPole(
+  slice: HyperliquidCandle[],
+  impulseMinPct: number,
+  bodyRatioMin: number,
+): { ok: boolean; movePct: number; bodyRatio: number } {
   if (slice.length !== POLE_LEN) return { ok: false, movePct: 0, bodyRatio: 0 };
   const firstC = cClose(slice[0]);
   const lastC = cClose(slice[POLE_LEN - 1]);
@@ -58,11 +83,15 @@ function validateBullPole(slice: HyperliquidCandle[]): { ok: boolean; movePct: n
     if (cClose(x) > cOpen(x)) bullBodies++;
   }
   const bodyRatio = bullBodies / POLE_LEN;
-  const ok = movePct > IMPULSE_MIN_PCT && bodyRatio >= BODY_RATIO_MIN && lastC > firstC;
+  const ok = movePct > impulseMinPct && bodyRatio >= bodyRatioMin && lastC > firstC;
   return { ok, movePct, bodyRatio };
 }
 
-function validateBearPole(slice: HyperliquidCandle[]): { ok: boolean; movePct: number; bodyRatio: number } {
+function validateBearPole(
+  slice: HyperliquidCandle[],
+  impulseMinPct: number,
+  bodyRatioMin: number,
+): { ok: boolean; movePct: number; bodyRatio: number } {
   if (slice.length !== POLE_LEN) return { ok: false, movePct: 0, bodyRatio: 0 };
   const firstC = cClose(slice[0]);
   const lastC = cClose(slice[POLE_LEN - 1]);
@@ -72,7 +101,7 @@ function validateBearPole(slice: HyperliquidCandle[]): { ok: boolean; movePct: n
     if (cClose(x) < cOpen(x)) bearBodies++;
   }
   const bodyRatio = bearBodies / POLE_LEN;
-  const ok = movePct > IMPULSE_MIN_PCT && bodyRatio >= BODY_RATIO_MIN && lastC < firstC;
+  const ok = movePct > impulseMinPct && bodyRatio >= bodyRatioMin && lastC < firstC;
   return { ok, movePct, bodyRatio };
 }
 
@@ -82,8 +111,14 @@ function poleRange(slice: HyperliquidCandle[]) {
   return { poleTop: hi, poleBottom: lo, H: hi - lo };
 }
 
-function bullFlagPivotOk(flag: HyperliquidCandle[]): boolean {
+function bullFlagPivotOk(flag: HyperliquidCandle[], loose: boolean): boolean {
   const { highs, lows } = findPivotsLocal(flag, 2);
+  if (loose) {
+    if (highs.length < 1 || lows.length < 1) return false;
+    const h1 = highs[highs.length - 1]!.price;
+    const l1 = lows[lows.length - 1]!.price;
+    return h1 >= l1 * 0.999 && flag.length >= MIN_FLAG;
+  }
   if (highs.length < 2 || lows.length < 2) return false;
   const h0 = highs[highs.length - 2].price;
   const h1 = highs[highs.length - 1].price;
@@ -94,8 +129,14 @@ function bullFlagPivotOk(flag: HyperliquidCandle[]): boolean {
   return true;
 }
 
-function bearFlagPivotOk(flag: HyperliquidCandle[]): boolean {
+function bearFlagPivotOk(flag: HyperliquidCandle[], loose: boolean): boolean {
   const { highs, lows } = findPivotsLocal(flag, 2);
+  if (loose) {
+    if (highs.length < 1 || lows.length < 1) return false;
+    const h1 = highs[highs.length - 1]!.price;
+    const l1 = lows[lows.length - 1]!.price;
+    return l1 <= h1 * 1.001 && flag.length >= MIN_FLAG;
+  }
   if (highs.length < 2 || lows.length < 2) return false;
   const h0 = highs[highs.length - 2].price;
   const h1 = highs[highs.length - 1].price;
@@ -191,8 +232,8 @@ export interface ApexGeometricResult {
 }
 
 /**
- * Impulse-first bull/bear flag: 15-bar pole (≥1.5% + ≥70% directional bodies), pivot flag, ≤50% pole retrace,
- * SMMA 21 vs 200 anti-hallucination guard.
+ * Impulse-first bull/bear flag: 15-bar pole + pivot flag + retrace cap; **1m/3m/5m use aggressive** thresholds
+ * (momentum + tight flag). SMMA 21 vs 200 anti-hallucination guard unchanged.
  */
 export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe: string): ApexGeometricResult {
   try {
@@ -204,6 +245,8 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
     if (!sma) {
       return { pattern: null, scanState: "no_pattern", note: "SMMA 21/200 unavailable." };
     }
+
+    const apx = apexThresholds(timeframe);
 
     let best: {
       pat: DetectedPattern;
@@ -228,18 +271,18 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
         const { poleTop, poleBottom, H } = poleRange(pole);
         if (H <= 0) continue;
 
-        const bullPole = validateBullPole(pole);
+        const bullPole = validateBullPole(pole, apx.impulseMinPct, apx.bodyRatioMin);
         if (bullPole.ok) {
           if (sma.sma21 < sma.sma200 * 0.9995) continue;
           const flagLo = Math.min(...flag.map(cLow));
           const flagHi = Math.max(...flag.map(cHigh));
           const retrace = (poleTop - flagLo) / H;
-          if (retrace > MAX_RETRACE) continue;
+          if (retrace > apx.maxRetrace) continue;
           if (flagLo < poleBottom * 0.9985) continue;
-          if (!bullFlagPivotOk(flag)) continue;
+          if (!bullFlagPivotOk(flag, apx.loosePivot)) continue;
           const firstFC = cClose(flag[0]);
           const lastFC = cClose(flag[flag.length - 1]);
-          if (((lastFC - firstFC) / Math.max(firstFC, 1e-12)) * 100 > 0.4) continue;
+          if (((lastFC - firstFC) / Math.max(firstFC, 1e-12)) * 100 > apx.maxFlagSlopePct) continue;
 
           const pat = buildBullFlag(pole, flag, tail, timeframe);
           if (!pat) continue;
@@ -250,18 +293,18 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
           }
         }
 
-        const bearPole = validateBearPole(pole);
+        const bearPole = validateBearPole(pole, apx.impulseMinPct, apx.bodyRatioMin);
         if (bearPole.ok) {
           if (sma.sma21 > sma.sma200 * 1.0005) continue;
           const flagLo = Math.min(...flag.map(cLow));
           const flagHi = Math.max(...flag.map(cHigh));
           const retrace = (flagHi - poleBottom) / H;
-          if (retrace > MAX_RETRACE) continue;
+          if (retrace > apx.maxRetrace) continue;
           if (flagHi > poleTop * 1.0015) continue;
-          if (!bearFlagPivotOk(flag)) continue;
+          if (!bearFlagPivotOk(flag, apx.loosePivot)) continue;
           const firstFC = cClose(flag[0]);
           const lastFC = cClose(flag[flag.length - 1]);
-          if (((lastFC - firstFC) / Math.max(firstFC, 1e-12)) * 100 < -0.4) continue;
+          if (((lastFC - firstFC) / Math.max(firstFC, 1e-12)) * 100 < -apx.maxFlagSlopePct) continue;
 
           const pat = buildBearFlag(pole, flag, tail, timeframe);
           if (!pat) continue;

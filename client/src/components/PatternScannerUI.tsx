@@ -282,7 +282,59 @@ function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
   };
 }
 
-/** Institutional-style pattern scanner — Apex geometric engine, 30s refresh, MTF SMMA context. */
+const FAST_TRACK_TFS = ["1m", "3m", "5m"] as const;
+
+function playSetupChime(): void {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.07, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime + 0.22);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function fetchPatternScanPayload(
+  timeframes: string,
+  wallet: string | null | undefined,
+  nocache: boolean,
+): Promise<PatternScanPayload> {
+  const qs = `timeframes=${encodeURIComponent(timeframes)}` + (nocache ? "&nocache=1" : "");
+  const response = await fetch(`/api/signals/patterns?${qs}`, {
+    headers: scannerAuthHeaders(wallet),
+  });
+  if (!response.ok) throw new Error("Failed to fetch patterns");
+  const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "top_volume").trim();
+  const source: PatternScanSource =
+    srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" || srcRaw === "top_volume"
+      ? srcRaw
+      : "top_volume";
+  const capHdr = response.headers.get("X-Pattern-Scan-Volume-Cap");
+  const capN = capHdr != null && capHdr !== "" ? Number(capHdr) : NaN;
+  const meta = {
+    coinCount: Number(response.headers.get("X-Pattern-Scan-Coins") || 0),
+    durationMs: Number(response.headers.get("X-Pattern-Scan-Duration-Ms") || 0),
+    signalCount: Number(response.headers.get("X-Pattern-Scan-Signals") || 0),
+    cached: response.headers.get("X-Pattern-Scan-Cached") === "1",
+    source,
+    coinsPreview: (response.headers.get("X-Pattern-Scan-Coins-Preview") || "").trim(),
+    volumeCapMax: Number.isFinite(capN) && capN > 0 ? capN : null,
+  };
+  const patterns = (await response.json()) as PatternSignal[];
+  return { patterns, meta };
+}
+
+/** Fast-track 1m/3m/5m vs slower HTF polling — merged view, Apex engine, SMMA guards unchanged. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
@@ -291,53 +343,103 @@ export function PatternScannerUI() {
     SCAN_ALL_TIMEFRAMES.filter((tf) => tf !== "1d"),
   );
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const scanHydratedRef = useRef(false);
+  const prev1mIdsRef = useRef<Set<string>>(new Set());
 
-  const tfParam =
-    selectedTimeframes.length > 0 ? selectedTimeframes.join(",") : [...SCAN_ALL_TIMEFRAMES].join(",");
+  const fastTfParam = useMemo(() => {
+    const sel =
+      selectedTimeframes.length > 0 ? selectedTimeframes : SCAN_ALL_TIMEFRAMES.filter((tf) => tf !== "1d");
+    const xs = sel.filter((tf) => (FAST_TRACK_TFS as readonly string[]).includes(tf));
+    return xs.length > 0 ? xs.join(",") : "";
+  }, [selectedTimeframes]);
 
-  const {
-    data: scanPayload,
-    isLoading,
-    refetch,
-    isFetching,
-    isError,
-    error,
-  } = useQuery<PatternScanPayload>({
-    queryKey: ["/api/signals/patterns", tfParam, address ?? ""],
-    queryFn: async () => {
-      const qs =
-        `timeframes=${encodeURIComponent(tfParam)}` + (forceNocacheRef.current ? "&nocache=1" : "");
-      forceNocacheRef.current = false;
-      const response = await fetch(`/api/signals/patterns?${qs}`, {
-        headers: scannerAuthHeaders(address),
-      });
-      if (!response.ok) throw new Error("Failed to fetch patterns");
-      const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "top_volume").trim();
-      const source: PatternScanSource =
-        srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" || srcRaw === "top_volume"
-          ? srcRaw
-          : "top_volume";
-      const capHdr = response.headers.get("X-Pattern-Scan-Volume-Cap");
-      const capN = capHdr != null && capHdr !== "" ? Number(capHdr) : NaN;
-      const meta = {
-        coinCount: Number(response.headers.get("X-Pattern-Scan-Coins") || 0),
-        durationMs: Number(response.headers.get("X-Pattern-Scan-Duration-Ms") || 0),
-        signalCount: Number(response.headers.get("X-Pattern-Scan-Signals") || 0),
-        cached: response.headers.get("X-Pattern-Scan-Cached") === "1",
-        source,
-        coinsPreview: (response.headers.get("X-Pattern-Scan-Coins-Preview") || "").trim(),
-        volumeCapMax: Number.isFinite(capN) && capN > 0 ? capN : null,
-      };
-      const patterns = (await response.json()) as PatternSignal[];
-      return { patterns, meta };
-    },
-    refetchInterval: (query) => (query.state.status === "error" ? false : 30_000),
-    staleTime: 25_000,
+  const slowTfParam = useMemo(() => {
+    const sel =
+      selectedTimeframes.length > 0 ? selectedTimeframes : SCAN_ALL_TIMEFRAMES.filter((tf) => tf !== "1d");
+    const xs = sel.filter((tf) => !(FAST_TRACK_TFS as readonly string[]).includes(tf));
+    return xs.length > 0 ? xs.join(",") : "";
+  }, [selectedTimeframes]);
+
+  const fastQuery = useQuery<PatternScanPayload>({
+    queryKey: ["/api/signals/patterns", "fast", fastTfParam, address ?? ""],
+    enabled: fastTfParam.length > 0,
+    queryFn: () =>
+      fetchPatternScanPayload(fastTfParam, address, forceNocacheRef.current),
+    refetchInterval: (q) =>
+      q.state.status === "error" || !fastTfParam ? false : 20_000,
+    staleTime: 12_000,
     retry: 1,
   });
 
-  const signals = isError ? [] : (scanPayload?.patterns ?? []);
-  const scanMeta = isError ? null : (scanPayload?.meta ?? null);
+  const slowQuery = useQuery<PatternScanPayload>({
+    queryKey: ["/api/signals/patterns", "slow", slowTfParam, address ?? ""],
+    enabled: slowTfParam.length > 0,
+    queryFn: () =>
+      fetchPatternScanPayload(slowTfParam, address, forceNocacheRef.current),
+    refetchInterval: (q) =>
+      q.state.status === "error" || !slowTfParam ? false : 180_000,
+    staleTime: 120_000,
+    retry: 1,
+  });
+
+  const hasScanData = !!(fastQuery.data || slowQuery.data);
+
+  const refetchAll = async () => {
+    forceNocacheRef.current = true;
+    try {
+      const ps: Promise<unknown>[] = [];
+      if (fastTfParam) ps.push(fastQuery.refetch());
+      if (slowTfParam) ps.push(slowQuery.refetch());
+      await Promise.all(ps);
+    } finally {
+      forceNocacheRef.current = false;
+    }
+  };
+
+  const isError = useMemo(() => {
+    const fDead = !!fastTfParam && fastQuery.isError && !fastQuery.data;
+    const sDead = !!slowTfParam && slowQuery.isError && !slowQuery.data;
+    if (!fastTfParam && !slowTfParam) return false;
+    if (fastTfParam && slowTfParam) return fDead && sDead;
+    if (fastTfParam) return fDead;
+    return sDead;
+  }, [fastTfParam, slowTfParam, fastQuery.isError, fastQuery.data, slowQuery.isError, slowQuery.data]);
+
+  const error = fastQuery.error ?? slowQuery.error;
+
+  const isLoading =
+    (!!fastTfParam && fastQuery.isPending && !fastQuery.data) ||
+    (!!slowTfParam && slowQuery.isPending && !slowQuery.data);
+
+  const isFetching =
+    (!!fastTfParam && fastQuery.isFetching) || (!!slowTfParam && slowQuery.isFetching);
+
+  const signals = useMemo(() => {
+    if (isError) return [];
+    const map = new Map<string, PatternSignal>();
+    const dedupeKey = (p: PatternSignal) => `${p.coin}|${p.timeframe}|${p.patternName}`;
+    for (const p of fastQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
+    for (const p of slowQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
+    return [...map.values()].sort(
+      (a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime(),
+    );
+  }, [isError, fastQuery.data, slowQuery.data]);
+
+  const scanMeta = useMemo(() => {
+    if (isError) return null;
+    const parts = [fastQuery.data?.meta, slowQuery.data?.meta].filter(Boolean) as PatternScanPayload["meta"][];
+    if (parts.length === 0) return null;
+    return {
+      coinCount: Math.max(...parts.map((p) => p.coinCount)),
+      durationMs: parts.reduce((s, p) => s + p.durationMs, 0),
+      signalCount: signals.length,
+      cached: parts.every((p) => p.cached),
+      source: parts[0]!.source,
+      coinsPreview: parts[0]!.coinsPreview || parts[1]?.coinsPreview || "",
+      volumeCapMax: parts[0]!.volumeCapMax ?? parts[1]?.volumeCapMax ?? null,
+    };
+  }, [isError, fastQuery.data, slowQuery.data, signals.length]);
+
   const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
   const uniqueCoinsInSignals = useMemo(() => new Set(signals.map((s) => s.coin)), [signals]);
 
@@ -346,6 +448,20 @@ export function PatternScannerUI() {
       setLastUpdate(new Date());
     }
   }, [isFetching]);
+
+  useEffect(() => {
+    if (isError || isLoading) return;
+    const nowIds = new Set(signals.filter((s) => s.timeframe === "1m").map((s) => s.id));
+    if (!scanHydratedRef.current) {
+      scanHydratedRef.current = true;
+      prev1mIdsRef.current = nowIds;
+      return;
+    }
+    for (const id of nowIds) {
+      if (!prev1mIdsRef.current.has(id)) playSetupChime();
+    }
+    prev1mIdsRef.current = nowIds;
+  }, [signals, isError, isLoading]);
 
   const tabRows = useMemo(() => {
     const bullishSignals = signals.filter((s) => s.bias === "bullish");
@@ -390,8 +506,9 @@ export function PatternScannerUI() {
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs md:text-sm text-muted-foreground">
-            Server scans the <strong>top 50 Hyperliquid perps by 24h volume</strong> plus <strong>PAXG</strong> (on-chain gold
-            proxy — not OANDA XAU). Apex: 15-bar pole + SMMA guards; 1m/5m candle fetches run before higher TFs.
+            Server scans the <strong>top 50 Hyperliquid perps by 24h volume</strong> plus <strong>PAXG</strong> (gold proxy on
+            HL). Fast-track <strong>1m / 3m / 5m</strong> refresh about every <strong>20s</strong>; higher timeframes about
+            every <strong>3 minutes</strong>. Apex uses aggressive geometry on short TFs; 21/200 SMMA guards unchanged.
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
@@ -401,8 +518,7 @@ export function PatternScannerUI() {
               variant="outline"
               size="sm"
               onClick={() => {
-                forceNocacheRef.current = true;
-                void refetch();
+                void refetchAll();
               }}
               disabled={isFetching}
               className="h-7 text-xs px-2"
@@ -430,8 +546,7 @@ export function PatternScannerUI() {
               size="sm"
               className="shrink-0"
               onClick={() => {
-                forceNocacheRef.current = true;
-                void refetch();
+                void refetchAll();
               }}
               disabled={isFetching}
             >
@@ -446,9 +561,9 @@ export function PatternScannerUI() {
           <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
           <AlertTitle className="text-orange-900 dark:text-orange-100">Server volume cap</AlertTitle>
           <AlertDescription className="text-xs sm:text-sm text-muted-foreground">
-            Only the top <strong>{scanMeta.volumeCapMax}</strong> market(s) by 24h volume are scanned — results skew to
-            majors like BTC/ETH. Unset <code className="text-[10px]">PATTERN_SCAN_ENFORCE_MAX_COINS</code> (and{" "}
-            <code className="text-[10px]">PATTERN_SCAN_MAX_COINS</code>) on the host for the full Hyperliquid universe.
+            Host enforced a volume cap; the server raises any value below <strong>50</strong> to match the global
+            scanner minimum (top volume + PAXG). Unset <code className="text-[10px]">PATTERN_SCAN_ENFORCE_MAX_COINS</code>{" "}
+            if you want the full API-driven list without a ceiling.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -457,7 +572,7 @@ export function PatternScannerUI() {
         <div
           className={cn(
             "rounded-lg border px-4 py-3 space-y-1.5 transition-colors",
-            isLoading && !scanPayload
+            isLoading && !hasScanData
               ? "border-primary/35 bg-primary/5"
               : signals.length > 0
                 ? "border-emerald-500/35 bg-emerald-500/[0.06]"
@@ -466,13 +581,13 @@ export function PatternScannerUI() {
                   : "border-border/80 bg-card/40",
           )}
         >
-          {isFetching && scanPayload ? (
+          {isFetching && hasScanData ? (
             <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
               <RefreshCw className="h-3 w-3 animate-spin shrink-0" aria-hidden />
               Updating scan…
             </p>
           ) : null}
-          {isLoading && !scanPayload ? (
+          {isLoading && !hasScanData ? (
             <p className="text-sm flex items-center gap-2 text-foreground">
               <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
               Scanning top volume markets and selected timeframes…
@@ -496,7 +611,10 @@ export function PatternScannerUI() {
                         {signals.length === 1 ? "" : "s"} matching the current rules.
                       </>
                     ) : (
-                      <>Scan finished — no setups matched the filters on this pass.</>
+                      <>
+                        Scanning <strong>50+</strong> markets — seeking high-probability setups. Nothing matched on this
+                        pass; fast-track lanes keep polling.
+                      </>
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
@@ -504,7 +622,7 @@ export function PatternScannerUI() {
                     {scanMeta!.coinCount === 1 ? "" : "s"} in {(scanMeta!.durationMs / 1000).toFixed(1)}s
                     {scanMeta!.cached ? " (recent cached result)" : ""}.
                     {signals.length === 0
-                      ? " That is normal: most symbols at any moment will not produce a label, because the model requires enough history and strict geometry + SMMA alignment."
+                      ? " The engine now uses aggressive short-TF geometry; new 1m labels surface immediately with an audio ping."
                       : null}
                   </p>
                   {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") &&
@@ -560,8 +678,8 @@ export function PatternScannerUI() {
           ))}
         </div>
         <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
-          Auto-refresh <strong>30s</strong>. 200 candles per TF; batched 5 tickers / 2s. Tap a TF to exclude (1d off by
-          default for speed). <strong>Scan</strong> = fresh pass.
+          <strong>1m–5m</strong> ~<strong>20s</strong> · slower TFs ~<strong>3m</strong>. 200+ candles per TF; wider
+          parallel batches. Tap a TF to exclude (1d off by default). <strong>Scan</strong> = fresh pass (both lanes).
         </span>
       </div>
 
@@ -722,12 +840,11 @@ export function PatternScannerUI() {
               {signals.length === 0 ? (
                 <div className="text-center py-12">
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No Patterns Detected</p>
-                  <p className="text-muted-foreground mb-4">Apex found no qualifying structures on selected TFs.</p>
+                  <p className="text-lg font-medium">Scanning 50+ Markets…</p>
+                  <p className="text-muted-foreground mb-4">Seeking high-probability setups across fast-track timeframes.</p>
                   <Button
                     onClick={() => {
-                      forceNocacheRef.current = true;
-                      void refetch();
+                      void refetchAll();
                     }}
                     disabled={isFetching}
                   >

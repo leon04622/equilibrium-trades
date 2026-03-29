@@ -13,6 +13,7 @@ import {
   finalizeScannerHealthRun,
   getScannerHealthMonitoringEnabled,
   isGoldScannerTicker,
+  isFastTrackTimeframe,
   type ScannerHealthErrorRow,
 } from "./global-scanner";
 import { PATTERN_SCAN_CANDLE_LIMIT } from "./scanner-controller";
@@ -69,8 +70,8 @@ export function prioritizeScanTimeframes(timeframes: string[]): string[] {
   return out.length > 0 ? out : [...UNIVERSAL_SCAN_TIMEFRAMES];
 }
 
-/** Serialize candleSnapshot calls so full-universe scans do not trip Hyperliquid rate limits. */
-const candleFetchLimit = pLimit(16);
+/** Parallel HL candle fetches — global batching + stagger between coins still applies. */
+const candleFetchLimit = pLimit(28);
 
 /**
  * Candle intervals needed for the requested scan TFs only (not always all nine).
@@ -675,12 +676,17 @@ async function scanOneCoinMtf(
 ): Promise<{ signals: EducationalPatternSignal[]; diag: CoinScanDiagnostics }> {
   const orderedTf = prioritizeScanTimeframes(timeframes);
   const intervals = intervalsForPatternScan(orderedTf);
-  const bundle = await fetchMtfCandleBundle(
-    coin,
-    PATTERN_SCAN_CANDLE_LIMIT,
-    intervals,
-    { throttleSequential: true },
-  );
+  const fastIvs = intervals.filter((iv) => isFastTrackTimeframe(iv));
+  const slowIvs = intervals.filter((iv) => !isFastTrackTimeframe(iv));
+  const [fastBundle, slowBundle] = await Promise.all([
+    fastIvs.length > 0
+      ? fetchMtfCandleBundle(coin, PATTERN_SCAN_CANDLE_LIMIT, fastIvs, { throttleSequential: false })
+      : Promise.resolve({} as Record<string, HyperliquidCandle[]>),
+    slowIvs.length > 0
+      ? fetchMtfCandleBundle(coin, PATTERN_SCAN_CANDLE_LIMIT, slowIvs, { throttleSequential: false })
+      : Promise.resolve({} as Record<string, HyperliquidCandle[]>),
+  ]);
+  const bundle: Record<string, HyperliquidCandle[]> = { ...slowBundle, ...fastBundle };
   const m1 = bundle["1m"] || [];
   const lastTs = m1.length > 0 ? m1[m1.length - 1]!.t : undefined;
   const diag: CoinScanDiagnostics = { coin, len1m: m1.length, candle1mLastTs: lastTs };
@@ -704,8 +710,7 @@ export interface PatternScanMeta {
 }
 
 /**
- * Multi-coin scan: queue tickers in batches (5 every 2s) so Hyperliquid rate limits are not tripped on 1m/5m.
- * Every timeframe uses the same `getCandles` path as higher TFs (`fetchMtfCandleBundle` with `throttleSequential`).
+ * Multi-coin scan: staggered batches (see `GlobalScanner`). Per coin, fast (1m/3m/5m) and slow intervals fetch in parallel.
  */
 export async function scanForEducationalPatterns(
   coins: string[],
