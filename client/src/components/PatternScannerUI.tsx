@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Zap, RefreshCw, Activity, BookOpen } from "lucide-react";
+import { RefreshCw, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
@@ -11,6 +10,7 @@ import {
   type PatternSignal,
   type PatternScanSource,
 } from "@/components/PatternResults";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export type { PatternSignal };
 
@@ -69,11 +69,11 @@ async function fetchPatternScanPayload(
     headers: scannerAuthHeaders(wallet),
   });
   if (!response.ok) throw new Error("Failed to fetch patterns");
-  const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "top_volume").trim();
+  const srcRaw = (response.headers.get("X-Pattern-Scan-Source") || "universe").trim();
   const source: PatternScanSource =
     srcRaw === "query" || srcRaw === "watchlist" || srcRaw === "universe" || srcRaw === "top_volume"
       ? srcRaw
-      : "top_volume";
+      : "universe";
   const capHdr = response.headers.get("X-Pattern-Scan-Volume-Cap");
   const capN = capHdr != null && capHdr !== "" ? Number(capHdr) : NaN;
   const meta = {
@@ -89,26 +89,25 @@ async function fetchPatternScanPayload(
   return { patterns, meta };
 }
 
-/** Fast-track 1m/3m/5m vs slower HTF polling — merged view; geometry unfiltered, SMMA context on cards only. */
+type ScanAlert = { key: string; coin: string; timeframe: string; patternName: string };
+
+/** Scans all Hyperliquid markets on every timeframe; lists forming / formed / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
-  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(() => [...ALL_TF_LIST]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const scanHydratedRef = useRef(false);
-  const prev1mIdsRef = useRef<Set<string>>(new Set());
+  const prevIdsRef = useRef<Set<string>>(new Set());
+  const [alerts, setAlerts] = useState<ScanAlert[]>([]);
 
-  const fastTfParam = useMemo(() => {
-    const sel = selectedTimeframes.length > 0 ? selectedTimeframes : ALL_TF_LIST;
-    const xs = sel.filter((tf) => (FAST_TRACK_TFS as readonly string[]).includes(tf));
-    return xs.length > 0 ? xs.join(",") : "";
-  }, [selectedTimeframes]);
-
-  const slowTfParam = useMemo(() => {
-    const sel = selectedTimeframes.length > 0 ? selectedTimeframes : ALL_TF_LIST;
-    const xs = sel.filter((tf) => !(FAST_TRACK_TFS as readonly string[]).includes(tf));
-    return xs.length > 0 ? xs.join(",") : "";
-  }, [selectedTimeframes]);
+  const fastTfParam = useMemo(
+    () => ALL_TF_LIST.filter((tf) => (FAST_TRACK_TFS as readonly string[]).includes(tf)).join(","),
+    [],
+  );
+  const slowTfParam = useMemo(
+    () => ALL_TF_LIST.filter((tf) => !(FAST_TRACK_TFS as readonly string[]).includes(tf)).join(","),
+    [],
+  );
 
   const fastQuery = useQuery<PatternScanPayload>({
     queryKey: ["/api/signals/patterns", "fast", fastTfParam, address ?? ""],
@@ -191,7 +190,6 @@ export function PatternScannerUI() {
   }, [isError, fastQuery.data, slowQuery.data, signals.length]);
 
   const scanHasCompleted = !isError && !!scanMeta && scanMeta.coinCount > 0;
-  const uniqueCoinsInSignals = useMemo(() => new Set(signals.map((s) => s.coin)), [signals]);
 
   useEffect(() => {
     if (!isFetching) {
@@ -201,40 +199,44 @@ export function PatternScannerUI() {
 
   useEffect(() => {
     if (isError || isLoading) return;
-    const nowIds = new Set(signals.filter((s) => s.timeframe === "1m").map((s) => s.id));
+    const nowIds = new Set(signals.map((s) => s.id));
     if (!scanHydratedRef.current) {
       scanHydratedRef.current = true;
-      prev1mIdsRef.current = nowIds;
+      prevIdsRef.current = nowIds;
       return;
     }
-    for (const id of nowIds) {
-      if (!prev1mIdsRef.current.has(id)) playSetupChime();
+    const incoming: ScanAlert[] = [];
+    for (const s of signals) {
+      if (!prevIdsRef.current.has(s.id)) {
+        incoming.push({
+          key: `${s.id}-${Date.now()}`,
+          coin: s.coin,
+          timeframe: s.timeframe,
+          patternName: s.patternName,
+        });
+      }
     }
-    prev1mIdsRef.current = nowIds;
+    prevIdsRef.current = nowIds;
+    if (incoming.length > 0) {
+      playSetupChime();
+      setAlerts((prev) => [...incoming, ...prev].slice(0, 12));
+    }
   }, [signals, isError, isLoading]);
 
   const tabRows = useMemo(() => {
-    const bullishSignals = signals.filter((s) => s.bias === "bullish");
-    const bearishSignals = signals.filter((s) => s.bias === "bearish");
     const formingSignals = signals.filter((s) => s.patternStatus === "forming");
-    const developedSignals = signals.filter(
-      (s) => s.patternStatus === "developed" || s.patternStatus === "breakout_watch",
-    );
-    const highProb = signals.filter((s) => s.apexTier === "high_probability_trend_aligned");
+    const formedSignals = signals.filter((s) => s.patternStatus === "breakout_watch");
+    const developedSignals = signals.filter((s) => s.patternStatus === "developed");
     return {
       all: signals,
-      bullishSignals,
-      bearishSignals,
       formingSignals,
+      formedSignals,
       developedSignals,
-      highProb,
     };
   }, [signals]);
 
-  const toggleTimeframe = (tf: string) => {
-    setSelectedTimeframes((prev) =>
-      prev.includes(tf) ? prev.filter((t) => t !== tf) : [...prev, tf],
-    );
+  const dismissAlert = (key: string) => {
+    setAlerts((prev) => prev.filter((a) => a.key !== key));
   };
 
   return (
@@ -242,22 +244,12 @@ export function PatternScannerUI() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Activity className="h-6 w-6 md:h-8 md:w-8 text-primary" />
-          <h1 className="text-xl md:text-3xl font-display font-bold">Pattern Scanner</h1>
-          <Badge className="bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30 text-[10px] md:text-xs">
-            <Zap className="h-3 w-3 mr-1" />
-            Apex Engine
-          </Badge>
-          <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] md:text-xs">
-            <BookOpen className="h-3 w-3 mr-1" />
-            Educational
-          </Badge>
+          <h1 className="text-xl md:text-3xl font-display font-bold">Market scanner</h1>
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs md:text-sm text-muted-foreground">
-            Server scans the <strong>top 50 Hyperliquid perps by 24h volume</strong> plus <strong>PAXG</strong> (gold on
-            HL). Full library (flags, triangles, doubles, wedges, H&amp;S, Apex) on <strong>1m–1d</strong> when selected.
-            Fast <strong>1m / 3m / 5m</strong> ~<strong>20s</strong>; slower TFs ~<strong>3m</strong>. Chart SMMA lines are
-            unchanged — scanner does not hide patterns by trend.
+            All Hyperliquid markets, all timeframes ({ALL_TF_LIST.join(", ")}). Patterns grouped as forming, formed, or
+            developed.
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
@@ -280,6 +272,34 @@ export function PatternScannerUI() {
         </div>
       </div>
 
+      {alerts.length > 0 ? (
+        <Alert className="border-emerald-500/40 bg-emerald-500/[0.07]">
+          <AlertTitle className="text-sm">New patterns</AlertTitle>
+          <AlertDescription className="space-y-2">
+            {alerts.map((a) => (
+              <div
+                key={a.key}
+                className="flex items-start justify-between gap-2 text-xs sm:text-sm text-muted-foreground"
+              >
+                <span>
+                  <strong className="text-foreground">{a.coin}</strong> {a.timeframe} — {a.patternName}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => dismissAlert(a.key)}
+                  aria-label="Dismiss"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <PatternResults
         signals={signals}
         tabRows={tabRows}
@@ -290,9 +310,6 @@ export function PatternScannerUI() {
         error={error}
         scanMeta={scanMeta}
         scanHasCompleted={scanHasCompleted}
-        uniqueCoinsInSignals={uniqueCoinsInSignals}
-        selectedTimeframes={selectedTimeframes}
-        toggleTimeframe={toggleTimeframe}
         refetchAll={refetchAll}
       />
     </div>

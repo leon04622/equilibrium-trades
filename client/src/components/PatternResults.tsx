@@ -1,26 +1,22 @@
 import { memo } from "react";
 import {
-  Zap,
   TrendingUp,
   TrendingDown,
   Clock,
   RefreshCw,
   AlertTriangle,
   Activity,
-  BookOpen,
   BarChart3,
-  Eye,
   CheckCircle2,
   Target,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 
 export interface PatternSignal {
   id: string;
@@ -86,7 +82,7 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
       case "developed":
         return <Badge className="bg-blue-500/80 text-white">Developed</Badge>;
       case "breakout_watch":
-        return <Badge className="bg-purple-500/80 text-white">Watch for Breakout</Badge>;
+        return <Badge className="bg-purple-500/80 text-white">Formed</Badge>;
     }
   };
 
@@ -96,26 +92,16 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
     return "border-gray-500/30 bg-gray-500/5";
   };
 
-  const isHighProb = signal.apexTier === "high_probability_trend_aligned";
-  const isApexFlag = signal.apexScanState === "bull_flag" || signal.apexScanState === "bear_flag";
-
   return (
-    <Card
-      className={cn(
-        "relative overflow-hidden transition-all",
-        getBiasColor(),
-        isHighProb && "ring-2 ring-violet-500/50 shadow-md shadow-violet-500/10",
-      )}
-    >
+    <Card className={cn("relative overflow-hidden transition-all", getBiasColor())}>
       <div
         className={cn(
           "absolute top-0 left-0 w-1 h-full",
           isBullish ? "bg-green-500" : isBearish ? "bg-red-500" : "bg-gray-500",
-          isHighProb && "bg-violet-500 w-1.5",
         )}
       />
 
-      <CardHeader className="pb-2 px-3 md:px-6 pt-3 md:pt-6">
+      <CardContent className="space-y-3 pt-4 px-3 md:px-6 pb-4 md:pb-6">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
             <span className="text-base md:text-lg font-bold">{signal.coin}</span>
@@ -123,28 +109,13 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
               {signal.timeframe}
             </Badge>
             {getStatusBadge()}
-            {isHighProb && (
-              <Badge className="bg-violet-600 text-white text-[10px] md:text-xs">High Prob · Apex</Badge>
-            )}
-            {isApexFlag && !isHighProb && (
-              <Badge variant="outline" className="text-[10px] border-violet-500/40 text-violet-600">
-                Apex Flag
-              </Badge>
-            )}
-            {signal.apexScanState === "ranging" && (
-              <Badge variant="secondary" className="text-[10px]">
-                Ranging
-              </Badge>
-            )}
           </div>
           <div className="flex items-center gap-1 text-[10px] md:text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
             {timeSince(signal.detectedAt)}
           </div>
         </div>
-      </CardHeader>
 
-      <CardContent className="space-y-3 md:space-y-4 px-3 md:px-6 pb-3 md:pb-6">
         <div className="flex items-center gap-2">
           {isBullish ? (
             <TrendingUp className="h-4 w-4 md:h-5 md:w-5 text-green-500 shrink-0" />
@@ -161,46 +132,9 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
           >
             {signal.patternName}
           </span>
-          <div className="ml-auto flex flex-wrap gap-1 justify-end shrink-0">
-            {signal.counterTrend && (
-              <Badge variant="outline" className="text-[10px] md:text-xs border-amber-500/50 text-amber-600">
-                Counter-Trend
-              </Badge>
-            )}
-            {signal.volumeConfirmed && (
-              <Badge variant="outline" className="text-[10px] md:text-xs border-emerald-500/40 text-emerald-600">
-                Vol ✓
-              </Badge>
-            )}
-            <Badge variant="secondary" className="text-[10px] md:text-xs">
-              {signal.bias.charAt(0).toUpperCase()} Bias
-            </Badge>
-          </div>
         </div>
 
-        {signal.apexEngineNote && (
-          <div className="p-2 rounded-lg bg-violet-500/5 border border-violet-500/20">
-            <div className="flex items-center gap-1.5 mb-1">
-              <Zap className="h-3 w-3 text-violet-600" />
-              <span className="text-[10px] md:text-xs font-medium text-violet-700 dark:text-violet-400">
-                Apex engine (pole + pivots)
-              </span>
-            </div>
-            <p className="text-[10px] md:text-xs text-muted-foreground">{signal.apexEngineNote}</p>
-          </div>
-        )}
-
-        <div className="p-2 md:p-3 rounded-lg bg-muted/50 border border-muted">
-          <div className="flex items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
-            <Eye className="h-3 w-3 md:h-4 md:w-4 text-primary" />
-            <span className="text-xs md:text-sm font-medium">21 / 200 SMMA (context)</span>
-          </div>
-          <p className="text-xs md:text-sm text-muted-foreground line-clamp-2 md:line-clamp-none">
-            {signal.smaRelationship}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 md:gap-3 pt-2 border-t">
+        <div className="grid grid-cols-3 gap-2 md:gap-3 pt-1 border-t">
           <div>
             <p className="text-[10px] md:text-xs text-muted-foreground">21 SMMA</p>
             <p className="font-mono text-xs md:text-sm">${formatPrice(signal.sma21)}</p>
@@ -215,23 +149,7 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
           </div>
         </div>
 
-        <div className="p-2 md:p-3 rounded-lg bg-primary/5 border border-primary/20">
-          <div className="flex items-center gap-1.5 md:gap-2 mb-1 md:mb-2">
-            <BookOpen className="h-3 w-3 md:h-4 md:w-4 text-primary" />
-            <span className="text-xs md:text-sm font-medium text-primary">What This Means</span>
-          </div>
-          <p className="text-xs md:text-sm text-muted-foreground line-clamp-2 md:line-clamp-none">
-            {signal.educationalNote}
-          </p>
-        </div>
-
-        <div className="p-2 md:p-3 rounded-lg bg-amber-500/5 border border-amber-500/20 hidden sm:block">
-          <div className="flex items-center gap-2 mb-2">
-            <Target className="h-4 w-4 text-amber-600" />
-            <span className="text-sm font-medium text-amber-600">What to Watch</span>
-          </div>
-          <p className="text-sm text-muted-foreground">{signal.whatToWatch}</p>
-        </div>
+        <p className="text-xs text-muted-foreground line-clamp-3">{signal.educationalNote}</p>
       </CardContent>
     </Card>
   );
@@ -252,13 +170,9 @@ function LoadingSkeleton() {
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {[1, 2, 3].map((i) => (
         <Card key={i}>
-          <CardHeader>
+          <CardContent className="pt-4 space-y-3">
             <Skeleton className="h-6 w-24" />
-          </CardHeader>
-          <CardContent className="space-y-3">
             <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
           </CardContent>
         </Card>
@@ -269,11 +183,9 @@ function LoadingSkeleton() {
 
 export type PatternTabRows = {
   all: PatternSignal[];
-  bullishSignals: PatternSignal[];
-  bearishSignals: PatternSignal[];
   formingSignals: PatternSignal[];
+  formedSignals: PatternSignal[];
   developedSignals: PatternSignal[];
-  highProb: PatternSignal[];
 };
 
 export interface PatternResultsProps {
@@ -286,16 +198,9 @@ export interface PatternResultsProps {
   error: unknown;
   scanMeta: PatternScanSummaryMeta | null;
   scanHasCompleted: boolean;
-  uniqueCoinsInSignals: Set<string>;
-  selectedTimeframes: string[];
-  toggleTimeframe: (tf: string) => void;
   refetchAll: () => Promise<void>;
 }
 
-/**
- * Scanner results: status banner, timeframe toggles, stat cards, SMMA context explainer, tabbed pattern grids.
- * Geometric setups are shown unfiltered; SMMA is labeling context only (chart SMMA math unchanged).
- */
 export function PatternResults({
   signals,
   tabRows,
@@ -306,12 +211,9 @@ export function PatternResults({
   error,
   scanMeta,
   scanHasCompleted,
-  uniqueCoinsInSignals,
-  selectedTimeframes,
-  toggleTimeframe,
   refetchAll,
 }: PatternResultsProps) {
-  const { bullishSignals, bearishSignals, formingSignals, developedSignals, highProb } = tabRows;
+  const { formingSignals, formedSignals, developedSignals } = tabRows;
 
   return (
     <>
@@ -321,9 +223,9 @@ export function PatternResults({
           <AlertTitle>Scan request failed</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              The scan runs ~50 high-volume markets × your selected timeframes; hosts often cut off around 60–120s.
-              Results below are cleared so you are not looking at stale data. Try fewer timeframes or ask ops to raise
-              the HTTP timeout. {error instanceof Error ? error.message : ""}
+              Scanning every Hyperliquid market on all timeframes can take a while; the request may time out on some
+              hosts. Try again or ask ops to raise the HTTP timeout.{" "}
+              {error instanceof Error ? error.message : ""}
             </span>
             <Button
               variant="outline"
@@ -343,11 +245,10 @@ export function PatternResults({
       {!isError && scanMeta?.volumeCapMax != null ? (
         <Alert className="border-orange-500/45 bg-orange-500/[0.07]">
           <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
-          <AlertTitle className="text-orange-900 dark:text-orange-100">Server volume cap</AlertTitle>
+          <AlertTitle className="text-orange-900 dark:text-orange-100">Server coin cap</AlertTitle>
           <AlertDescription className="text-xs sm:text-sm text-muted-foreground">
-            Host enforced a volume cap; the server raises any value below <strong>50</strong> to match the global
-            scanner minimum (top volume + PAXG). Unset <code className="text-[10px]">PATTERN_SCAN_ENFORCE_MAX_COINS</code>{" "}
-            if you want the full API-driven list without a ceiling.
+            <code className="text-[10px]">PATTERN_SCAN_ENFORCE_MAX_COINS</code> is limiting how many markets are scanned.
+            Unset it for the full universe (unless you need a smaller run for performance).
           </AlertDescription>
         </Alert>
       ) : null}
@@ -374,212 +275,72 @@ export function PatternResults({
           {isLoading && !hasScanData ? (
             <p className="text-sm flex items-center gap-2 text-foreground">
               <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
-              Scanning top volume markets and selected timeframes…
+              Scanning all markets, all timeframes…
             </p>
           ) : scanHasCompleted ? (
-            <>
-              <div className="flex items-start gap-2">
-                {signals.length > 0 ? (
-                  <CheckCircle2
-                    className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
-                    aria-hidden
-                  />
-                ) : (
-                  <Activity className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
-                )}
-                <div className="min-w-0 space-y-1">
-                  <p className="text-sm font-medium text-foreground leading-snug">
-                    {signals.length > 0 ? (
-                      <>
-                        Scanner found <strong>{signals.length}</strong> labeled setup
-                        {signals.length === 1 ? "" : "s"} (geometry-first; SMMA does not hide opposite-direction
-                        structures).
-                      </>
-                    ) : (
-                      <>
-                        Scanning <strong>50+</strong> markets across all selected timeframes. Nothing labeled on this
-                        pass; fast-track lanes keep polling.
-                      </>
-                    )}
+            <div className="flex items-start gap-2">
+              {signals.length > 0 ? (
+                <CheckCircle2
+                  className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
+                  aria-hidden
+                />
+              ) : (
+                <Activity className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
+              )}
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium text-foreground leading-snug">
+                  {signals.length > 0 ? (
+                    <>
+                      <strong>{signals.length}</strong> pattern{signals.length === 1 ? "" : "s"} right now.
+                    </>
+                  ) : (
+                    <>No patterns met the rules on this pass — scans keep running.</>
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Evaluated <strong>{scanMeta!.coinCount}</strong> market{scanMeta!.coinCount === 1 ? "" : "s"} in{" "}
+                  {(scanMeta!.durationMs / 1000).toFixed(1)}s
+                  {scanMeta!.cached ? " (cached)" : ""}.
+                </p>
+                {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") && scanMeta!.coinsPreview ? (
+                  <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
+                    Sample: {scanMeta!.coinsPreview}
                   </p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    This run evaluated <strong>{scanMeta!.coinCount}</strong> market
-                    {scanMeta!.coinCount === 1 ? "" : "s"} in {(scanMeta!.durationMs / 1000).toFixed(1)}s
-                    {scanMeta!.cached ? " (recent cached result)" : ""}.
-                    {signals.length === 0
-                      ? " The engine uses aggressive short-TF geometry; new 1m labels surface with an audio ping when they appear."
-                      : null}
-                  </p>
-                  {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") && scanMeta!.coinsPreview ? (
-                    <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
-                      Tickers in this run (sample): {scanMeta!.coinsPreview}
-                    </p>
-                  ) : null}
-                  {signals.length > 0 &&
-                  (scanMeta!.source === "universe" || scanMeta!.source === "top_volume") &&
-                  uniqueCoinsInSignals.size === 1 &&
-                  scanMeta!.coinCount > 15 ? (
-                    <p className="text-[10px] text-muted-foreground leading-snug pt-0.5">
-                      All visible cards are for <strong>{Array.from(uniqueCoinsInSignals)[0]}</strong> right now — other
-                      markets in this run were checked but did not get a qualifying label on this pass.
-                    </p>
-                  ) : null}
-                </div>
+                ) : null}
               </div>
-            </>
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground">Waiting for scan to start…</p>
           )}
         </div>
       ) : null}
 
-      <Alert className="border-blue-500/50 bg-blue-500/5 hidden md:block">
-        <BookOpen className="h-4 w-4 text-blue-500" />
-        <AlertTitle className="text-blue-600">Educational Tool</AlertTitle>
-        <AlertDescription className="text-muted-foreground">
-          This scanner helps you <strong>learn pattern recognition</strong>.{" "}
-          <strong>We do not provide trade signals or financial advice.</strong>
-        </AlertDescription>
-      </Alert>
-
-      <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-        <span className="text-xs md:text-sm font-medium shrink-0">Timeframes:</span>
-        <div className="flex flex-wrap gap-1.5 md:gap-2">
-          {SCAN_ALL_TIMEFRAMES.map((tf) => (
-            <Badge
-              key={tf}
-              variant={selectedTimeframes.includes(tf) ? "default" : "outline"}
-              className={cn(
-                "cursor-pointer transition-all text-[10px] md:text-xs",
-                selectedTimeframes.includes(tf) && "bg-primary",
-              )}
-              onClick={() => toggleTimeframe(tf)}
-              data-testid={`badge-timeframe-${tf}`}
-            >
-              {tf}
-            </Badge>
-          ))}
-        </div>
-        <span className="text-[10px] md:text-xs text-muted-foreground w-full sm:w-auto sm:ml-auto">
-          <strong>1m–5m</strong> ~<strong>20s</strong> · slower TFs ~<strong>3m</strong>. All nine TFs can run together
-          (1m–1d). <strong>Scan</strong> = fresh pass (both lanes).
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-2 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-primary/15 shrink-0">
-                <Eye className="h-4 w-4 md:h-5 md:w-5 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg md:text-2xl font-bold">{signals.length}</p>
-                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Patterns</p>
-              </div>
-            </div>
+            <p className="text-lg md:text-2xl font-bold">{signals.length}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground truncate">All</p>
           </CardContent>
         </Card>
-        <Card className="bg-violet-500/5 border-violet-500/20">
+        <Card className="bg-amber-500/5 border-amber-500/20">
           <CardContent className="p-2 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-violet-500/15 shrink-0">
-                <Zap className="h-4 w-4 md:h-5 md:w-5 text-violet-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg md:text-2xl font-bold">{highProb.length}</p>
-                <p className="text-[10px] md:text-xs text-muted-foreground truncate">High prob</p>
-              </div>
-            </div>
+            <p className="text-lg md:text-2xl font-bold">{formingSignals.length}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground truncate">Forming</p>
           </CardContent>
         </Card>
-        <Card className="bg-green-500/5 border-green-500/20">
+        <Card className="bg-purple-500/5 border-purple-500/20">
           <CardContent className="p-2 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-green-500/15 shrink-0">
-                <TrendingUp className="h-4 w-4 md:h-5 md:w-5 text-green-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg md:text-2xl font-bold">{bullishSignals.length}</p>
-                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Bullish</p>
-              </div>
-            </div>
+            <p className="text-lg md:text-2xl font-bold">{formedSignals.length}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground truncate">Formed</p>
           </CardContent>
         </Card>
-        <Card className="bg-red-500/5 border-red-500/20">
+        <Card className="bg-blue-500/5 border-blue-500/20">
           <CardContent className="p-2 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-red-500/15 shrink-0">
-                <TrendingDown className="h-4 w-4 md:h-5 md:w-5 text-red-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg md:text-2xl font-bold">{bearishSignals.length}</p>
-                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Bearish</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-amber-500/5 border-amber-500/20 md:col-span-1 col-span-2">
-          <CardContent className="p-2 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg bg-amber-500/15 shrink-0">
-                <Clock className="h-4 w-4 md:h-5 md:w-5 text-amber-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg md:text-2xl font-bold">{formingSignals.length}</p>
-                <p className="text-[10px] md:text-xs text-muted-foreground truncate">Forming</p>
-              </div>
-            </div>
+            <p className="text-lg md:text-2xl font-bold">{developedSignals.length}</p>
+            <p className="text-[10px] md:text-xs text-muted-foreground truncate">Developed</p>
           </CardContent>
         </Card>
       </div>
-
-      <Card className="hidden md:block">
-        <CardHeader className="pb-3">
-          <CardTitle className="font-display text-sm flex items-center gap-2">
-            <BookOpen className="h-4 w-4" />
-            21 / 200 SMMA (context only)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-500/15 shrink-0">
-                <TrendingUp className="h-4 w-4 text-green-500" />
-              </div>
-              <div>
-                <p className="font-medium text-sm text-green-600">Bullish context</p>
-                <p className="text-xs text-muted-foreground">
-                  When 21 SMMA is above 200, cards still show bearish geometry if the structure is there — nothing is
-                  suppressed by trend.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/15 shrink-0">
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              </div>
-              <div>
-                <p className="font-medium text-sm text-red-600">Bearish context</p>
-                <p className="text-xs text-muted-foreground">
-                  When 21 SMMA is below 200, bull flags and bullish reversals still appear if the template validates.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15 shrink-0">
-                <Target className="h-4 w-4 text-amber-500" />
-              </div>
-              <div>
-                <p className="font-medium text-sm text-amber-600">High probability</p>
-                <p className="text-xs text-muted-foreground">
-                  “High prob” tags reflect Apex pole + flag quality and breakout state — not SMMA alignment.
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       <Tabs defaultValue="all" className="space-y-3 md:space-y-4">
         <TabsList className="w-full overflow-x-auto flex justify-start gap-0 h-auto p-1">
@@ -594,25 +355,18 @@ export function PatternResults({
             Forming ({formingSignals.length})
           </TabsTrigger>
           <TabsTrigger
+            value="formed"
+            className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5"
+            data-testid="tab-formed-signals"
+          >
+            Formed ({formedSignals.length})
+          </TabsTrigger>
+          <TabsTrigger
             value="developed"
             className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5"
             data-testid="tab-developed-signals"
           >
             Developed ({developedSignals.length})
-          </TabsTrigger>
-          <TabsTrigger
-            value="bullish"
-            className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5"
-            data-testid="tab-bullish-signals"
-          >
-            Bullish ({bullishSignals.length})
-          </TabsTrigger>
-          <TabsTrigger
-            value="bearish"
-            className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5"
-            data-testid="tab-bearish-signals"
-          >
-            Bearish ({bearishSignals.length})
           </TabsTrigger>
         </TabsList>
 
@@ -624,8 +378,8 @@ export function PatternResults({
               {signals.length === 0 ? (
                 <div className="text-center py-12">
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">Scanning 50+ Markets…</p>
-                  <p className="text-muted-foreground mb-4">Labeled setups across your selected timeframes.</p>
+                  <p className="text-lg font-medium">No patterns yet</p>
+                  <p className="text-muted-foreground mb-4">Full-market scan in progress.</p>
                   <Button
                     onClick={() => {
                       void refetchAll();
@@ -633,7 +387,7 @@ export function PatternResults({
                     disabled={isFetching}
                   >
                     <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
-                    Scan Again
+                    Scan again
                   </Button>
                 </div>
               ) : (
@@ -645,15 +399,23 @@ export function PatternResults({
               {formingSignals.length === 0 ? (
                 <div className="text-center py-12">
                   <Clock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No Patterns Forming</p>
-                  <p className="text-muted-foreground">Check back soon — patterns develop over time.</p>
+                  <p className="text-lg font-medium">Nothing forming</p>
+                  <p className="text-muted-foreground">Check back on the next poll.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {formingSignals.map((signal) => (
-                    <PatternCard key={signal.id} signal={signal} />
-                  ))}
+                <PatternGrid items={formingSignals} />
+              )}
+            </TabsContent>
+
+            <TabsContent value="formed" className="space-y-4">
+              {formedSignals.length === 0 ? (
+                <div className="text-center py-12">
+                  <Target className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-lg font-medium">Nothing in formed state</p>
+                  <p className="text-muted-foreground">Structures here are ready for a breakout watch.</p>
                 </div>
+              ) : (
+                <PatternGrid items={formedSignals} />
               )}
             </TabsContent>
 
@@ -661,35 +423,11 @@ export function PatternResults({
               {developedSignals.length === 0 ? (
                 <div className="text-center py-12">
                   <Target className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No Developed Patterns</p>
-                  <p className="text-muted-foreground">Patterns are still forming — be patient.</p>
+                  <p className="text-lg font-medium">Nothing developed</p>
+                  <p className="text-muted-foreground">Developed = breakout confirmed on this pass.</p>
                 </div>
               ) : (
-                <PatternGrid items={tabRows.developedSignals} />
-              )}
-            </TabsContent>
-
-            <TabsContent value="bullish" className="space-y-4">
-              {bullishSignals.length === 0 ? (
-                <div className="text-center py-12">
-                  <TrendingUp className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No Bullish Patterns</p>
-                  <p className="text-muted-foreground">No bullish setups detected currently.</p>
-                </div>
-              ) : (
-                <PatternGrid items={tabRows.bullishSignals} />
-              )}
-            </TabsContent>
-
-            <TabsContent value="bearish" className="space-y-4">
-              {bearishSignals.length === 0 ? (
-                <div className="text-center py-12">
-                  <TrendingDown className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">No Bearish Patterns</p>
-                  <p className="text-muted-foreground">No bearish setups detected currently.</p>
-                </div>
-              ) : (
-                <PatternGrid items={tabRows.bearishSignals} />
+                <PatternGrid items={developedSignals} />
               )}
             </TabsContent>
           </>
@@ -698,9 +436,9 @@ export function PatternResults({
 
       <Alert className="border-amber-500/50 bg-amber-500/10">
         <AlertTriangle className="h-4 w-4 text-amber-500" />
-        <AlertTitle className="text-amber-600">Not Financial Advice</AlertTitle>
+        <AlertTitle className="text-amber-600">Not financial advice</AlertTitle>
         <AlertDescription className="text-muted-foreground">
-          Educational only. Always practice risk management and use a demo account first.
+          For learning only. Manage risk and use a demo where appropriate.
         </AlertDescription>
       </Alert>
     </>

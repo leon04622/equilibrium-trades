@@ -60,6 +60,7 @@ import {
   getScannerHealthMonitoringEnabled,
   setScannerHealthMonitoringEnabled,
   GLOBAL_SCANNER_GOLD_PROXY_INFO,
+  buildGlobalScannerTickerList,
   effectivePatternScanVolumeCap,
   PATTERN_SCAN_FAST_CACHE_TTL_MS,
   PATTERN_SCAN_SLOW_CACHE_TTL_MS,
@@ -474,9 +475,16 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
   }
   let list: string[] = [];
   try {
-    list = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
+    list = await buildGlobalScannerTickerList();
   } catch (e) {
-    console.warn("[pattern-scan] Top-volume coin list failed:", e);
+    console.warn("[pattern-scan] Hyperliquid universe list failed:", e);
+  }
+  if (list.length === 0) {
+    try {
+      list = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
+    } catch (e) {
+      console.warn("[pattern-scan] Top-volume fallback failed:", e);
+    }
   }
   if (list.length === 0) {
     list = getDefaultPatternScanTickerList();
@@ -924,8 +932,8 @@ export async function registerRoutes(
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
       const skipCache = req.query.nocache === "1" || req.query.nocache === "true";
 
-      // Default: top 50 perps by 24h notional + PAXG (gold proxy). `coins` query overrides.
-      let scanSource: "query" | "watchlist" | "universe" | "top_volume" = "top_volume";
+      // Default: all Hyperliquid perps + spot coins from the API. `coins` query overrides.
+      let scanSource: "query" | "watchlist" | "universe" | "top_volume" = "universe";
       let coins: string[];
       if (coinsParam?.trim()) {
         scanSource = "query";
@@ -987,10 +995,13 @@ export async function registerRoutes(
     }
   });
 
-  /** Top-volume perp list (same universe as default pattern scan) */
+  /** Full HL universe (same as default pattern scan) */
   app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
     try {
-      let tickers = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
+      let tickers = await buildGlobalScannerTickerList();
+      if (tickers.length === 0) {
+        tickers = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
+      }
       if (tickers.length === 0) {
         tickers = getDefaultPatternScanTickerList();
       }
