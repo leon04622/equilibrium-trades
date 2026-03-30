@@ -199,6 +199,8 @@ export interface PatternResultsProps {
   scanMeta: PatternScanSummaryMeta | null;
   scanHasCompleted: boolean;
   refetchAll: () => Promise<void>;
+  /** Shown in loading / empty copy, e.g. "all timeframes" or "15m only". */
+  timeframeScopeLabel?: string;
 }
 
 export function PatternResults({
@@ -212,6 +214,7 @@ export function PatternResults({
   scanMeta,
   scanHasCompleted,
   refetchAll,
+  timeframeScopeLabel = "all timeframes",
 }: PatternResultsProps) {
   const { formingSignals, formedSignals, developedSignals } = tabRows;
 
@@ -223,8 +226,8 @@ export function PatternResults({
           <AlertTitle>Scan request failed</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Scanning every Hyperliquid market on all timeframes can take a while; the request may time out on some
-              hosts. Try again or ask ops to raise the HTTP timeout.{" "}
+              Scanning every Hyperliquid market ({timeframeScopeLabel}) can take a while; the request may time out on
+              some hosts. Try again or ask ops to raise the HTTP timeout.{" "}
               {error instanceof Error ? error.message : ""}
             </span>
             <Button
@@ -379,7 +382,11 @@ export function PatternResults({
                 <div className="text-center py-12">
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">No patterns yet</p>
-                  <p className="text-muted-foreground mb-4">Full-market scan in progress.</p>
+                  <p className="text-muted-foreground mb-4">
+                    {scanHasCompleted
+                      ? `No setups on ${timeframeScopeLabel} for this pass — try another timeframe or scan again.`
+                      : `Scanner is updating (${timeframeScopeLabel}).`}
+                  </p>
                   <Button
                     onClick={() => {
                       void refetchAll();

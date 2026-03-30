@@ -15,7 +15,7 @@
  *
  * Deep TF candle pulls re-exported from `scanner-controller.ts` (`patternScanCandleLimitForInterval`, `PATTERN_SCAN_MIN_BARS`).
  */
-import { getPerpUniverseCoinNames, getSpotTickers } from "./hyperliquid";
+import { getPerpUniverseCoinNames, getSpotScannerCoinIds } from "./hyperliquid";
 import { getDefaultPatternScanTickerList, PATTERN_SCAN_TOP_VOLUME_COUNT } from "./scanner-controller";
 
 /** Re-export scanner defaults for tooling / health UIs that import from GlobalScanner only. */
@@ -59,13 +59,12 @@ export function sleep(ms: number): Promise<void> {
 }
 
 async function buildGlobalScannerTickerListOnce(): Promise<string[]> {
-  const [perps, spots] = await Promise.all([getPerpUniverseCoinNames(), getSpotTickers()]);
+  const [perps, spotCoins] = await Promise.all([getPerpUniverseCoinNames(), getSpotScannerCoinIds()]);
   const set = new Set<string>();
   for (const p of perps) {
     if (p) set.add(p);
   }
-  for (const s of spots) {
-    const c = s.coin?.trim();
+  for (const c of spotCoins) {
     if (c) set.add(c);
   }
   return [...set].sort((a, b) => a.localeCompare(b));

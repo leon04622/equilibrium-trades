@@ -3,7 +3,8 @@ import { RefreshCw, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
+import { SCAN_ALL_TIMEFRAMES, type ScanTimeframe } from "@shared/scan-timeframes";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useWallet } from "@/lib/wallet-context";
 import {
   PatternResults,
@@ -38,6 +39,14 @@ function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
 const FAST_TRACK_TFS = ["1m", "3m", "5m"] as const;
 
 const ALL_TF_LIST = [...SCAN_ALL_TIMEFRAMES];
+
+type ScannerTfSelection = "all" | ScanTimeframe;
+
+function isFastTf(tf: string): boolean {
+  return (FAST_TRACK_TFS as readonly string[]).includes(tf);
+}
+
+type ScannerMarketsPayload = { tickers: string[] };
 
 function playSetupChime(): void {
   try {
@@ -91,7 +100,7 @@ async function fetchPatternScanPayload(
 
 type ScanAlert = { key: string; coin: string; timeframe: string; patternName: string };
 
-/** Scans all Hyperliquid markets on every timeframe; lists forming / formed / developed setups. */
+/** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / formed / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
@@ -99,15 +108,37 @@ export function PatternScannerUI() {
   const scanHydratedRef = useRef(false);
   const prevIdsRef = useRef<Set<string>>(new Set());
   const [alerts, setAlerts] = useState<ScanAlert[]>([]);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>("all");
 
-  const fastTfParam = useMemo(
-    () => ALL_TF_LIST.filter((tf) => (FAST_TRACK_TFS as readonly string[]).includes(tf)).join(","),
-    [],
-  );
-  const slowTfParam = useMemo(
-    () => ALL_TF_LIST.filter((tf) => !(FAST_TRACK_TFS as readonly string[]).includes(tf)).join(","),
-    [],
-  );
+  const marketsQuery = useQuery<ScannerMarketsPayload>({
+    queryKey: ["/api/scanner/markets"],
+    queryFn: async () => {
+      const res = await fetch("/api/scanner/markets");
+      if (!res.ok) throw new Error("Failed to load markets");
+      return (await res.json()) as ScannerMarketsPayload;
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const universeCount = marketsQuery.data?.tickers?.length ?? null;
+
+  const fastTfParam = useMemo(() => {
+    if (selectedTimeframe === "all") {
+      return ALL_TF_LIST.filter((tf) => isFastTf(tf)).join(",");
+    }
+    return isFastTf(selectedTimeframe) ? selectedTimeframe : "";
+  }, [selectedTimeframe]);
+
+  const slowTfParam = useMemo(() => {
+    if (selectedTimeframe === "all") {
+      return ALL_TF_LIST.filter((tf) => !isFastTf(tf)).join(",");
+    }
+    return !isFastTf(selectedTimeframe) ? selectedTimeframe : "";
+  }, [selectedTimeframe]);
+
+  const timeframeScopeLabel =
+    selectedTimeframe === "all" ? "all timeframes" : `${selectedTimeframe} only`;
 
   const fastQuery = useQuery<PatternScanPayload>({
     queryKey: ["/api/signals/patterns", "fast", fastTfParam, address ?? ""],
@@ -198,6 +229,11 @@ export function PatternScannerUI() {
   }, [isFetching]);
 
   useEffect(() => {
+    scanHydratedRef.current = false;
+    prevIdsRef.current = new Set();
+  }, [selectedTimeframe]);
+
+  useEffect(() => {
     if (isError || isLoading) return;
     const nowIds = new Set(signals.map((s) => s.id));
     if (!scanHydratedRef.current) {
@@ -248,8 +284,15 @@ export function PatternScannerUI() {
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs md:text-sm text-muted-foreground">
-            All Hyperliquid markets, all timeframes ({ALL_TF_LIST.join(", ")}). Patterns grouped as forming, formed, or
-            developed.
+            Scans all perps and spot markets from Hyperliquid
+            {universeCount != null ? (
+              <>
+                {" "}
+                (<strong>{universeCount}</strong> symbols)
+              </>
+            ) : null}
+            . Choose a timeframe to see only that chart interval; leave <strong>All TF</strong> for everything (
+            {ALL_TF_LIST.join(", ")}). Patterns stay grouped as forming, formed, or developed.
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
@@ -270,6 +313,29 @@ export function PatternScannerUI() {
             </Button>
           </div>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">Timeframe</p>
+        <ToggleGroup
+          type="single"
+          value={selectedTimeframe}
+          onValueChange={(v) => {
+            if (v) setSelectedTimeframe(v as ScannerTfSelection);
+          }}
+          variant="outline"
+          size="sm"
+          className="flex flex-wrap justify-start gap-1.5 h-auto p-0 bg-transparent"
+        >
+          <ToggleGroupItem value="all" className="text-[10px] md:text-xs px-2.5 py-1.5 shrink-0" aria-label="All timeframes">
+            All TF
+          </ToggleGroupItem>
+          {ALL_TF_LIST.map((tf) => (
+            <ToggleGroupItem key={tf} value={tf} className="text-[10px] md:text-xs px-2.5 py-1.5 shrink-0">
+              {tf}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
 
       {alerts.length > 0 ? (
@@ -311,6 +377,7 @@ export function PatternScannerUI() {
         scanMeta={scanMeta}
         scanHasCompleted={scanHasCompleted}
         refetchAll={refetchAll}
+        timeframeScopeLabel={timeframeScopeLabel}
       />
     </div>
   );

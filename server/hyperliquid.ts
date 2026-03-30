@@ -260,6 +260,35 @@ export async function getSpotTickers(): Promise<HyperliquidTicker[]> {
   }
 }
 
+/**
+ * All Hyperliquid spot `@index` ids that have a usable mark/mid price.
+ * Used for the pattern scanner universe (full market coverage). The trading ticker list still uses
+ * {@link getSpotTickers} with a volume floor so the UI stays uncluttered.
+ */
+export async function getSpotScannerCoinIds(): Promise<string[]> {
+  try {
+    const response = await fetch(HYPERLIQUID_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "spotMetaAndAssetCtxs" }),
+    });
+    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+
+    const [spotMeta, spotCtxs] = await response.json();
+    const universe = (spotMeta.universe || []) as unknown[];
+    const out: string[] = [];
+    for (let i = 0; i < universe.length; i++) {
+      const ctx = (spotCtxs[i] || {}) as { markPx?: string; midPx?: string };
+      const px = parseFloat(ctx.markPx || ctx.midPx || "0");
+      if (px > 0) out.push(`@${i}`);
+    }
+    return out;
+  } catch (error) {
+    console.error("Error fetching spot scanner coin ids:", error);
+    return [];
+  }
+}
+
 // Get order book for a specific coin
 export async function getOrderBook(coin: string): Promise<HyperliquidOrderBook | null> {
   try {
