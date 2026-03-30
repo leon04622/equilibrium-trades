@@ -1020,13 +1020,7 @@ export async function registerRoutes(
   /** Full HL universe (same as default pattern scan) */
   app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
     try {
-      let tickers = await buildGlobalScannerTickerList();
-      if (tickers.length === 0) {
-        tickers = await buildTopVolumePatternScanCoins(PATTERN_SCAN_TOP_VOLUME_COUNT);
-      }
-      if (tickers.length === 0) {
-        tickers = getDefaultPatternScanTickerList();
-      }
+      const tickers = await resolveScanCoins(undefined);
       const spotDisplayByCoin =
         tickers.some((t) => t.startsWith("@")) ? await getSpotAtIndexDisplayMap() : {};
       res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO, spotDisplayByCoin });

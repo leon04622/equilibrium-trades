@@ -884,8 +884,8 @@ function PatternChartComponent({
               <span className={`text-[11px] font-bold ${activeSignal.bias === "bullish" ? "text-green-300" : activeSignal.bias === "bearish" ? "text-red-300" : "text-yellow-300"}`}>
                 {activeSignal.bias === "bullish" ? "Bullish Pattern" : activeSignal.bias === "bearish" ? "Bearish Pattern" : "Neutral Pattern"}
               </span>
-              <Badge className={`ml-auto text-[8px] px-1 shrink-0 ${activeSignal.patternStatus === "breakout_watch" ? "bg-amber-600" : activeSignal.patternStatus === "forming" ? "bg-blue-800" : "bg-emerald-800"}`}>
-                {activeSignal.patternStatus === "breakout_watch" ? "WATCH" : activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
+              <Badge className={`ml-auto text-[8px] px-1 shrink-0 ${activeSignal.patternStatus === "forming" ? "bg-blue-800" : "bg-emerald-800"}`}>
+                {activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
               </Badge>
             </div>
             <div className="flex items-center gap-1.5 mb-2">

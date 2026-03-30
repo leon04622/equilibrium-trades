@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { RefreshCw, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES, type ScanTimeframe } from "@shared/scan-timeframes";
@@ -100,7 +101,7 @@ async function fetchPatternScanPayload(
 
 type ScanAlert = { key: string; coin: string; coinDisplay?: string; timeframe: string; patternName: string };
 
-/** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / formed / developed setups. */
+/** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
@@ -122,6 +123,11 @@ export function PatternScannerUI() {
   });
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
+  const marketLabels = useMemo(() => {
+    const tickers = marketsQuery.data?.tickers ?? [];
+    const map = marketsQuery.data?.spotDisplayByCoin ?? {};
+    return tickers.map((ticker) => (ticker.startsWith("@") ? map[ticker] || ticker : ticker));
+  }, [marketsQuery.data]);
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -273,12 +279,12 @@ export function PatternScannerUI() {
 
   const tabRows = useMemo(() => {
     const formingSignals = signals.filter((s) => s.patternStatus === "forming");
-    const formedSignals = signals.filter((s) => s.patternStatus === "breakout_watch");
-    const developedSignals = signals.filter((s) => s.patternStatus === "developed");
+    const developedSignals = signals.filter(
+      (s) => s.patternStatus === "developed" || s.patternStatus === "breakout_watch",
+    );
     return {
       all: signals,
       formingSignals,
-      formedSignals,
       developedSignals,
     };
   }, [signals]);
@@ -304,7 +310,7 @@ export function PatternScannerUI() {
               </>
             ) : null}
             . Choose a timeframe to see only that chart interval; leave <strong>All TF</strong> for everything (
-            {ALL_TF_LIST.join(", ")}). Patterns stay grouped as forming, formed, or developed.
+            {ALL_TF_LIST.join(", ")}). Patterns stay grouped as forming or developed.
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] md:text-xs text-muted-foreground hidden sm:inline">
@@ -349,6 +355,24 @@ export function PatternScannerUI() {
           ))}
         </ToggleGroup>
       </div>
+
+      {marketLabels.length > 0 ? (
+        <div className="rounded-lg border bg-card/40 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              Scanned markets
+            </p>
+            <span className="text-[10px] md:text-xs text-muted-foreground">{marketLabels.length} total</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+            {marketLabels.map((label) => (
+              <Badge key={label} variant="outline" className="text-[10px] md:text-xs">
+                {label}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {alerts.length > 0 ? (
         <Alert className="border-emerald-500/40 bg-emerald-500/[0.07]">

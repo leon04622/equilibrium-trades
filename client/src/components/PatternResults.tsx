@@ -84,7 +84,7 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
       case "developed":
         return <Badge className="bg-blue-500/80 text-white">Developed</Badge>;
       case "breakout_watch":
-        return <Badge className="bg-purple-500/80 text-white">Formed</Badge>;
+        return <Badge className="bg-blue-500/80 text-white">Developed</Badge>;
     }
   };
 
@@ -191,7 +191,6 @@ function LoadingSkeleton() {
 export type PatternTabRows = {
   all: PatternSignal[];
   formingSignals: PatternSignal[];
-  formedSignals: PatternSignal[];
   developedSignals: PatternSignal[];
 };
 
@@ -223,7 +222,7 @@ export function PatternResults({
   refetchAll,
   timeframeScopeLabel = "all timeframes",
 }: PatternResultsProps) {
-  const { formingSignals, formedSignals, developedSignals } = tabRows;
+  const { formingSignals, developedSignals } = tabRows;
 
   return (
     <>
@@ -325,7 +324,7 @@ export function PatternResults({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+      <div className="grid grid-cols-3 gap-2 md:gap-4">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-2 md:p-4">
             <p className="text-lg md:text-2xl font-bold">{signals.length}</p>
@@ -336,12 +335,6 @@ export function PatternResults({
           <CardContent className="p-2 md:p-4">
             <p className="text-lg md:text-2xl font-bold">{formingSignals.length}</p>
             <p className="text-[10px] md:text-xs text-muted-foreground truncate">Forming</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-purple-500/5 border-purple-500/20">
-          <CardContent className="p-2 md:p-4">
-            <p className="text-lg md:text-2xl font-bold">{formedSignals.length}</p>
-            <p className="text-[10px] md:text-xs text-muted-foreground truncate">Formed</p>
           </CardContent>
         </Card>
         <Card className="bg-blue-500/5 border-blue-500/20">
@@ -363,13 +356,6 @@ export function PatternResults({
             data-testid="tab-forming-signals"
           >
             Forming ({formingSignals.length})
-          </TabsTrigger>
-          <TabsTrigger
-            value="formed"
-            className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5"
-            data-testid="tab-formed-signals"
-          >
-            Formed ({formedSignals.length})
           </TabsTrigger>
           <TabsTrigger
             value="developed"
@@ -421,24 +407,12 @@ export function PatternResults({
               )}
             </TabsContent>
 
-            <TabsContent value="formed" className="space-y-4">
-              {formedSignals.length === 0 ? (
-                <div className="text-center py-12">
-                  <Target className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">Nothing in formed state</p>
-                  <p className="text-muted-foreground">Structures here are ready for a breakout watch.</p>
-                </div>
-              ) : (
-                <PatternGrid items={formedSignals} />
-              )}
-            </TabsContent>
-
             <TabsContent value="developed" className="space-y-4">
               {developedSignals.length === 0 ? (
                 <div className="text-center py-12">
                   <Target className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">Nothing developed</p>
-                  <p className="text-muted-foreground">Developed = breakout confirmed on this pass.</p>
+                  <p className="text-muted-foreground">Developed includes mature setups and confirmed breakouts on this pass.</p>
                 </div>
               ) : (
                 <PatternGrid items={developedSignals} />
