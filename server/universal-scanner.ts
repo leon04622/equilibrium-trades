@@ -16,7 +16,6 @@ import {
   type ScannerHealthErrorRow,
 } from "./global-scanner";
 import {
-  PATTERN_SCAN_CANDLE_LIMIT,
   PATTERN_SCAN_MIN_BARS,
   patternScanCandleLimitForInterval,
 } from "./scanner-controller";
@@ -373,7 +372,9 @@ export async function analyzeEducationalUniversal(
   timeframe: string,
   candles: HyperliquidCandle[],
 ): Promise<EducationalPatternSignal[]> {
-  if (candles.length < PATTERN_SCAN_CANDLE_LIMIT) return [];
+  // Must match `scanOneCoinMtf` gate. Shorter TFs only fetch up to 320 bars
+  // (`patternScanCandleLimitForInterval`); requiring 400 here zeroed all fast-TF signals.
+  if (candles.length < PATTERN_SCAN_MIN_BARS) return [];
   const currentSMA = calculateSMAFromCandles(candles);
   if (!currentSMA) return [];
 
