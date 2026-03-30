@@ -9,6 +9,13 @@ export type SubscriptionSyncSlice = {
   subTier: string;
 };
 
+export type HlBalanceSnapshot = {
+  perpAccountValue: number;
+  spotUsdc: number;
+  totalUsd: number;
+  updatedAt: string | null;
+};
+
 export type UserSyncResponse = {
   wallet: string;
   subscription: SubscriptionSyncSlice;
@@ -19,6 +26,10 @@ export type UserSyncResponse = {
     isBuilderLinked: boolean;
     manualProOverride: boolean;
   };
+  /** Last totals persisted to Mongo from the trading terminal (see `POST /api/user/hl-balance-snapshot`). */
+  hlBalance: HlBalanceSnapshot | null;
+  /** Same as `hlBalance.totalUsd` when present — used for quick tier/balance hydration. */
+  totalBalance: number | null;
   journal: {
     entries: unknown[];
     stats: unknown;
@@ -39,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryKey: ["/api/user/sync", address ?? ""],
     enabled: !!address && isConnected,
     staleTime: 0,
+    refetchInterval: 10_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<UserSyncResponse> => {
@@ -53,7 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const err = new Error(`user sync failed: ${res.status}`);
         throw err;
       }
-      return (await res.json()) as UserSyncResponse;
+      const raw = (await res.json()) as UserSyncResponse;
+      return {
+        ...raw,
+        hlBalance: raw.hlBalance ?? null,
+        totalBalance: raw.totalBalance ?? raw.hlBalance?.totalUsd ?? null,
+      };
     },
   });
 

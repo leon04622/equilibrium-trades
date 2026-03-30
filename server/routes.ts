@@ -43,6 +43,8 @@ import {
   getVaultDb,
   getMongoVaultHealth,
   resolveMongoVaultUri,
+  persistMongoCrmHlBalanceSnapshot,
+  fetchMongoCrmHlBalanceSnapshot,
   type MongoVaultHandle,
 } from "./mongo-vault";
 import {
@@ -1549,6 +1551,7 @@ export async function registerRoutes(
       if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
         return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
       }
+      await upsertMongoCrmContactOnConnect({ walletAddress: wallet });
       const payload = await buildWalletSubscriptionPayload(wallet);
       const user = await storage.getWalletUser(wallet);
       let joinDate: string | null = null;
@@ -1566,9 +1569,10 @@ export async function registerRoutes(
           }
         }
       }
-      const [entries, stats] = await Promise.all([
+      const [entries, stats, hlBalanceMongo] = await Promise.all([
         listTradeJournalEntries(wallet, 500),
         getTradeJournalStats(wallet),
+        fetchMongoCrmHlBalanceSnapshot(wallet),
       ]);
       res.json({
         wallet,
@@ -1585,6 +1589,9 @@ export async function registerRoutes(
           isBuilderLinked: user?.isBuilderLinked ?? false,
           manualProOverride: user?.manualProOverride ?? false,
         },
+        /** Last Hyperliquid totals persisted from the client (spot USDC + perp account value). */
+        hlBalance: hlBalanceMongo,
+        totalBalance: hlBalanceMongo?.totalUsd ?? null,
         journal: {
           entries,
           stats,
@@ -1594,6 +1601,29 @@ export async function registerRoutes(
     } catch (error) {
       console.error("GET /api/user/sync:", error);
       res.status(500).json({ error: "Failed to sync user" });
+    }
+  });
+
+  /** Persist unified HL equity snapshot to Mongo CRM (`users`) — called from client on live poll. */
+  app.post("/api/user/hl-balance-snapshot", async (req: Request, res: Response) => {
+    try {
+      const wallet = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const perp = parseFloat(String((body as any).perpAccountValue ?? ""));
+      const spot = parseFloat(String((body as any).spotUsdc ?? ""));
+      const totalIn = parseFloat(String((body as any).totalUsd ?? ""));
+      const perpAccountValue = Number.isFinite(perp) ? perp : 0;
+      const spotUsdc = Number.isFinite(spot) ? spot : 0;
+      const totalUsd =
+        Number.isFinite(totalIn) && totalIn > 0 ? totalIn : perpAccountValue + spotUsdc;
+      await persistMongoCrmHlBalanceSnapshot(wallet, { perpAccountValue, spotUsdc, totalUsd });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("POST /api/user/hl-balance-snapshot:", error);
+      res.status(500).json({ error: "Failed to persist balance snapshot" });
     }
   });
 

@@ -10,6 +10,13 @@
 import { getPerpUniverseCoinNames, getSpotTickers } from "./hyperliquid";
 import { getDefaultPatternScanTickerList, PATTERN_SCAN_TOP_VOLUME_COUNT } from "./scanner-controller";
 
+/** Re-export scanner defaults for tooling / health UIs that import from GlobalScanner only. */
+export {
+  PATTERN_SCAN_MIN_BARS,
+  PATTERN_SCAN_DEEP_TIMEFRAMES,
+  patternScanCandleLimitForInterval,
+} from "./scanner-controller";
+
 const parsedBatch = parseInt(process.env.PATTERN_SCAN_BATCH_SIZE || "", 10);
 const parsedDelay = parseInt(process.env.PATTERN_SCAN_BATCH_DELAY_MS || "", 10);
 

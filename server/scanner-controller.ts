@@ -58,3 +58,16 @@ export function getDefaultPatternScanTickerList(): string[] {
 const parsedLimit = parseInt(process.env.PATTERN_SCAN_CANDLE_LIMIT || "400", 10);
 export const PATTERN_SCAN_CANDLE_LIMIT =
   Number.isFinite(parsedLimit) && parsedLimit >= 200 ? Math.max(parsedLimit, 200) : 400;
+
+/** Minimum bars required to run geometry + SMMA context (do not require full fetch if HL returns fewer). */
+export const PATTERN_SCAN_MIN_BARS = 200;
+
+/** Deep swing TFs — always request at least 400 bars when env default allows (macro poles / H&S). */
+export const PATTERN_SCAN_DEEP_TIMEFRAMES = ["1h", "2h", "4h", "1d"] as const;
+
+export function patternScanCandleLimitForInterval(interval: string): number {
+  const iv = interval.trim();
+  const deep = (PATTERN_SCAN_DEEP_TIMEFRAMES as readonly string[]).includes(iv);
+  if (deep) return Math.max(PATTERN_SCAN_CANDLE_LIMIT, 400);
+  return Math.max(PATTERN_SCAN_MIN_BARS, Math.min(PATTERN_SCAN_CANDLE_LIMIT, 320));
+}

@@ -166,7 +166,7 @@ function detectFlagPatternInFixedWindow(
   if (window.length < 60) return null;
 
   const shortTf = SHORT_SCAN_TFS.has(timeframe);
-  /** 1m/3m/5m: aggressive — smaller pole % OK, wider flag/retrace tolerance (still SMMA-gated upstream). */
+  /** 1m/3m/5m: aggressive — smaller pole % OK, wider flag/retrace tolerance (scanner does not veto geometry on SMMA). */
   const maxFlagToPoleRatio = shortTf ? 0.92 : 0.65;
   const maxPoleRetraceRatio = shortTf ? 0.82 : 0.6;
   const poleMinMult = shortTf ? 0.68 : 1;

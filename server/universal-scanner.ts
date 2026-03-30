@@ -15,7 +15,10 @@ import {
   isFastTrackTimeframe,
   type ScannerHealthErrorRow,
 } from "./global-scanner";
-import { PATTERN_SCAN_CANDLE_LIMIT } from "./scanner-controller";
+import {
+  PATTERN_SCAN_MIN_BARS,
+  patternScanCandleLimitForInterval,
+} from "./scanner-controller";
 import {
   calculateSMAFromCandles,
   detectCrossover,
@@ -330,19 +333,22 @@ function buildEducationalSignalFromCandidate(
  */
 export async function fetchMtfCandleBundle(
   coin: string,
-  limit: number,
+  limit: number | ((interval: string) => number),
   intervals: readonly string[] = UNIVERSAL_SCAN_TIMEFRAMES,
   opts?: { throttleSequential?: boolean },
 ): Promise<Record<string, HyperliquidCandle[]>> {
   const end = Date.now();
   const ivs = intervals.length > 0 ? intervals : [...UNIVERSAL_SCAN_TIMEFRAMES];
+  const resolveLimit = (interval: string) =>
+    typeof limit === "function" ? limit(interval) : limit;
 
   if (opts?.throttleSequential) {
     const out: Record<string, HyperliquidCandle[]> = {};
     for (const interval of ivs) {
+      const lim = resolveLimit(interval);
       const ms = INTERVAL_MS[interval] ?? 60_000;
-      const start = end - ms * limit - ms * 2;
-      out[interval] = await getCandles(coin, interval, start, end, limit);
+      const start = end - ms * lim - ms * 2;
+      out[interval] = await getCandles(coin, interval, start, end, lim);
     }
     return out;
   }
@@ -350,9 +356,10 @@ export async function fetchMtfCandleBundle(
   const entries = await Promise.all(
     ivs.map((interval) =>
       candleFetchLimit(async () => {
+        const lim = resolveLimit(interval);
         const ms = INTERVAL_MS[interval] ?? 60_000;
-        const start = end - ms * limit - ms * 2;
-        const candles = await getCandles(coin, interval, start, end, limit);
+        const start = end - ms * lim - ms * 2;
+        const candles = await getCandles(coin, interval, start, end, lim);
         return [interval, candles] as const;
       }),
     ),
@@ -374,7 +381,7 @@ export async function analyzeEducationalUniversal(
   const prevSma = calculateSMAFromCandles(prev);
   const crossover = detectCrossover(currentSMA, prevSma);
 
-  const { rows, apexResult } = gatherMultiPatternCandidates(candles, timeframe, marketBias);
+  const { rows, apexResult } = gatherMultiPatternCandidates(candles, timeframe);
 
   if (rows.length === 0) {
     if (!crossover) return [];
@@ -452,10 +459,14 @@ async function scanOneCoinMtf(
   const slowIvs = intervals.filter((iv) => !isFastTrackTimeframe(iv));
   const [fastBundle, slowBundle] = await Promise.all([
     fastIvs.length > 0
-      ? fetchMtfCandleBundle(coin, PATTERN_SCAN_CANDLE_LIMIT, fastIvs, { throttleSequential: false })
+      ? fetchMtfCandleBundle(coin, patternScanCandleLimitForInterval, fastIvs, {
+          throttleSequential: false,
+        })
       : Promise.resolve({} as Record<string, HyperliquidCandle[]>),
     slowIvs.length > 0
-      ? fetchMtfCandleBundle(coin, PATTERN_SCAN_CANDLE_LIMIT, slowIvs, { throttleSequential: false })
+      ? fetchMtfCandleBundle(coin, patternScanCandleLimitForInterval, slowIvs, {
+          throttleSequential: false,
+        })
       : Promise.resolve({} as Record<string, HyperliquidCandle[]>),
   ]);
   const bundle: Record<string, HyperliquidCandle[]> = { ...slowBundle, ...fastBundle };
@@ -466,7 +477,7 @@ async function scanOneCoinMtf(
   const tfLimit = pLimit(9);
   const tasks = orderedTf.map(
     (tf) => () =>
-      bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_CANDLE_LIMIT
+      bundle[tf] && bundle[tf]!.length >= PATTERN_SCAN_MIN_BARS
         ? analyzeEducationalUniversal(coin, tf, bundle[tf]!)
         : Promise.resolve([] as EducationalPatternSignal[]),
   );
@@ -509,7 +520,7 @@ export async function scanForEducationalPatterns(
         try {
           const { signals, diag } = await scanOneCoinMtf(coin, uniqueTf);
           if (monitoring && wants1m) {
-            if (diag.len1m < PATTERN_SCAN_CANDLE_LIMIT && coin !== "BTC") {
+            if (diag.len1m < PATTERN_SCAN_MIN_BARS && coin !== "BTC") {
               alt1mThinOrEmpty++;
             }
             if (diag.candle1mLastTs != null) {

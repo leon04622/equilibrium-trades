@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { MongoClient, ObjectId, type Db, type Collection, type Document } from "mongodb";
+import { getPublicAppBaseUrl } from "./public-url";
 import { adminVideoCreateSchema, insertSupportMessageSchema, supportSendBodySchema } from "@shared/schema";
 import type { InsertSupportMessage, SupportMessage, WalletUser } from "@shared/schema";
 import { isFortressSovereignAddress } from "./fortress-admin";
@@ -145,8 +146,17 @@ export type MongoVaultHandle = {
   handleMarkSupportRead(req: Request, res: Response): Promise<void>;
 };
 
-function videoDocToApi(doc: Document & { _id: ObjectId }) {
+function absolutizeMediaUrl(pathOrUrl: string | null | undefined, origin: string): string | null {
+  if (pathOrUrl == null || String(pathOrUrl).trim() === "") return null;
+  const s = String(pathOrUrl).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  const base = origin.replace(/\/$/, "");
+  return `${base}${s.startsWith("/") ? "" : "/"}${s}`;
+}
+
+function videoDocToApi(doc: Document & { _id: ObjectId }, publicOrigin?: string) {
   const created = doc.createdAt instanceof Date ? doc.createdAt : new Date(doc.createdAt || Date.now());
+  const origin = (publicOrigin || getPublicAppBaseUrl()).replace(/\/$/, "");
   return {
     id: doc._id.toString(),
     title: String(doc.title ?? ""),
@@ -154,8 +164,8 @@ function videoDocToApi(doc: Document & { _id: ObjectId }) {
     duration: String(doc.duration ?? ""),
     category: String(doc.category ?? ""),
     youtubeId: doc.youtubeId != null ? String(doc.youtubeId) : null,
-    videoPath: doc.videoPath != null ? String(doc.videoPath) : null,
-    thumbnailPath: doc.thumbnailPath != null ? String(doc.thumbnailPath) : null,
+    videoPath: absolutizeMediaUrl(doc.videoPath != null ? String(doc.videoPath) : null, origin),
+    thumbnailPath: absolutizeMediaUrl(doc.thumbnailPath != null ? String(doc.thumbnailPath) : null, origin),
     academySection: doc.academySection != null ? String(doc.academySection) : null,
     createdAt: created.toISOString(),
   };
@@ -284,6 +294,81 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
 }
 
 /** Read persisted tier from Mongo when Postgres has no `wallet_users` row yet. */
+function numField(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = parseFloat(String(v ?? "0"));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Persist last known Hyperliquid perp + spot USDC totals (CRM `users`) for hydration after refresh. */
+export async function persistMongoCrmHlBalanceSnapshot(
+  walletAddress: string,
+  data: { perpAccountValue: number; spotUsdc: number; totalUsd: number },
+): Promise<void> {
+  if (!vaultDb) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(w)) return;
+  const now = new Date();
+  await coll.updateOne(
+    { $or: [{ wallet: w }, { walletAddress: w }] },
+    {
+      $set: {
+        hlPerpAccountValue: data.perpAccountValue,
+        hlSpotUsdc: data.spotUsdc,
+        hlTotalUsd: data.totalUsd,
+        hlBalanceObservedAt: now,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        wallet: w,
+        walletAddress: w,
+        source: "equilibrium_app",
+        joinDate: now,
+        createdAt: now,
+        subTier: "Free",
+        subscriptionTier: "free",
+        subscriptionActive: false,
+        manualProOverride: false,
+        accessExpires: null,
+        subscriptionExpiresAt: null,
+        status: "Active",
+        isBuilderLinked: false,
+        email: null,
+      },
+    },
+    { upsert: true },
+  );
+}
+
+export async function fetchMongoCrmHlBalanceSnapshot(walletAddress: string): Promise<{
+  perpAccountValue: number;
+  spotUsdc: number;
+  totalUsd: number;
+  updatedAt: string | null;
+} | null> {
+  const doc = await findCrmUserDocumentByWallet(walletAddress);
+  if (!doc) return null;
+  if (
+    doc.hlPerpAccountValue == null &&
+    doc.hlSpotUsdc == null &&
+    doc.hlTotalUsd == null
+  ) {
+    return null;
+  }
+  const perp = numField(doc.hlPerpAccountValue);
+  const spot = numField(doc.hlSpotUsdc);
+  let total = numField(doc.hlTotalUsd);
+  if (total <= 0 && (perp > 0 || spot > 0)) total = perp + spot;
+  const u = doc.hlBalanceObservedAt;
+  return {
+    perpAccountValue: perp,
+    spotUsdc: spot,
+    totalUsd: total,
+    updatedAt: u instanceof Date ? u.toISOString() : u != null ? String(u) : null,
+  };
+}
+
 export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): Promise<{
   subscriptionTier: string;
   subscriptionActive: boolean;
@@ -361,10 +446,14 @@ function createHandle(db: Db): MongoVaultHandle {
   const tickets: Collection<Document> = db.collection(SUPPORT_COLL);
 
   return {
-    async handleGetVideos(_req: Request, res: Response): Promise<void> {
+    async handleGetVideos(req: Request, res: Response): Promise<void> {
       try {
+        const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
+        const host = req.get("host");
+        const origin =
+          host && proto ? `${proto}://${host}`.replace(/\/$/, "") : getPublicAppBaseUrl();
         const docs = await videos.find({}).sort({ createdAt: -1 }).toArray();
-        res.json(docs.map((d) => videoDocToApi(d as Document & { _id: ObjectId })));
+        res.json(docs.map((d) => videoDocToApi(d as Document & { _id: ObjectId }, origin)));
       } catch (e) {
         console.error("[mongo-vault] GET /api/videos:", e);
         res.status(500).json({ error: "Failed to fetch videos" });
@@ -408,10 +497,13 @@ function createHandle(db: Db): MongoVaultHandle {
         };
         const r = await videos.insertOne(insertDoc);
         res.json(
-          videoDocToApi({
-            ...insertDoc,
-            _id: r.insertedId,
-          } as Document & { _id: ObjectId }),
+          videoDocToApi(
+            {
+              ...insertDoc,
+              _id: r.insertedId,
+            } as Document & { _id: ObjectId },
+            getPublicAppBaseUrl(),
+          ),
         );
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);

@@ -4,6 +4,7 @@ import {
   getAccountState,
   getOpenOrders,
   getClearinghouseStateViaInfoClient,
+  getSpotState,
   closePosition as hlClosePosition,
   cancelOrder as hlCancelOrder,
   placeTriggerOrder,
@@ -81,6 +82,10 @@ interface TradingContextType {
   balance: number;
   withdrawable: number;
   accountValue: number;
+  /** Native USDC total on Hyperliquid spot (from `spotClearinghouseState`). */
+  spotUsdcTotal: number;
+  /** Perp account value + spot USDC total (unified HL equity). */
+  unifiedAccountUsd: number;
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
@@ -224,6 +229,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [balance, setBalance] = useState(0);
   const [withdrawable, setWithdrawable] = useState(0);
   const [accountValue, setAccountValue] = useState(0);
+  const [spotUsdcTotal, setSpotUsdcTotal] = useState(0);
+  const [unifiedAccountUsd, setUnifiedAccountUsd] = useState(0);
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
@@ -240,6 +247,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const currentPricesRef = useRef<Record<string, number>>({});
   const wsSubsRef = useRef<Array<{ unsubscribe: () => Promise<void> }>>([]);
   const userEventsRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastHlBalanceSnapRef = useRef<string>("");
+  const spotUsdcRef = useRef(0);
+  useEffect(() => {
+    spotUsdcRef.current = spotUsdcTotal;
+  }, [spotUsdcTotal]);
 
   const connected = walletConnected;
   const address = walletAddress || "";
@@ -258,12 +270,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     setIsLoadingAccount(true);
     setHlAccountFetchError(null);
     try {
-      const [accountState, hlOrders] = await Promise.all([
+      const [accountState, hlOrders, spotState] = await Promise.all([
         getClearinghouseStateViaInfoClient(walletAddress).then(
           (s) => s ?? getAccountState(walletAddress),
         ),
         getOpenOrders(walletAddress),
+        getSpotState(walletAddress),
       ]);
+
+      let spotUsdc = 0;
+      const usdcRow = spotState?.balances?.find((b) => b.coin === "USDC");
+      if (usdcRow) {
+        spotUsdc = parseFloat(usdcRow.total || "0") || 0;
+      }
+      setSpotUsdcTotal(spotUsdc);
 
       if (accountState) {
         applyMarginSummaryFromAccountState(accountState, {
@@ -272,6 +292,33 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           setBalance,
           setWithdrawable,
         });
+        const perpVal = parseFloat(accountState.marginSummary?.accountValue || "0") || 0;
+        setUnifiedAccountUsd(perpVal + spotUsdc);
+      } else {
+        setUnifiedAccountUsd(spotUsdc);
+      }
+
+      const perpForSnap = accountState
+        ? parseFloat(accountState.marginSummary?.accountValue || "0") || 0
+        : 0;
+      const unifiedSnap = perpForSnap + spotUsdc;
+      const snapKey = `${perpForSnap.toFixed(4)}|${spotUsdc.toFixed(4)}`;
+      if (lastHlBalanceSnapRef.current !== snapKey) {
+        lastHlBalanceSnapRef.current = snapKey;
+        void fetch("/api/user/hl-balance-snapshot", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "x-wallet-address": walletAddress,
+            Authorization: `Bearer ${walletAddress}`,
+          },
+          body: JSON.stringify({
+            perpAccountValue: perpForSnap,
+            spotUsdc: spotUsdc,
+            totalUsd: unifiedSnap,
+          }),
+        }).catch(() => {});
       }
 
       const mids = currentPricesRef.current;
@@ -329,7 +376,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setBalance(0);
       setWithdrawable(0);
       setAccountValue(0);
+      setSpotUsdcTotal(0);
+      setUnifiedAccountUsd(0);
       setMarginUsed(0);
+      lastHlBalanceSnapRef.current = "";
     }
   }, [walletConnected, walletAddress]);
 
@@ -468,7 +518,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
 
-    const interval = setInterval(refreshAccount, 30_000);
+    const interval = setInterval(refreshAccount, 10_000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refreshAccount();
@@ -824,6 +874,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       balance,
       withdrawable,
       accountValue,
+      spotUsdcTotal,
+      unifiedAccountUsd,
       marginUsed,
       positions,
       openOrders,

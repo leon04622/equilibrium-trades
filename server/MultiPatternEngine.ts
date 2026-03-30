@@ -14,10 +14,8 @@ import { runApexGeometricFlagScan, type ApexGeometricResult } from "./ApexDetect
 import { detectHeadAndShoulders, detectInverseHeadAndShoulders } from "./pattern-shoulders";
 import { detectStrictFlagWithVolume } from "./pattern-strict-volume";
 
-export type ScannerMarketBias = "bullish" | "bearish" | "neutral_choppy";
-
 /** Geometry + actionability only — 21/200 SMMA must not demote or suppress counter-trend setups. */
-function scoreCandidate(p: DetectedPattern, _marketBias: ScannerMarketBias, volumeOk: boolean): number {
+function scoreCandidate(p: DetectedPattern, volumeOk: boolean): number {
   const structural = getPatternStructuralBias(p);
   let s = 220 + p.confidence;
   if (structural !== "neutral") s += 24;
@@ -30,12 +28,11 @@ function scoreCandidate(p: DetectedPattern, _marketBias: ScannerMarketBias, volu
 function upsertByScore(
   map: Map<string, { p: DetectedPattern; volumeOk: boolean }>,
   item: { p: DetectedPattern; volumeOk: boolean },
-  marketBias: ScannerMarketBias,
 ) {
   const k = item.p.name;
   const ex = map.get(k);
-  const sNew = scoreCandidate(item.p, marketBias, item.volumeOk);
-  const sOld = ex ? scoreCandidate(ex.p, marketBias, ex.volumeOk) : -Infinity;
+  const sNew = scoreCandidate(item.p, item.volumeOk);
+  const sOld = ex ? scoreCandidate(ex.p, ex.volumeOk) : -Infinity;
   if (!ex || sNew > sOld) map.set(k, item);
 }
 
@@ -44,31 +41,30 @@ export type MultiPatternGatherRow = { p: DetectedPattern; volumeOk: boolean };
 export function gatherMultiPatternCandidates(
   candles: HyperliquidCandle[],
   timeframe: string,
-  marketBias: ScannerMarketBias,
 ): { rows: MultiPatternGatherRow[]; apexResult: ApexGeometricResult } {
   const apexResult = runApexGeometricFlagScan(candles, timeframe);
   const candMap = new Map<string, { p: DetectedPattern; volumeOk: boolean }>();
 
   const base = collectPatternCandidates(candles, timeframe);
   sortPatternCandidatesByActionability(base);
-  for (const p of base) upsertByScore(candMap, { p, volumeOk: false }, marketBias);
+  for (const p of base) upsertByScore(candMap, { p, volumeOk: false });
 
   if (apexResult.pattern) {
-    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: true }, marketBias);
+    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: true });
   }
 
   const hs = detectHeadAndShoulders(candles);
-  if (hs) upsertByScore(candMap, { p: hs, volumeOk: false }, marketBias);
+  if (hs) upsertByScore(candMap, { p: hs, volumeOk: false });
   const ihs = detectInverseHeadAndShoulders(candles);
-  if (ihs) upsertByScore(candMap, { p: ihs, volumeOk: false }, marketBias);
+  if (ihs) upsertByScore(candMap, { p: ihs, volumeOk: false });
 
   const strictBull = detectStrictFlagWithVolume(candles, true);
-  if (strictBull) upsertByScore(candMap, { p: strictBull.pattern, volumeOk: strictBull.volumeOk }, marketBias);
+  if (strictBull) upsertByScore(candMap, { p: strictBull.pattern, volumeOk: strictBull.volumeOk });
   const strictBear = detectStrictFlagWithVolume(candles, false);
-  if (strictBear) upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk }, marketBias);
+  if (strictBear) upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk });
 
   const rows = [...candMap.values()].sort(
-    (a, b) => scoreCandidate(b.p, marketBias, b.volumeOk) - scoreCandidate(a.p, marketBias, a.volumeOk),
+    (a, b) => scoreCandidate(b.p, b.volumeOk) - scoreCandidate(a.p, a.volumeOk),
   );
   return { rows, apexResult };
 }
