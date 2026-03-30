@@ -44,6 +44,7 @@ interface EducationalPatternSignal {
   counterTrend?: boolean;
   volumeConfirmed?: boolean;
   marketBiasLabel?: string;
+  apexTier?: "high_probability_trend_aligned" | "standard" | "no_pattern_apex";
 }
 
 interface PatternChartProps {
@@ -127,6 +128,48 @@ function fmtVol(v: number): string {
   if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
   if (v >= 1e3) return (v / 1e3).toFixed(2) + "K";
   return v.toFixed(2);
+}
+
+function rankPatternStatus(status: EducationalPatternSignal["patternStatus"]): number {
+  if (status === "developed") return 3;
+  if (status === "breakout_watch") return 2;
+  return 1;
+}
+
+function rankApexTier(tier?: EducationalPatternSignal["apexTier"]): number {
+  if (tier === "high_probability_trend_aligned") return 2;
+  if (tier === "standard") return 1;
+  return 0;
+}
+
+function selectBestSignal(
+  signals: EducationalPatternSignal[] | undefined,
+  coin: string,
+  interval: string,
+): EducationalPatternSignal | null {
+  if (!signals?.length) return null;
+
+  const matches = signals.filter((signal) => signal.coin === coin && signal.timeframe === interval);
+  if (matches.length === 0) return null;
+
+  return [...matches].sort((a, b) => {
+    const statusDiff = rankPatternStatus(b.patternStatus) - rankPatternStatus(a.patternStatus);
+    if (statusDiff !== 0) return statusDiff;
+
+    const apexDiff = rankApexTier(b.apexTier) - rankApexTier(a.apexTier);
+    if (apexDiff !== 0) return apexDiff;
+
+    const volumeDiff = Number(Boolean(b.volumeConfirmed)) - Number(Boolean(a.volumeConfirmed));
+    if (volumeDiff !== 0) return volumeDiff;
+
+    const trendDiff = Number(Boolean(a.counterTrend)) - Number(Boolean(b.counterTrend));
+    if (trendDiff !== 0) return trendDiff;
+
+    const detectedAtDiff = new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime();
+    if (detectedAtDiff !== 0) return detectedAtDiff;
+
+    return a.patternName.localeCompare(b.patternName);
+  })[0] ?? null;
 }
 
 function PatternChartComponent({
@@ -336,7 +379,7 @@ function PatternChartComponent({
   // Show ALL detected patterns — do NOT gate by MA direction here.
   // Server sets tradeable for geometric setups; card copy explains SMMA as context only.
   useEffect(() => {
-    const currentSignal = signals?.find(s => s.coin === coin && s.timeframe === interval);
+    const currentSignal = selectBestSignal(signals, coin, interval);
     setActiveSignal(currentSignal ?? null);
   }, [signals, coin, interval]);
 
@@ -845,7 +888,12 @@ function PatternChartComponent({
                 {activeSignal.patternStatus === "breakout_watch" ? "WATCH" : activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
               </Badge>
             </div>
-            <p className="text-[10px] font-medium text-[#e8ecf1] mb-2">{activeSignal.patternName}</p>
+            <div className="flex items-center gap-1.5 mb-2">
+              <p className="text-[10px] font-medium text-[#e8ecf1]">{activeSignal.patternName}</p>
+              <Badge variant="outline" className="h-4 px-1 text-[8px] leading-none shrink-0">
+                {activeSignal.timeframe}
+              </Badge>
+            </div>
 
             {/* Tradeable badge */}
               <div className={`rounded px-2 py-1 mb-2 ${activeSignal.tradeable ? "bg-green-900/50 border border-green-700/50" : "bg-orange-900/30 border border-orange-700/30"}`}>
