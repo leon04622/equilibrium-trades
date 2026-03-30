@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 export interface PatternSignal {
   id: string;
   coin: string;
+  /** Human-readable market name when `coin` is a Hyperliquid spot `@index` id. */
+  coinDisplay?: string;
   timeframe: string;
   bias: "bullish" | "bearish" | "neutral";
   patternName: string;
@@ -104,7 +106,12 @@ const PatternCard = memo(function PatternCard({ signal }: { signal: PatternSigna
       <CardContent className="space-y-3 pt-4 px-3 md:px-6 pb-4 md:pb-6">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
-            <span className="text-base md:text-lg font-bold">{signal.coin}</span>
+            <span
+              className="text-base md:text-lg font-bold truncate max-w-[min(100%,14rem)] sm:max-w-none"
+              title={signal.coin}
+            >
+              {signal.coinDisplay ?? signal.coin}
+            </span>
             <Badge variant="outline" className="text-[10px] md:text-xs px-1.5 py-0">
               {signal.timeframe}
             </Badge>

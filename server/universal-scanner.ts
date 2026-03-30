@@ -3,7 +3,7 @@
  * **unfiltered geometry** (SMMA is advisory on each signal, not a veto). See `MultiPatternEngine.ts`.
  */
 import pLimit from "p-limit";
-import { getCandles, type HyperliquidCandle } from "./hyperliquid";
+import { getCandles, getSpotAtIndexDisplayMap, type HyperliquidCandle } from "./hyperliquid";
 import {
   GLOBAL_SCANNER_BATCH_SIZE,
   GLOBAL_SCANNER_BATCH_DELAY_MS,
@@ -89,6 +89,8 @@ export type MarketBias = "bullish" | "bearish" | "neutral_choppy";
 export interface EducationalPatternSignal {
   id: string;
   coin: string;
+  /** Resolved from spot `spotMeta` when `coin` is `@index`; omit for perp symbols. */
+  coinDisplay?: string;
   timeframe: string;
   bias: "bullish" | "bearish" | "neutral";
   patternName: string;
@@ -548,6 +550,15 @@ export async function scanForEducationalPatterns(
     flat.push(...batchSignals.flat());
     if (bi < batches.length - 1) {
       await sleep(GLOBAL_SCANNER_BATCH_DELAY_MS);
+    }
+  }
+
+  if (coins.some((c) => c.startsWith("@"))) {
+    const spotMap = await getSpotAtIndexDisplayMap();
+    for (let i = 0; i < flat.length; i++) {
+      const s = flat[i]!;
+      const label = spotMap[s.coin];
+      if (label?.trim()) flat[i] = { ...s, coinDisplay: label };
     }
   }
 

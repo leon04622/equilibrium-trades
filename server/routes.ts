@@ -12,6 +12,7 @@ import {
   getRecentTrades,
   getCandles,
   getPerpExchangeAggregates,
+  getSpotAtIndexDisplayMap,
 } from "./hyperliquid";
 import { scanForSignals, getSMAStatus } from "./sma-detection";
 import {
@@ -118,11 +119,25 @@ function patternScanCacheTtlForTimeframes(timeframes: string[]): number {
 
 const patternScanResultCache = new Map<string, PatternScanCacheEntry>();
 
-function patternScanCoinsPreview(coins: string[]): string {
+async function buildPatternScanCoinsPreview(coins: string[]): Promise<string> {
   const max = 24;
   if (coins.length === 0) return "";
-  if (coins.length <= max) return coins.join(",");
-  return `${coins.slice(0, max).join(",")},+${coins.length - max}more`;
+  const hasAt = coins.some((c) => c.startsWith("@"));
+  const spotMap = hasAt ? await getSpotAtIndexDisplayMap() : {};
+  const resolved = coins.map((c) => (c.startsWith("@") && spotMap[c] ? spotMap[c]! : c));
+  if (resolved.length <= max) return resolved.join(",");
+  return `${resolved.slice(0, max).join(",")},+${coins.length - max}more`;
+}
+
+/** Attach human-readable spot labels on every patterns response (cache hits, older payloads, missed enrichment). */
+async function ensureEducationalPatternSpotLabels(patterns: EducationalPatternSignal[]): Promise<void> {
+  if (!patterns.some((p) => p.coin.startsWith("@"))) return;
+  const map = await getSpotAtIndexDisplayMap();
+  for (const p of patterns) {
+    if (!p.coin.startsWith("@")) continue;
+    const label = map[p.coin];
+    if (label?.trim()) p.coinDisplay = label;
+  }
 }
 
 function patternVolumeCapMax(): number | null {
@@ -135,6 +150,7 @@ function patternVolumeCapMax(): number | null {
 function setPatternScanInsightHeaders(
   res: Response,
   opts: {
+    coinsPreview: string;
     coins: string[];
     source: "query" | "watchlist" | "universe" | "top_volume";
     volumeCapMax: number | null;
@@ -147,7 +163,7 @@ function setPatternScanInsightHeaders(
   res.setHeader("X-Pattern-Scan-Signals", String(opts.meta.signalCount));
   res.setHeader("X-Pattern-Scan-Cached", opts.cached ? "1" : "0");
   res.setHeader("X-Pattern-Scan-Source", opts.source);
-  res.setHeader("X-Pattern-Scan-Coins-Preview", patternScanCoinsPreview(opts.coins));
+  res.setHeader("X-Pattern-Scan-Coins-Preview", opts.coinsPreview);
   if (opts.volumeCapMax != null) {
     res.setHeader("X-Pattern-Scan-Volume-Cap", String(opts.volumeCapMax));
   }
@@ -956,7 +972,10 @@ export async function registerRoutes(
         prunePatternScanCache();
         const hit = patternScanResultCache.get(cacheKey);
         if (hit && Date.now() - hit.at <= hit.ttlMs) {
+          await ensureEducationalPatternSpotLabels(hit.patterns);
+          const coinsPreview = await buildPatternScanCoinsPreview(hit.coins);
           setPatternScanInsightHeaders(res, {
+            coinsPreview,
             coins: hit.coins,
             source: hit.source,
             volumeCapMax: hit.volumeCapMax,
@@ -968,6 +987,7 @@ export async function registerRoutes(
       }
 
       const { patterns, meta } = await scanForEducationalPatterns(coins, timeframes);
+      await ensureEducationalPatternSpotLabels(patterns);
       const scanTtlMs = patternScanCacheTtlForTimeframes(timeframes);
       if (!skipCache) {
         patternScanResultCache.set(cacheKey, {
@@ -981,7 +1001,9 @@ export async function registerRoutes(
         });
         prunePatternScanCache();
       }
+      const coinsPreview = await buildPatternScanCoinsPreview(coins);
       setPatternScanInsightHeaders(res, {
+        coinsPreview,
         coins,
         source: scanSource,
         volumeCapMax,
@@ -1005,7 +1027,9 @@ export async function registerRoutes(
       if (tickers.length === 0) {
         tickers = getDefaultPatternScanTickerList();
       }
-      res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO });
+      const spotDisplayByCoin =
+        tickers.some((t) => t.startsWith("@")) ? await getSpotAtIndexDisplayMap() : {};
+      res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO, spotDisplayByCoin });
     } catch (error) {
       console.error("Error building scanner markets list:", error);
       res.status(500).json({ error: "Failed to load markets" });

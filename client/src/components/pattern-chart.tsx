@@ -27,6 +27,7 @@ import { computeSmmaSeries } from "@/lib/smma-worker-client";
 interface EducationalPatternSignal {
   id: string;
   coin: string;
+  coinDisplay?: string;
   timeframe: string;
   bias: "bullish" | "bearish" | "neutral";
   patternName: string;

@@ -202,6 +202,60 @@ const SPOT_ASSET_LABELS: Record<string, string> = {
 // Kept low so all legitimately active assets appear in the selector
 const SPOT_MIN_VOL = 1_000;
 
+/** Human-readable spot pair label (same rules as ticker list) for `@index` API ids. */
+function spotPairDisplayName(pair: any, tokens: any[]): string {
+  const baseToken = tokens[pair.tokens?.[0]] as any;
+  const quoteToken = tokens[pair.tokens?.[1]] as any;
+  const baseName: string = baseToken?.name || "";
+  const quoteName: string = quoteToken?.name || "USDC";
+  const rawName: string =
+    pair.name && !pair.name.startsWith("@") ? pair.name.replace("/", "-") : `${baseName}-${quoteName}`;
+  const label = SPOT_ASSET_LABELS[baseName];
+  return label ? `${rawName} (${label})` : rawName;
+}
+
+let spotAtIndexDisplayCache: { at: number; map: Record<string, string> } | null = null;
+const SPOT_AT_INDEX_DISPLAY_TTL_MS = 120_000;
+
+/**
+ * Map Hyperliquid spot API ids (`@0`, `@1`, …) to display names for scanners and headers.
+ * Cached briefly to avoid extra round-trips on every pattern poll.
+ */
+export async function getSpotAtIndexDisplayMap(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (spotAtIndexDisplayCache && now - spotAtIndexDisplayCache.at < SPOT_AT_INDEX_DISPLAY_TTL_MS) {
+    return spotAtIndexDisplayCache.map;
+  }
+  try {
+    const response = await fetch(HYPERLIQUID_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "spotMetaAndAssetCtxs" }),
+    });
+    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+    const [spotMeta] = await response.json();
+    const tokens: any[] = spotMeta.tokens || [];
+    const universe = (spotMeta.universe || []) as any[];
+    const map: Record<string, string> = {};
+    for (let i = 0; i < universe.length; i++) {
+      const pair = universe[i];
+      const label = spotPairDisplayName(pair, tokens);
+      map[`@${i}`] = label;
+      // HL `pair.name` is often `@<assetId>` and can differ from the universe index (e.g. index 250 → name `@266`).
+      // Register both so any code path resolving by either id gets a label.
+      const rawName = typeof pair?.name === "string" ? pair.name.trim() : "";
+      if (rawName.startsWith("@") && /^@\d+$/.test(rawName)) {
+        map[rawName] = label;
+      }
+    }
+    spotAtIndexDisplayCache = { at: now, map };
+    return map;
+  } catch (e) {
+    console.error("Error building spot @index display map:", e);
+    return spotAtIndexDisplayCache?.map ?? {};
+  }
+}
+
 // Fetch spot market tickers and return them with @index coin identifiers
 export async function getSpotTickers(): Promise<HyperliquidTicker[]> {
   try {
@@ -223,18 +277,8 @@ export async function getSpotTickers(): Promise<HyperliquidTicker[]> {
         if (vol < SPOT_MIN_VOL || px === 0) return null;
 
         const baseToken = tokens[pair.tokens?.[0]] as any;
-        const quoteToken = tokens[pair.tokens?.[1]] as any;
         const baseName: string = baseToken?.name || "";
-        const quoteName: string = quoteToken?.name || "USDC";
-
-        // Human-readable name: prefer pair's own name, else baseName-quoteName
-        const rawName: string = pair.name && !pair.name.startsWith("@")
-          ? pair.name.replace("/", "-")
-          : `${baseName}-${quoteName}`;
-
-        // Override with known labels
-        const label = SPOT_ASSET_LABELS[baseName];
-        const displayName = label ? `${rawName} (${label})` : rawName;
+        const displayName = spotPairDisplayName(pair, tokens);
 
         return {
           coin: `@${index}`,

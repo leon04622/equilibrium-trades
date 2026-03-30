@@ -46,7 +46,7 @@ function isFastTf(tf: string): boolean {
   return (FAST_TRACK_TFS as readonly string[]).includes(tf);
 }
 
-type ScannerMarketsPayload = { tickers: string[] };
+type ScannerMarketsPayload = { tickers: string[]; spotDisplayByCoin?: Record<string, string> };
 
 function playSetupChime(): void {
   try {
@@ -98,7 +98,7 @@ async function fetchPatternScanPayload(
   return { patterns, meta };
 }
 
-type ScanAlert = { key: string; coin: string; timeframe: string; patternName: string };
+type ScanAlert = { key: string; coin: string; coinDisplay?: string; timeframe: string; patternName: string };
 
 /** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / formed / developed setups. */
 export function PatternScannerUI() {
@@ -194,16 +194,27 @@ export function PatternScannerUI() {
   const isFetching =
     (!!fastTfParam && fastQuery.isFetching) || (!!slowTfParam && slowQuery.isFetching);
 
+  const spotDisplayByCoin = marketsQuery.data?.spotDisplayByCoin;
+
   const signals = useMemo(() => {
     if (isError) return [];
     const map = new Map<string, PatternSignal>();
     const dedupeKey = (p: PatternSignal) => `${p.coin}|${p.timeframe}|${p.patternName}`;
     for (const p of fastQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
     for (const p of slowQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
-    return [...map.values()].sort(
+    const merged = [...map.values()].sort(
       (a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime(),
     );
-  }, [isError, fastQuery.data, slowQuery.data]);
+    if (!spotDisplayByCoin || Object.keys(spotDisplayByCoin).length === 0) return merged;
+    return merged.map((s) => {
+      if (!s.coin.startsWith("@")) return s;
+      const fromServer = s.coinDisplay?.trim();
+      if (fromServer) return s;
+      const fromMap = spotDisplayByCoin[s.coin]?.trim();
+      if (!fromMap) return s;
+      return { ...s, coinDisplay: fromMap };
+    });
+  }, [isError, fastQuery.data, slowQuery.data, spotDisplayByCoin]);
 
   const scanMeta = useMemo(() => {
     if (isError) return null;
@@ -247,6 +258,7 @@ export function PatternScannerUI() {
         incoming.push({
           key: `${s.id}-${Date.now()}`,
           coin: s.coin,
+          coinDisplay: s.coinDisplay,
           timeframe: s.timeframe,
           patternName: s.patternName,
         });
@@ -348,7 +360,10 @@ export function PatternScannerUI() {
                 className="flex items-start justify-between gap-2 text-xs sm:text-sm text-muted-foreground"
               >
                 <span>
-                  <strong className="text-foreground">{a.coin}</strong> {a.timeframe} — {a.patternName}
+                  <strong className="text-foreground" title={a.coin}>
+                    {a.coinDisplay ?? a.coin}
+                  </strong>{" "}
+                  {a.timeframe} — {a.patternName}
                 </span>
                 <Button
                   type="button"
