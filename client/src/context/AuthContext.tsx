@@ -60,7 +60,9 @@ const AuthContext = createContext<UseQueryResult<UserSyncResponse> | undefined>(
  * (authoritative `subTier`) with Postgres + Stripe so Pro/Mentor survives refresh.
  *
  * UI must not assume **Free** until `status === "success"` — use `useSubscription().isLoading` /
- * `subscriptionHydrated` for gates (Videos, Signals, SubscriptionGuard).
+ * `subscriptionHydrated` for gates (Videos, Signals, SubscriptionGuard). **Master bypass** wallets
+ * (`MASTER_BYPASS_WALLET_ADDRESSES` in `@shared/schema` + optional `VITE_MASTER_BYPASS_WALLET_2`) are
+ * always Pro in `useSubscription` without waiting on sync.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useWallet();

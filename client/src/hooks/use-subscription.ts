@@ -1,5 +1,6 @@
 import { useWallet } from "@/lib/wallet-context";
 import { useUserSync } from "@/context/AuthContext";
+import { isMasterBypassWallet } from "@/lib/master-bypass-wallets";
 
 export interface SubscriptionStatus {
   tier: "free" | "pro" | "mentoring" | "elite";
@@ -25,13 +26,15 @@ export function useSubscription() {
   const { data: sync, status, error, refetch, isFetching, isError } = userSync;
 
   const syncEnabled = Boolean(isConnected && address);
+  const masterBypass = isMasterBypassWallet(address);
 
   /** True only after a successful `/api/user/sync` for the connected wallet — avoids treating users as Free while pending. */
   const subscriptionHydrated = syncEnabled && status === "success" && sync != null;
 
-  const isSyncError = syncEnabled && isError;
+  const isSyncError = syncEnabled && isError && !masterBypass;
 
-  const isLoadingEffective = syncEnabled && !isSyncError && !subscriptionHydrated;
+  const isLoadingEffective =
+    !masterBypass && syncEnabled && !isSyncError && !subscriptionHydrated;
 
   const subscription: SubscriptionStatus | undefined = sync?.subscription
     ? {
@@ -68,13 +71,14 @@ export function useSubscription() {
     (manualProUnlock || mongoSubTierUnlock || !!subscription?.active);
 
   const isPro =
+    masterBypass ||
     manualProUnlock ||
     mongoSubTierUnlock ||
     (subscriptionHydrated &&
       !!subscription?.active &&
       (subscription.tier === "pro" || subscription.tier === "mentoring" || subscription.tier === "elite"));
 
-  const isFree = subscriptionHydrated && !isPro;
+  const isFree = subscriptionHydrated && !isPro && !masterBypass;
 
   const hasAccess = (feature: PremiumFeature): boolean => {
     switch (feature) {
@@ -109,7 +113,8 @@ export function useSubscription() {
     isFree,
     /** Alias for an active Pro or Mentoring plan (Mongo + Postgres + Stripe, after sync). */
     isSubscribed: !!isPro,
-    tier: (subscriptionHydrated ? subscription?.tier : undefined) || "free",
+    tier: masterBypass ? "mentoring" : (subscriptionHydrated ? subscription?.tier : undefined) || "free",
+    masterBypass,
     hasAccess,
     isConnected,
   };

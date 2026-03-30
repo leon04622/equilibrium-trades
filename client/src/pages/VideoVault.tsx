@@ -263,7 +263,17 @@ export default function VideoVault() {
   }, [items]);
 
   const accessChecking = isConnected && subLoading;
-  const canPlayVideos = isConnected && !subLoading && !isSyncError && isSubscribed;
+  /** Pro (including master bypass) → no upgrade button; player is never paywalled inside the dialog. */
+  const showUpgradeBanner = isConnected && !isSubscribed;
+
+  if (listLoading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-6 bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
+        <p className="text-sm text-muted-foreground">Loading Educational Vault…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto min-h-[60vh] bg-background">
@@ -276,7 +286,7 @@ export default function VideoVault() {
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
             Library list from Mongo via <code className="text-xs">/api/videos</code> (same entries as Command Center) —{" "}
-            <strong>browsable while logged out</strong>; playback stays Pro. Categories follow the{" "}
+            <strong>browsable while logged out</strong>; the player opens for any visitor. Categories follow the{" "}
             <strong>category name</strong> set when publishing.
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
@@ -289,7 +299,7 @@ export default function VideoVault() {
 
       <div className="relative rounded-xl border bg-card/40">
         <div className="p-4 md:p-6 space-y-10">
-          {!canPlayVideos && (
+          {showUpgradeBanner && (
             <div
               className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3"
               data-testid="vault-paywall-banner"
@@ -298,22 +308,18 @@ export default function VideoVault() {
                 <Lock className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium text-sm">
-                    {!isConnected
-                      ? "Connect your wallet to unlock playback"
-                      : isSyncError
-                        ? "Could not load your subscription tier"
-                        : accessChecking
-                          ? "Loading subscription from your account…"
-                          : `Pro subscription required to watch — $${TIER_PRO}/mo`}
+                    {isSyncError
+                      ? "Could not load your subscription tier"
+                      : accessChecking
+                        ? "Loading subscription from your account…"
+                        : `Pro subscription required for full access — $${TIER_PRO}/mo`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-                    {!isConnected
-                      ? "Anyone can browse lessons below. Connect so we can verify Pro from billing."
-                      : isSyncError
-                        ? "Your tier is stored on the server. Retry sync — do not assume Free until this succeeds."
-                        : accessChecking
-                          ? "Confirming your plan from Mongo-backed /api/user/sync."
-                          : "Browse the library below. Upgrade to stream lessons added in Command Center → Videos."}
+                    {isSyncError
+                      ? "Retry sync — tier is loaded from the server, not the browser session."
+                      : accessChecking
+                        ? "Confirming your plan from Mongo-backed /api/user/sync."
+                        : "Lessons play in the player below for everyone; this banner is informational for non‑Pro accounts."}
                   </p>
                 </div>
               </div>
@@ -343,11 +349,6 @@ export default function VideoVault() {
               <Button variant="outline" size="sm" onClick={() => void refetchVideos()}>
                 Try again
               </Button>
-            </div>
-          ) : listLoading ? (
-            <div className="flex justify-center py-16 text-muted-foreground gap-2">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              Loading library from server…
             </div>
           ) : items.length === 0 ? (
             <p className="text-center text-muted-foreground py-12 text-sm">
@@ -424,28 +425,13 @@ export default function VideoVault() {
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              {canPlayVideos ? (
-                active.videoUrl.trim() ? (
-                  <PlayerFrame key={active.id} url={active.videoUrl} title={active.title} />
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8 rounded-lg border border-dashed">
-                    No playable URL for this lesson. Re-save the video in Command Center with a YouTube link, Vimeo, or
-                    uploaded file.
-                  </p>
-                )
+              {active.videoUrl.trim() ? (
+                <PlayerFrame key={active.id} url={active.videoUrl} title={active.title} />
               ) : (
-                <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    {!isConnected
-                      ? "Connect your wallet and use an active Pro plan to play videos here."
-                      : accessChecking
-                        ? "Confirming your subscription…"
-                        : "Upgrade to Pro to stream lessons from the vault."}
-                  </p>
-                  <Button asChild>
-                    <Link to="/pricing">{!isConnected ? "Connect & upgrade" : "Upgrade to Pro"}</Link>
-                  </Button>
-                </div>
+                <p className="text-sm text-muted-foreground text-center py-8 rounded-lg border border-dashed">
+                  No playable URL for this lesson. Re-save the video in Command Center with a YouTube link, Vimeo, or
+                  uploaded file.
+                </p>
               )}
             </>
           )}

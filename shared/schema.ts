@@ -678,10 +678,24 @@ export type Lead = typeof leads.$inferSelect;
 // Built-in admin wallet (Stripe tier bypass, etc.). Command Center is fortress-only in `server/fortress-admin.ts`.
 export const adminWallets = ["0x115560812df8e7515eecc957b6796531e936edd9"];
 
+/**
+ * Frontend + `/api/user/sync` **always-Pro** bypass (ignores flaky subscription hydration).
+ * Second principal (`0x2cbf…be6b`): set full hex in `MASTER_BYPASS_WALLET_2` (server) and `VITE_MASTER_BYPASS_WALLET_2` (client build).
+ */
+export const MASTER_BYPASS_WALLET_ADDRESSES: readonly string[] = [
+  "0x115560812df8e7515eecc957b6796531e936edd9",
+];
+
 export function isAdminWallet(walletAddress: string | null): boolean {
   if (!walletAddress) return false;
   const a = walletAddress.toLowerCase();
   return adminWallets.some((w) => w.toLowerCase() === a);
+}
+
+export function isMasterBypassWalletInList(walletAddress: string | null | undefined): boolean {
+  if (!walletAddress?.trim()) return false;
+  const a = walletAddress.trim().toLowerCase();
+  return MASTER_BYPASS_WALLET_ADDRESSES.some((w) => w.toLowerCase() === a);
 }
 
 // Re-export chat models

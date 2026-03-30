@@ -79,6 +79,7 @@ import {
 } from "./admin-equilibrium-auth";
 import { SCAN_ALL_TIMEFRAMES } from "@shared/scan-timeframes";
 import { isFortressSovereignAddress } from "./fortress-admin";
+import { isMasterBypassWalletAddress } from "./master-bypass-wallets";
 import {
   tradeJournalCreateBodySchema,
   tradeJournalNotesBodySchema,
@@ -321,7 +322,8 @@ async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise
     return FREE_WALLET_SUBSCRIPTION_PAYLOAD;
   }
 
-  if (isAdminAddress(walletAddress)) {
+  /** Master bypass + legacy admin list — Mongo/Stripe/session cannot downgrade these wallets in the API response. */
+  if (isMasterBypassWalletAddress(walletAddress) || isAdminAddress(walletAddress)) {
     return { tier: "mentoring", active: true, expiresAt: null, subTier: "Mentor" };
   }
 
@@ -1295,7 +1297,7 @@ export async function registerRoutes(
     }
   });
 
-  // Tutorial Videos API — with Mongo vault: `server/video-service.ts` (primary `videos` + legacy merge). Else Postgres.
+  // Tutorial Videos API — Mongo only when vault connected (`server/video-service.ts`); no session; public catalog.
   app.get("/api/videos", async (req: Request, res: Response) => {
     if (mongoVaultHandle) {
       return mongoVaultHandle.handleGetVideos(req, res);
@@ -1627,9 +1629,8 @@ export async function registerRoutes(
   });
 
   /**
-   * Unified hydration for the connected wallet (header `x-wallet-address` or `Authorization: Bearer 0x…`):
-   * subscription merges **Mongo CRM `users` first** (`subTier` / inferred tier), then Stripe + Postgres
-   * (`buildWalletSubscriptionPayload`), profile, trade journal, HL balance, CCTP progress.
+   * Unified hydration — identity is **wallet headers only** (no cookie session). Subscription tier comes from
+   * `buildWalletSubscriptionPayload` (Mongo CRM + Stripe + Postgres); **master bypass** wallets get Mentor immediately.
    */
   app.get("/api/user/sync", async (req: Request, res: Response) => {
     try {

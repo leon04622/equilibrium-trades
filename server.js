@@ -22,7 +22,8 @@
  *
  * Client auth (`client/src/context/AuthContext.tsx`):
  *   • React Query `refetchInterval: 10_000` + `staleTime: 0` re-hydrates `subTier` and `totalBalance` from
- *     `/api/user/sync` so authorized Pro/Mentor users keep access across navigations.
+ *     `/api/user/sync` (wallet headers only — no cookie session). `MASTER_BYPASS_WALLET_ADDRESSES` + optional
+ *     `MASTER_BYPASS_WALLET_2` / `VITE_MASTER_BYPASS_WALLET_2` force Pro in UI + sync (`server/master-bypass-wallets.ts`).
  *
  * Apex / scanner (`server/GlobalScanner.ts`, `server/universal-scanner.ts`, `server/MultiPatternEngine.ts`):
  *   • Geometry-first: flags, wedges, H&S, channels, etc. are not suppressed by 21/200 SMMA (SMMA is context

@@ -1,6 +1,6 @@
 /**
- * Educational Vault (`/videos`). Catalog is loaded from Mongo via `GET /api/videos` for everyone;
- * {@link VideoVault} gates **playback** to Pro so titles/thumbnails stay visible after logout.
+ * Educational Vault (`/videos`). Catalog + player: {@link VideoVault} loads from `GET /api/videos` (Mongo when connected).
+ * Master-bypass / Pro wallets skip upgrade CTAs via `useSubscription`.
  */
 import VideoVault from "./VideoVault";
 
