@@ -1,4 +1,4 @@
-import { JsonRpcSigner, Wallet } from "ethers";
+import { JsonRpcSigner, Wallet, getAddress } from "ethers";
 import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { ApiRequestError } from "@nktkas/hyperliquid/api/exchange";
 import { signL1Action as sdkSignL1Action, PrivateKeySigner } from "@nktkas/hyperliquid/signing";
@@ -1513,7 +1513,8 @@ export async function withdrawUsdcToWallet(
 
 // ── Deposit: Arbitrum USDC → Hyperliquid bridge ──────────────────────────────
 const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-const HL_BRIDGE_ARBITRUM = "0x2Df1c51E09a4aB13229630FC358d49776d67093e";
+/** Hyperliquid bridge on Arbitrum One — normalized so ethers v6 accepts it in Contract.transfer. */
+export const HL_BRIDGE_ARBITRUM = getAddress("0x2df1c51e09a4ab13229630fc358d49776d67093e");
 const USDC_DECIMALS = 6;
 
 const USDC_MINIMAL_ABI = [

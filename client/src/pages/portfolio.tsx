@@ -40,7 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, depositUsdcToHyperliquid, getArbitrumUsdcBalance, type SpotBalance } from "@/lib/hyperliquid-client";
+import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, depositUsdcToHyperliquid, getArbitrumUsdcBalance, HL_BRIDGE_ARBITRUM, type SpotBalance } from "@/lib/hyperliquid-client";
 import { Link } from "react-router-dom";
 
 export default function Portfolio() {
@@ -1027,7 +1027,7 @@ export default function Portfolio() {
               <span>
                 Deposits use native USDC on Arbitrum One. The transaction sends your USDC directly to the Hyperliquid bridge contract.{" "}
                 <a
-                  href={`https://arbiscan.io/address/0x2Df1c51E09a4aB13229630FC358d49776d67093e`}
+                  href={`https://arbiscan.io/address/${HL_BRIDGE_ARBITRUM}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary hover:underline inline-flex items-center gap-0.5"
