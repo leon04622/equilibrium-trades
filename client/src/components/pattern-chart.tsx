@@ -306,9 +306,18 @@ function PatternChartComponent({
     candlesFetched && !hasRenderableCandles && !candlesFetching && (candlesError || !candlesLoading);
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
-    queryKey: [`/api/signals/patterns?timeframes=${encodeURIComponent(interval)}&coins=${encodeURIComponent(coin)}`],
+    queryKey: ["/api/signals/patterns", coin, interval],
     refetchInterval: 45_000,
     enabled: patternScanEnabled,
+    queryFn: async () => {
+      const u = new URL("/api/signals/patterns", window.location.origin);
+      u.searchParams.set("coins", coin);
+      u.searchParams.set("timeframes", interval);
+      u.searchParams.set("nocache", "1");
+      const res = await fetch(u.toString(), { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load chart patterns");
+      return (await res.json()) as EducationalPatternSignal[];
+    },
   });
 
   const parsePrice = useCallback((val: number | string): number =>

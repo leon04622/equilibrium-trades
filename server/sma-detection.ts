@@ -96,6 +96,41 @@ function flagPatternScore(p: DetectedPattern): number {
   return tier + p.confidence;
 }
 
+function patternActionabilityScore(p: DetectedPattern): number {
+  const tier = p.status === "breakout_confirmed" ? 300 : p.status === "breakout_pending" ? 200 : 100;
+  return tier + p.confidence;
+}
+
+function scanPatternWindows(
+  candles: HyperliquidCandle[],
+  windowSizes: number[],
+  maxOffset: number,
+  step: number,
+  detector: (window: HyperliquidCandle[]) => DetectedPattern | null,
+): DetectedPattern | null {
+  let best: DetectedPattern | null = null;
+  let bestScore = -Infinity;
+
+  for (const windowSize of windowSizes) {
+    if (candles.length < windowSize) continue;
+    const cappedOffset = Math.max(0, Math.min(candles.length - windowSize, maxOffset));
+    for (let offset = 0; offset <= cappedOffset; offset += step) {
+      const end = candles.length - offset;
+      const start = end - windowSize;
+      if (start < 0) continue;
+      const pattern = detector(candles.slice(start, end));
+      if (!pattern) continue;
+      const score = patternActionabilityScore(pattern);
+      if (score > bestScore) {
+        bestScore = score;
+        best = pattern;
+      }
+    }
+  }
+
+  return best;
+}
+
 // SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
 // First value = SMA of first `period` bars; then SMMA = (prev * (period-1) + close) / period
 function calculateSMMA(prices: number[], period: number): number | null {
@@ -329,51 +364,55 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
 }
 
 // Detect Triangle patterns (Ascending, Descending, Symmetrical)
-function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
-  if (candles.length < 40) return null;
-  
+function detectTrianglePatternInWindow(
+  recentCandles: HyperliquidCandle[],
+  isBullish: boolean,
+  timeframe: string,
+): DetectedPattern | null {
+  if (recentCandles.length < 40) return null;
+
   const thresholds = getThresholds(timeframe);
-  const recentCandles = candles.slice(-40);
   const { highs, lows } = findSwingPoints(recentCandles, 3);
-  
+
   if (highs.length < 2 || lows.length < 2) return null;
-  
+
   const recentHighs = highs.slice(-3);
   const recentLows = lows.slice(-3);
-  
+
   if (recentHighs.length < 2 || recentLows.length < 2) return null;
-  
+
   const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
   const avgPrice = currentPrice;
-  
+
   // Normalize slopes as % of price per candle so thresholds work on any asset price
   const rawHighSlope = (recentHighs[recentHighs.length - 1].price - recentHighs[0].price) / (recentHighs[recentHighs.length - 1].idx - recentHighs[0].idx || 1);
   const rawLowSlope = (recentLows[recentLows.length - 1].price - recentLows[0].price) / (recentLows[recentLows.length - 1].idx - recentLows[0].idx || 1);
-  
+
   // Slopes as % of price per candle — price-relative so they work for BTC, altcoins, etc.
   const highSlopePct = rawHighSlope / avgPrice; // e.g. -0.0003 = falling 0.03% per candle
   const lowSlopePct = rawLowSlope / avgPrice;
-  
-  // "Flat" means changing < 0.03% per candle
-  const FLAT_THRESHOLD = 0.0003;
-  const isHighFlat = Math.abs(highSlopePct) < FLAT_THRESHOLD;
-  const isLowFlat = Math.abs(lowSlopePct) < FLAT_THRESHOLD;
-  const isHighFalling = highSlopePct < -FLAT_THRESHOLD;
-  const isLowRising = lowSlopePct > FLAT_THRESHOLD;
-  
+
+  // Give broader BTC / majors a little more room while keeping clear convergence.
+  const flatThreshold =
+    timeframe === "1m" || timeframe === "3m" || timeframe === "5m" ? 0.00045 : 0.00035;
+  const isHighFlat = Math.abs(highSlopePct) < flatThreshold;
+  const isLowFlat = Math.abs(lowSlopePct) < flatThreshold;
+  const isHighFalling = highSlopePct < -flatThreshold;
+  const isLowRising = lowSlopePct > flatThreshold;
+
   const resistance = recentHighs[recentHighs.length - 1].price;
   const support = recentLows[recentLows.length - 1].price;
   const range = resistance - support;
-  
+
   // Range must be meaningful relative to price
   if ((range / avgPrice) * 100 < thresholds.minMovePercent) return null;
-  
+
   // Lines must be converging (not already crossed)
   if (resistance <= support) return null;
-  
+
   let patternName: PatternName | null = null;
   let displayName = "";
-  
+
   // Ascending Triangle: flat resistance, rising support
   if (isHighFlat && isLowRising) {
     patternName = "ascending_triangle";
@@ -389,15 +428,15 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
     patternName = "symmetrical_triangle";
     displayName = "Symmetrical Triangle";
   }
-  
+
   if (!patternName) return null;
-  
+
   let status: DetectedPattern["status"] = "forming";
   let breakoutLevel: number;
   let stopLoss: number;
   let takeProfit: number;
   let entryPrice: number;
-  
+
   if (isBullish && (patternName === "ascending_triangle" || patternName === "symmetrical_triangle")) {
     breakoutLevel = resistance;
     // Use recent 5-candle high to catch a confirmed breakout that closed above
@@ -443,18 +482,29 @@ function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean,
   };
 }
 
+function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  return scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
+    detectTrianglePatternInWindow(window, isBullish, timeframe),
+  );
+}
+
 // Detect Double Top/Bottom patterns — strict, real-TA criteria
-function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
-  if (candles.length < 80) return null;
+function detectDoublePatternInWindow(
+  recentCandles: HyperliquidCandle[],
+  isBullish: boolean,
+  timeframe: string,
+): DetectedPattern | null {
+  if (recentCandles.length < 80) return null;
 
   const thresholds = getThresholds(timeframe);
-
-  // Use last 80 candles with a larger lookback to find significant swings only
-  const recentCandles = candles.slice(-80);
 
   // Use lookback=6 for higher timeframes (fewer, more meaningful swings)
   const swingLookback = ["1h", "4h", "1d"].includes(timeframe) ? 7 : 5;
   const { highs, lows } = findSwingPoints(recentCandles, swingLookback);
+  const peakTolerancePct =
+    timeframe === "1m" || timeframe === "3m" || timeframe === "5m" ? 0.75 : 0.6;
+  const minValleyDepthPct =
+    timeframe === "1m" || timeframe === "3m" || timeframe === "5m" ? 1.0 : 1.25;
 
   const currentPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
 
@@ -474,10 +524,10 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         const candlesBetween = h2.idx - h1.idx;
 
         // Strict criteria:
-        // 1. Two peaks within 0.5% of each other (much tighter than before)
+        // 1. Two peaks within a tight tolerance of each other
         // 2. At least 8 candles apart so they're truly separate tops
         // 3. At most 60 candles apart so they're in the same price structure
-        if (priceDiffPct > 0.5) continue;
+        if (priceDiffPct > peakTolerancePct) continue;
         if (candlesBetween < 8 || candlesBetween > 60) continue;
 
         // Find the neckline: lowest low BETWEEN the two tops
@@ -487,9 +537,9 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         const neckline = Math.min(...lowsBetween.map(l => l.price));
         const patternHeight = avgHigh - neckline;
 
-        // 4. Valley must be at least 1.5% below the tops — otherwise it's just noise
+        // 4. Valley must be materially below the tops — otherwise it's just noise
         const valleyDepthPct = (patternHeight / avgHigh) * 100;
-        if (valleyDepthPct < 1.5) continue;
+        if (valleyDepthPct < minValleyDepthPct) continue;
 
         // 5. Pattern height must meet the timeframe's minimum move threshold
         if ((patternHeight / avgHigh) * 100 < thresholds.minMovePercent) continue;
@@ -539,7 +589,7 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         const priceDiffPct = (Math.abs(l1.price - l2.price) / avgLow) * 100;
         const candlesBetween = l2.idx - l1.idx;
 
-        if (priceDiffPct > 0.5) continue;
+        if (priceDiffPct > peakTolerancePct) continue;
         if (candlesBetween < 8 || candlesBetween > 60) continue;
 
         const highsBetween = highs.filter(h => h.idx > l1.idx && h.idx < l2.idx);
@@ -549,7 +599,7 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
         const patternHeight = neckline - avgLow;
 
         const valleyHeightPct = (patternHeight / avgLow) * 100;
-        if (valleyHeightPct < 1.5) continue;
+        if (valleyHeightPct < minValleyDepthPct) continue;
 
         if ((patternHeight / avgLow) * 100 < thresholds.minMovePercent) continue;
 
@@ -587,15 +637,24 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
   return null;
 }
 
+function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  return scanPatternWindows(candles, [80, 96, 112, 128], 48, 4, (window) =>
+    detectDoublePatternInWindow(window, isBullish, timeframe),
+  );
+}
+
 // Detect Wedge patterns (Rising/Falling)
 // A wedge is defined by two converging trendlines — both pointing the SAME direction
 // (both up for rising wedge, both down for falling wedge) but with different slopes,
 // so the lines are squeezing together. The breakout is AGAINST the wedge direction.
-function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
-  if (candles.length < 40) return null;
+function detectWedgePatternInWindow(
+  recentCandles: HyperliquidCandle[],
+  isBullish: boolean,
+  timeframe: string,
+): DetectedPattern | null {
+  if (recentCandles.length < 40) return null;
 
   const thresholds = getThresholds(timeframe);
-  const recentCandles = candles.slice(-40);
   const avgPrice = parseFloat(recentCandles[recentCandles.length - 1].c);
   const { highs, lows } = findSwingPoints(recentCandles, 3);
 
@@ -625,8 +684,8 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
   const rangePct = (range / avgPrice) * 100;
   if (rangePct < 0.3) return null; // Wedge too flat to be meaningful
 
-  // Guard: slopes must be meaningfully non-zero (at least 0.01% per candle)
-  const minSlopeMag = 0.01;
+  // BTC / majors often compress with shallower trendlines than alts on short windows.
+  const minSlopeMag = timeframe === "1m" || timeframe === "3m" || timeframe === "5m" ? 0.005 : 0.0065;
 
   // ── Rising Wedge (bearish) ────────────────────────────────────────────────
   // Both trendlines slope UP, but lower rises faster → lines converge from below
@@ -705,6 +764,12 @@ function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, ti
   }
 
   return null;
+}
+
+function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+  return scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
+    detectWedgePatternInWindow(window, isBullish, timeframe),
+  );
 }
 
 function patternsLooselyEqual(a: DetectedPattern, b: DetectedPattern): boolean {

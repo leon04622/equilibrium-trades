@@ -133,6 +133,7 @@ export default function Trading({ visible = true }: TradingProps) {
       const u = new URL("/api/signals/patterns", window.location.origin);
       u.searchParams.set("coins", coin);
       u.searchParams.set("timeframes", chartInterval);
+      u.searchParams.set("nocache", "1");
       const headers: Record<string, string> = {};
       if (walletAddr?.trim()) {
         const w = walletAddr.trim();
