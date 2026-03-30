@@ -45,8 +45,11 @@ import {
   resolveMongoVaultUri,
   persistMongoCrmHlBalanceSnapshot,
   fetchMongoCrmHlBalanceSnapshot,
+  fetchMongoCrmCctpBridgeProgress,
+  persistMongoCrmCctpBridgeProgress,
   type MongoVaultHandle,
 } from "./mongo-vault";
+import { loadCctpServerConfig, fetchCctpBurnForwardFeeMax } from "./cctp-config";
 import {
   getScannerHealthSnapshot,
   getScannerHealthMonitoringEnabled,
@@ -268,12 +271,9 @@ function subscriptionPayloadFromPostgresUser(
 ): WalletSubscriptionPayload | null {
   if (user.manualProOverride) {
     const rawTier = user.subscriptionTier;
+    const r = (rawTier || "free").toLowerCase();
     const paidTier: "pro" | "mentoring" | "elite" =
-      rawTier === "mentoring" || rawTier === "elite"
-        ? "mentoring"
-        : rawTier === "pro"
-          ? "pro"
-          : "pro";
+      r === "mentoring" || r === "elite" ? "mentoring" : "pro";
     return {
       tier: paidTier,
       active: true,
@@ -740,6 +740,54 @@ export async function registerRoutes(
   });
 
   // ============ HYPERLIQUID API ROUTES ============
+
+  /**
+   * Circle CCTP deposit config — **no contract addresses in the client bundle**.
+   * Set `CCTP_EXTENSION_ADDRESS`, `CCTP_USDC_ADDRESS`, `CCTP_FORWARDER_ADDRESS` (and optional domain overrides) on the server.
+   * @see https://developers.circle.com/cctp/howtos/transfer-usdc-from-arbitrum-to-hypercore
+   */
+  app.get("/api/cctp/deposit-config", async (_req: Request, res: Response) => {
+    try {
+      const cfg = loadCctpServerConfig();
+      res.json({
+        cctpExtension: cfg.cctpExtension,
+        usdc: cfg.usdc,
+        chainId: cfg.chainIdArbitrum,
+        cctpForwarder: cfg.cctpForwarder,
+        destinationDomain: cfg.destinationDomain,
+        sourceDomain: cfg.sourceDomain,
+        minDepositUsdc: cfg.minDepositUsdc,
+        minFinalityThreshold: cfg.minFinalityThreshold,
+        usdcEip712: {
+          name: cfg.usdcEip712Name,
+          version: cfg.usdcEip712Version,
+          chainId: cfg.chainIdArbitrum,
+          verifyingContract: cfg.usdc,
+        },
+      });
+    } catch (e) {
+      console.error("GET /api/cctp/deposit-config:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(503).json({ error: msg });
+    }
+  });
+
+  /** Proxy Circle Iris forward-fee quote (avoids browser CORS; no secrets). */
+  app.get("/api/cctp/fees", async (_req: Request, res: Response) => {
+    try {
+      const cfg = loadCctpServerConfig();
+      const { maxFee, minFinalityThreshold } = await fetchCctpBurnForwardFeeMax(cfg);
+      res.json({
+        maxFee: maxFee.toString(),
+        minFinalityThreshold,
+        forwardFeeUsdc: Number(maxFee) / 1e6,
+      });
+    } catch (e) {
+      console.error("GET /api/cctp/fees:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(502).json({ error: msg });
+    }
+  });
 
   // Get available coins from Hyperliquid — cached 60 s (coin list changes rarely)
   app.get("/api/hyperliquid/coins", async (_req: Request, res: Response) => {
@@ -1569,10 +1617,11 @@ export async function registerRoutes(
           }
         }
       }
-      const [entries, stats, hlBalanceMongo] = await Promise.all([
+      const [entries, stats, hlBalanceMongo, cctpBridgeProgress] = await Promise.all([
         listTradeJournalEntries(wallet, 500),
         getTradeJournalStats(wallet),
         fetchMongoCrmHlBalanceSnapshot(wallet),
+        fetchMongoCrmCctpBridgeProgress(wallet),
       ]);
       res.json({
         wallet,
@@ -1592,6 +1641,8 @@ export async function registerRoutes(
         /** Last Hyperliquid totals persisted from the client (spot USDC + perp account value). */
         hlBalance: hlBalanceMongo,
         totalBalance: hlBalanceMongo?.totalUsd ?? null,
+        /** Last saved Circle CCTP bridge step (Mongo CRM) — survives refresh so users can resume. */
+        cctpBridgeProgress,
         journal: {
           entries,
           stats,
@@ -1624,6 +1675,45 @@ export async function registerRoutes(
     } catch (error) {
       console.error("POST /api/user/hl-balance-snapshot:", error);
       res.status(500).json({ error: "Failed to persist balance snapshot" });
+    }
+  });
+
+  /**
+   * Persist CCTP bridge UX state to Mongo (`cctpBridgeProgress` only). Does not change subscription tier.
+   * Headers: `x-wallet-address` or `Authorization: Bearer 0x…`.
+   */
+  app.post("/api/user/cctp-bridge-progress", async (req: Request, res: Response) => {
+    try {
+      const wallet = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const stage = typeof (body as any).stage === "string" ? String((body as any).stage).trim() : "";
+      if (!stage || stage.length > 64) {
+        return res.status(400).json({ error: "Invalid stage" });
+      }
+      const txHash =
+        (body as any).txHash != null && String((body as any).txHash).trim() !== ""
+          ? String((body as any).txHash).trim()
+          : null;
+      const amountUsdc = parseFloat(String((body as any).amountUsdc ?? ""));
+      const forwardFeeMax = parseFloat(String((body as any).forwardFeeMax ?? ""));
+      const error =
+        (body as any).error != null && String((body as any).error).trim() !== ""
+          ? String((body as any).error).trim().slice(0, 2000)
+          : null;
+      await persistMongoCrmCctpBridgeProgress(wallet, {
+        stage,
+        txHash,
+        amountUsdc: Number.isFinite(amountUsdc) ? amountUsdc : null,
+        forwardFeeMax: Number.isFinite(forwardFeeMax) ? forwardFeeMax : null,
+        error,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("POST /api/user/cctp-bridge-progress:", error);
+      res.status(500).json({ error: "Failed to persist bridge progress" });
     }
   });
 
@@ -1837,7 +1927,7 @@ export async function registerRoutes(
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
 
-      void syncWalletUserToMongoCrm(paramWallet);
+      await syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating subscription:", error);
@@ -2339,7 +2429,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
-      void syncWalletUserToMongoCrm(paramWallet);
+      await syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("command-center subscription:", error);
@@ -2495,7 +2585,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
-      void syncWalletUserToMongoCrm(paramWallet);
+      await syncWalletUserToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("admin-equilibrium subscription:", error);

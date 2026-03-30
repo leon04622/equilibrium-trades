@@ -16,6 +16,7 @@ import {
   type ScannerHealthErrorRow,
 } from "./global-scanner";
 import {
+  PATTERN_SCAN_CANDLE_LIMIT,
   PATTERN_SCAN_MIN_BARS,
   patternScanCandleLimitForInterval,
 } from "./scanner-controller";

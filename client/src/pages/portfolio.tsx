@@ -40,8 +40,20 @@ import {
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
-import { getSpotBalances, transferUsdcBetweenAccounts, withdrawUsdcToWallet, depositUsdcToHyperliquid, getArbitrumUsdcBalance, HL_BRIDGE_ARBITRUM, type SpotBalance } from "@/lib/hyperliquid-client";
+import {
+  getSpotBalances,
+  transferUsdcBetweenAccounts,
+  withdrawUsdcToWallet,
+  depositUsdcToHyperliquid,
+  getArbitrumUsdcBalance,
+  fetchHyperliquidDepositConfig,
+  type HyperliquidDepositConfig,
+  type SpotBalance,
+} from "@/lib/hyperliquid-client";
+import { queryClient } from "@/lib/queryClient";
+import { Progress } from "@/components/ui/progress";
 import { Link } from "react-router-dom";
+import { useUserSync } from "@/context/AuthContext";
 
 export default function Portfolio() {
   const { 
@@ -55,6 +67,7 @@ export default function Portfolio() {
     refreshAccount,
   } = useTrading();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
+  const { data: userSync } = useUserSync();
   const { toast } = useToast();
   const [spotBalances, setSpotBalances] = useState<SpotBalance[]>([]);
   const [isLoadingSpot, setIsLoadingSpot] = useState(false);
@@ -80,6 +93,9 @@ export default function Portfolio() {
   const [depositResult, setDepositResult] = useState<{ success: boolean; txHash?: string; error?: string } | null>(null);
   const [arbUsdcBalance, setArbUsdcBalance] = useState<number | null>(null);
   const [isLoadingArbBalance, setIsLoadingArbBalance] = useState(false);
+  const [depositAwaitingChain, setDepositAwaitingChain] = useState(false);
+  const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
+  const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
@@ -323,19 +339,23 @@ export default function Portfolio() {
     setDepositAmount("");
     setDepositResult(null);
     setDepositStep("");
+    setDepositCfg(null);
+    setDepositCfgLoadError(null);
     setDepositOpen(true);
-    if (address) {
-      setIsLoadingArbBalance(true);
-      try {
-        const bal = await getArbitrumUsdcBalance(address);
-        setArbUsdcBalance(bal);
-        const safeMax = Math.floor(bal * 100) / 100;
-        setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
-      } catch {
-        setArbUsdcBalance(0);
-      } finally {
-        setIsLoadingArbBalance(false);
-      }
+    if (!address) return;
+    setIsLoadingArbBalance(true);
+    try {
+      const cfg = await fetchHyperliquidDepositConfig();
+      setDepositCfg(cfg);
+      const bal = await getArbitrumUsdcBalance(address, cfg.usdc);
+      setArbUsdcBalance(bal);
+      const safeMax = Math.floor(bal * 100) / 100;
+      setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+    } catch (e: any) {
+      setDepositCfgLoadError(e?.message || "Could not load deposit settings from the server.");
+      setArbUsdcBalance(null);
+    } finally {
+      setIsLoadingArbBalance(false);
     }
   };
 
@@ -379,10 +399,35 @@ export default function Portfolio() {
       return;
     }
 
+    let cfg = depositCfg;
+    if (!cfg) {
+      setDepositStep("Loading deposit settings…");
+      try {
+        cfg = await fetchHyperliquidDepositConfig(true);
+        setDepositCfg(cfg);
+        setDepositCfgLoadError(null);
+      } catch (e: any) {
+        setDepositStep("");
+        const msg =
+          e?.message ||
+          "Deposit is not configured. Set CCTP_EXTENSION_ADDRESS, CCTP_USDC_ADDRESS, and CCTP_FORWARDER_ADDRESS on the server.";
+        setDepositResult({ success: false, error: msg });
+        return;
+      }
+    }
+
     const amount = parseFloat(depositAmount);
     if (isNaN(amount) || amount <= 0) {
       setDepositStep("");
       setDepositResult({ success: false, error: "Please enter a valid amount greater than 0." });
+      return;
+    }
+    if (amount < cfg.minDepositUsdc) {
+      setDepositStep("");
+      setDepositResult({
+        success: false,
+        error: `Hyperliquid requires at least ${cfg.minDepositUsdc} USDC per deposit (smaller amounts are not credited).`,
+      });
       return;
     }
     const maxDeposit = arbUsdcBalance ?? 0;
@@ -393,27 +438,54 @@ export default function Portfolio() {
     }
 
     setDepositing(true);
-    setDepositStep("Sending USDC to exchange — confirm the transaction in your wallet...");
+    setDepositAwaitingChain(false);
+    setDepositStep("Fetching Circle CCTP fee quote…");
 
     try {
-      const result = await depositUsdcToHyperliquid(activeSigner, amount);
+      const result = await depositUsdcToHyperliquid(activeSigner, amount, {
+        depositConfig: cfg,
+        hyperCoreRecipient: address ?? undefined,
+        onProgress: (stage) => {
+          if (stage === "quoting_fees") setDepositStep("Fetching Circle CCTP fee quote…");
+          else if (stage === "sign_receive_auth") {
+            setDepositStep("Sign USDC ReceiveWithAuthorization (EIP-3009) in your wallet…");
+          } else if (stage === "submit_burn") {
+            setDepositStep("Submitting CCTP burn on Arbitrum…");
+          } else if (stage === "await_confirm") {
+            setDepositAwaitingChain(true);
+            setDepositStep(
+              "Confirming on Arbitrum — CCTP will mint on HyperEVM and forward to HyperCore (often a few minutes).",
+            );
+          }
+        },
+      });
+      setDepositAwaitingChain(false);
       setDepositStep("");
       setDepositResult(result);
 
       if (result.success) {
-        toast({ title: "Deposit Submitted", description: `${amount} USDC sent to your trading account. It will appear in your account within a few minutes.` });
-        setTimeout(() => handleRefresh(), 10000);
-        setTimeout(() => handleRefresh(), 30000);
+        window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
+        void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
+        toast({
+          title: "CCTP burn confirmed on Arbitrum",
+          description: `${amount} USDC burn submitted. Circle routes USDC to HyperCore; balances refresh as the forward completes.`,
+        });
+        handleRefresh();
+        setTimeout(() => handleRefresh(), 5_000);
+        setTimeout(() => handleRefresh(), 15_000);
+        setTimeout(() => handleRefresh(), 45_000);
       } else {
         toast({ title: "Deposit Failed", description: result.error || "Deposit failed", variant: "destructive" });
       }
     } catch (err: any) {
       const errMsg = err?.message || String(err) || "Deposit failed unexpectedly";
+      setDepositAwaitingChain(false);
       setDepositStep("");
       setDepositResult({ success: false, error: errMsg });
       toast({ title: "Deposit Failed", description: errMsg, variant: "destructive" });
     } finally {
       setDepositing(false);
+      setDepositAwaitingChain(false);
     }
   };
 
@@ -954,9 +1026,48 @@ export default function Portfolio() {
               Deposit USDC to Your Account
             </DialogTitle>
             <DialogDescription>
-              Send native USDC from your Arbitrum wallet to your trading account. Funds typically arrive within a few minutes.
+              <strong>Circle CCTP:</strong> native USDC on Arbitrum is burned via{" "}
+              <code className="text-xs bg-muted px-1 rounded">batchDepositForBurnWithAuth</code> and{" "}
+              <strong>EIP-3009 ReceiveWithAuthorization</strong>, then minted on HyperEVM and forwarded to your address on{" "}
+              <strong>HyperCore</strong> (perps by default). Contract addresses are loaded from the server only — no hardcoded
+              bridge recipients. A small <strong>HyperCore forward fee</strong> (quoted live) is deducted from the credited
+              amount. Minimum {depositCfg ? `${depositCfg.minDepositUsdc}` : "—"} USDC from server config.
             </DialogDescription>
           </DialogHeader>
+
+          {userSync?.cctpBridgeProgress &&
+            userSync.cctpBridgeProgress.stage !== "completed" &&
+            !String(userSync.cctpBridgeProgress.stage).startsWith("failed") && (
+              <div className="flex items-start gap-2 p-3 rounded-lg text-xs bg-muted/60 border border-border">
+                <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Resume:</strong> last bridge step saved:{" "}
+                  <span className="font-mono">{userSync.cctpBridgeProgress.stage}</span>
+                  {userSync.cctpBridgeProgress.txHash ? (
+                    <>
+                      {" "}
+                      · tx{" "}
+                      <a
+                        className="text-primary underline"
+                        href={`https://arbiscan.io/tx/${userSync.cctpBridgeProgress.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {userSync.cctpBridgeProgress.txHash.slice(0, 10)}…
+                      </a>
+                    </>
+                  ) : null}
+                  . Progress syncs to your account on refresh.
+                </span>
+              </div>
+            )}
+
+          {depositCfgLoadError && (
+            <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-destructive/10 text-destructive border border-destructive/20">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{depositCfgLoadError}</span>
+            </div>
+          )}
 
           {!signer && (
             <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
@@ -1022,27 +1133,46 @@ export default function Portfolio() {
             </div>
 
             {/* Info note */}
-            <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-              <Info className="h-3 w-3 shrink-0 mt-0.5" />
-              <span>
-                Deposits use native USDC on Arbitrum One. The transaction sends your USDC directly to the Hyperliquid bridge contract.{" "}
-                <a
-                  href={`https://arbiscan.io/address/${HL_BRIDGE_ARBITRUM}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                  data-testid="link-bridge-contract"
-                >
-                  View bridge contract
-                  <ExternalLink className="h-2.5 w-2.5" />
-                </a>
-              </span>
-            </div>
+            {depositCfg && (
+              <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>
+                  Native USDC on Arbitrum One. View the configured{" "}
+                  <strong>CctpExtension</strong> on{" "}
+                  <a
+                    href={`https://arbiscan.io/address/${depositCfg.cctpExtension}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline inline-flex items-center gap-0.5"
+                    data-testid="link-cctp-extension-contract"
+                  >
+                    Arbiscan
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  . Guide:{" "}
+                  <a
+                    href="https://developers.circle.com/cctp/howtos/transfer-usdc-from-arbitrum-to-hypercore"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline inline-flex items-center gap-0.5"
+                  >
+                    Circle CCTP → HyperCore
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  .
+                </span>
+              </div>
+            )}
 
             {depositStep && (
-              <div className="flex items-center gap-2 p-3 rounded-lg text-sm bg-primary/10 text-primary border border-primary/20">
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                <span>{depositStep}</span>
+              <div className="space-y-2 p-3 rounded-lg text-sm bg-primary/10 text-primary border border-primary/20">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                  <span>{depositStep}</span>
+                </div>
+                {depositAwaitingChain && (
+                  <Progress value={85} className="h-1.5 bg-primary/20 [&>div]:animate-pulse" />
+                )}
               </div>
             )}
 
@@ -1060,7 +1190,7 @@ export default function Portfolio() {
                 )}
                 <span className="break-all">
                   {depositResult.success
-                    ? `Deposit of ${depositAmount} USDC submitted! Funds will appear in your trading account shortly.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
+                    ? `CCTP burn of ${depositAmount} USDC submitted on Arbitrum. USDC will route to HyperCore after Circle attestation; amount credited is net of the forward fee.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
                     : depositResult.error || "Deposit failed"}
                 </span>
               </div>
@@ -1075,6 +1205,7 @@ export default function Portfolio() {
               onClick={handleDeposit}
               disabled={
                 depositing ||
+                !!depositCfgLoadError ||
                 !depositAmount ||
                 parseFloat(depositAmount) <= 0 ||
                 (arbUsdcBalance !== null && parseFloat(depositAmount) > arbUsdcBalance + 0.001)

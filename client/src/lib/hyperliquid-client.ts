@@ -1511,58 +1511,18 @@ export async function withdrawUsdcToWallet(
   }
 }
 
-// ── Deposit: Arbitrum USDC → Hyperliquid bridge ──────────────────────────────
-const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-/** Hyperliquid bridge on Arbitrum One — normalized so ethers v6 accepts it in Contract.transfer. */
-export const HL_BRIDGE_ARBITRUM = getAddress("0x2df1c51e09a4ab13229630fc358d49776d67093e");
-const USDC_DECIMALS = 6;
-
-const USDC_MINIMAL_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function transfer(address to, uint256 amount) returns (bool)",
-];
-
-/** Read the user's native USDC balance on Arbitrum One (in USDC, not wei). */
-export async function getArbitrumUsdcBalance(address: string): Promise<number> {
-  try {
-    const { JsonRpcProvider, Contract } = await import("ethers");
-    const provider = new JsonRpcProvider("https://arb1.arbitrum.io/rpc");
-    const contract = new Contract(USDC_ARBITRUM, USDC_MINIMAL_ABI, provider);
-    const raw: bigint = await contract.balanceOf(address);
-    return Number(raw) / 10 ** USDC_DECIMALS;
-  } catch (error) {
-    console.error("[Deposit] Error reading Arbitrum USDC balance:", error);
-    return 0;
-  }
-}
-
-/**
- * Deposit USDC from Arbitrum into the user's Hyperliquid account.
- * Sends native USDC directly to the Hyperliquid bridge contract on Arbitrum One.
- * The signer must already be connected to Arbitrum (chainId 42161).
- */
-export async function depositUsdcToHyperliquid(
-  signer: JsonRpcSigner,
-  amount: number
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  try {
-    const { Contract, parseUnits } = await import("ethers");
-    const amountWei = parseUnits(amount.toFixed(USDC_DECIMALS), USDC_DECIMALS);
-    const contract = new Contract(USDC_ARBITRUM, USDC_MINIMAL_ABI, signer);
-
-    console.log(`[Deposit] Sending ${amount} USDC to HL bridge ${HL_BRIDGE_ARBITRUM}`);
-    const tx = await contract.transfer(HL_BRIDGE_ARBITRUM, amountWei);
-    console.log("[Deposit] Transaction sent:", tx.hash);
-    const receipt = await tx.wait();
-    console.log("[Deposit] Confirmed in block:", receipt.blockNumber);
-
-    return { success: true, txHash: receipt.hash };
-  } catch (error: any) {
-    console.error("[Deposit] Error:", error);
-    const msg: string = error?.reason || error?.message || "Deposit failed";
-    return { success: false, error: msg };
-  }
-}
+// ── Deposit: Circle CCTP (Arbitrum USDC → HyperCore) — implementation in `cctp-deposit.ts` ──
+export {
+  depositUsdcToHyperliquid,
+  fetchCctpDepositConfig,
+  fetchHyperliquidDepositConfig,
+  getArbitrumUsdcBalance,
+  encodeCctpForwardHookData,
+  type CctpDepositConfig,
+  type HyperliquidDepositConfig,
+  type CctpDepositProgressStage,
+  type HyperliquidDepositProgressStage,
+} from "./cctp-deposit";
 
 export async function setLeverage(
   signer: JsonRpcSigner,

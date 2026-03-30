@@ -16,6 +16,16 @@ export type HlBalanceSnapshot = {
   updatedAt: string | null;
 };
 
+/** Last persisted Circle CCTP bridge step (Mongo CRM) — see `POST /api/user/cctp-bridge-progress`. */
+export type CctpBridgeProgressSync = {
+  stage: string;
+  updatedAt: string | null;
+  txHash?: string | null;
+  amountUsdc?: number | null;
+  forwardFeeMax?: number | null;
+  error?: string | null;
+};
+
 export type UserSyncResponse = {
   wallet: string;
   subscription: SubscriptionSyncSlice;
@@ -30,6 +40,8 @@ export type UserSyncResponse = {
   hlBalance: HlBalanceSnapshot | null;
   /** Same as `hlBalance.totalUsd` when present — used for quick tier/balance hydration. */
   totalBalance: number | null;
+  /** Resume long CCTP flows after refresh — does not replace on-chain status. */
+  cctpBridgeProgress: CctpBridgeProgressSync | null;
   journal: {
     entries: unknown[];
     stats: unknown;
@@ -41,7 +53,11 @@ const AuthContext = createContext<UseQueryResult<UserSyncResponse> | undefined>(
 
 /**
  * Fetches `GET /api/user/sync` whenever a wallet is connected — subscription, profile, and journal
- * snapshot from Mongo + Postgres so tier survives refresh and admin grants.
+ * snapshot from **Mongo + Postgres** so tier survives refresh.
+ *
+ * Admin Panel **Pro / Mentor** writes go through `persistUserAccessTier` → `await syncWalletUserToMongoCrm`
+ * on the server; this query uses `staleTime: 0`, `refetchOnMount: "always"`, and a 10s interval so
+ * `manualProOverride` and `subTier` re-hydrate and **SubscriptionGuard** does not stick on “Upgrade” blur.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useWallet();
@@ -70,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...raw,
         hlBalance: raw.hlBalance ?? null,
         totalBalance: raw.totalBalance ?? raw.hlBalance?.totalUsd ?? null,
+        cctpBridgeProgress: raw.cctpBridgeProgress ?? null,
       };
     },
   });

@@ -265,6 +265,7 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
   const now = new Date();
   const created =
     user.createdAt instanceof Date ? user.createdAt : new Date(user.createdAt || now);
+  const existing = await coll.findOne({ $or: [{ wallet }, { walletAddress: wallet }] });
   const doc: Record<string, unknown> = {
     wallet,
     walletAddress: wallet,
@@ -283,6 +284,21 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
     status: crmSubscriptionStatusFromWallet(user),
     isBuilderLinked: user.isBuilderLinked ?? false,
   };
+  /** Lock CRM **Pro / Mentor** when `manualProOverride` was granted in Mongo but Postgres row still shows `free` (sync lag). */
+  if (existing && existing.manualProOverride === true) {
+    doc.manualProOverride = true;
+    const exTier = inferSubscriptionTierString(existing);
+    const pgFree = (user.subscriptionTier || "free").toLowerCase() === "free";
+    if (pgFree && exTier !== "free") {
+      doc.subscriptionTier = exTier;
+      doc.subTier =
+        existing.subTier != null && String(existing.subTier).trim() !== ""
+          ? String(existing.subTier)
+          : crmDisplayTier(exTier);
+      doc.subscriptionActive = true;
+      doc.status = "Active";
+    }
+  }
   await coll.updateOne(
     { $or: [{ wallet }, { walletAddress: wallet }] },
     {
@@ -318,6 +334,95 @@ export async function persistMongoCrmHlBalanceSnapshot(
         hlSpotUsdc: data.spotUsdc,
         hlTotalUsd: data.totalUsd,
         hlBalanceObservedAt: now,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        wallet: w,
+        walletAddress: w,
+        source: "equilibrium_app",
+        joinDate: now,
+        createdAt: now,
+        subTier: "Free",
+        subscriptionTier: "free",
+        subscriptionActive: false,
+        manualProOverride: false,
+        accessExpires: null,
+        subscriptionExpiresAt: null,
+        status: "Active",
+        isBuilderLinked: false,
+        email: null,
+      },
+    },
+    { upsert: true },
+  );
+}
+
+/** Persisted CCTP Arbitrum → HyperCore flow (CRM only — does not modify subscription / Pro fields). */
+export type CctpBridgeProgressPublic = {
+  stage: string;
+  updatedAt: string | null;
+  txHash?: string | null;
+  amountUsdc?: number | null;
+  forwardFeeMax?: number | null;
+  error?: string | null;
+};
+
+function cctpProgressFromDoc(doc: Document | null): CctpBridgeProgressPublic | null {
+  if (!doc || !doc.cctpBridgeProgress || typeof doc.cctpBridgeProgress !== "object") return null;
+  const p = doc.cctpBridgeProgress as Record<string, unknown>;
+  const stage = typeof p.stage === "string" ? p.stage : "unknown";
+  const u = p.updatedAt;
+  const updatedAt =
+    u instanceof Date ? u.toISOString() : u != null && u !== "" ? String(u) : null;
+  return {
+    stage,
+    updatedAt,
+    txHash: p.txHash != null ? String(p.txHash) : null,
+    amountUsdc: typeof p.amountUsdc === "number" ? p.amountUsdc : undefined,
+    forwardFeeMax: typeof p.forwardFeeMax === "number" ? p.forwardFeeMax : undefined,
+    error: p.error != null ? String(p.error) : null,
+  };
+}
+
+export async function fetchMongoCrmCctpBridgeProgress(
+  walletAddress: string,
+): Promise<CctpBridgeProgressPublic | null> {
+  const doc = await findCrmUserDocumentByWallet(walletAddress);
+  return cctpProgressFromDoc(doc);
+}
+
+/**
+ * Updates only `cctpBridgeProgress` (+ `updatedAt`). Subscription tier and `manualProOverride` are untouched
+ * so **Pro / Mentor grants stay locked** in Mongo while users resume a long CCTP flow.
+ */
+export async function persistMongoCrmCctpBridgeProgress(
+  walletAddress: string,
+  progress: {
+    stage: string;
+    txHash?: string | null;
+    amountUsdc?: number | null;
+    forwardFeeMax?: number | null;
+    error?: string | null;
+  },
+): Promise<void> {
+  if (!vaultDb) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(w)) return;
+  const now = new Date();
+  const blob = {
+    stage: progress.stage,
+    updatedAt: now,
+    txHash: progress.txHash ?? null,
+    amountUsdc: progress.amountUsdc ?? null,
+    forwardFeeMax: progress.forwardFeeMax ?? null,
+    error: progress.error ?? null,
+  };
+  await coll.updateOne(
+    { $or: [{ wallet: w }, { walletAddress: w }] },
+    {
+      $set: {
+        cctpBridgeProgress: blob,
         updatedAt: now,
       },
       $setOnInsert: {
