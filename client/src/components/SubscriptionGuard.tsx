@@ -51,7 +51,7 @@ export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isLoading) {
+  if (isPro === null || isLoading) {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
@@ -60,7 +60,7 @@ export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isPro) {
+  if (isPro === true) {
     return <>{children}</>;
   }
 

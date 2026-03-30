@@ -243,6 +243,11 @@ function mongoSubscriptionSnapshotToPayload(
   const subNorm = String(mongo.subTier ?? "").trim().toLowerCase();
   const crmLabelPaid =
     subNorm === "pro" || subNorm === "mentor" || subNorm === "mentoring" || subNorm === "elite";
+  /** CRM `subTier` wins when `subscriptionTier` still reads `free` — avoids returning inactive Free for paying users. */
+  if (tier === "free" && crmLabelPaid) {
+    if (subNorm === "pro") tier = "pro";
+    else tier = "mentoring";
+  }
   const active =
     tier !== "free" && expOk && (mongo.subscriptionActive || crmLabelPaid);
   return {
@@ -591,6 +596,7 @@ export async function registerRoutes(
     })();
   }, 5000);
 
+  /** Command Center access only (fortress list). Subscription tier for the wallet always comes from `GET /api/user/sync`. */
   app.get("/api/wallet/is-admin", async (req: Request, res: Response) => {
     const walletAddress = req.headers["x-wallet-address"] as string | undefined;
     res.json({

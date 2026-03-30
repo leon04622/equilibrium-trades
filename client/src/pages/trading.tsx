@@ -86,7 +86,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const { toast } = useToast();
   const { updatePrices, refreshAccount, connected: tradingConnected } = useTrading();
   const { openPaywall } = usePaywall();
-  const { hasAccess, isConnected, isLoading: subLoading } = useSubscription();
+  const { hasAccess, isConnected } = useSubscription();
   const { address: walletAddr } = useWallet();
 
   const { pathname, search } = useLocation();
@@ -280,19 +280,7 @@ export default function Trading({ visible = true }: TradingProps) {
     );
   }
 
-  // While subscription loads for a connected wallet, avoid flashing paid UI
-  if (subLoading && isConnected) {
-    return (
-      <div className="h-full flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <p className="text-sm">Checking subscription...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Wallet gate is handled by WalletGate in App.tsx — no need to re-check here
+  // Subscription pending UI is handled globally by `SubscriptionPersistenceGate` in `AuthProvider`.
 
   return (
     <div className={cn(

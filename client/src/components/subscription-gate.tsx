@@ -145,7 +145,7 @@ export function SubscriptionGate({
             {description || `Unlock ${featureName.toLowerCase()} with a Pro subscription.`}
           </p>
 
-          {tier !== 'free' && (
+          {tier != null && tier !== "free" && (
             <p className="text-xs text-muted-foreground">
               Current plan: <span className="font-medium capitalize">{tier}</span>
             </p>

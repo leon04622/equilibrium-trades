@@ -203,10 +203,30 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
+function VaultUpgradeInline() {
+  return (
+    <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-lg border border-primary/25 bg-primary/5 p-8 text-center">
+      <Lock className="h-10 w-10 text-primary shrink-0" aria-hidden />
+      <div className="space-y-1">
+        <p className="font-semibold text-base">Equilibrium Pro required</p>
+        <p className="text-sm text-muted-foreground max-w-md">
+          Connect a subscribed wallet or upgrade to unlock in-app playback for the Educational Vault.
+        </p>
+      </div>
+      <Button asChild size="lg" className="gap-2">
+        <Link to="/pricing" data-testid="vault-dialog-upgrade-pricing">
+          <Sparkles className="h-4 w-4" />
+          Upgrade to Pro — ${TIER_PRO}/mo
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
 /** Educational Vault — lessons from GET /api/videos, grouped by the category name set in Command Center. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
-  const { isSubscribed, isLoading: subLoading, tier, isSyncError, refetch: refetchUserSync } = useSubscription();
+  const { isPro, isLoading: subLoading, tier, isSyncError, refetch: refetchUserSync } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
   /** Same /api/videos list as Admin Command Center; refetched for all visitors (playback stays Pro). */
@@ -262,9 +282,9 @@ export default function VideoVault() {
     }));
   }, [items]);
 
-  const accessChecking = isConnected && subLoading;
-  /** Pro (including master bypass) → no upgrade button; player is never paywalled inside the dialog. */
-  const showUpgradeBanner = isConnected && !isSubscribed;
+  const accessChecking = isConnected && (subLoading || isPro === null);
+  /** Pro (including master bypass) → no upgrade CTA; non‑Pro / logged‑out see inline upgrade in the player area. */
+  const showUpgradeBanner = isConnected && isPro === false;
 
   if (listLoading) {
     return (
@@ -285,10 +305,10 @@ export default function VideoVault() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Library list from Mongo via <code className="text-xs">/api/videos</code> (same entries as Command Center) —{" "}
-            <strong>browsable while logged out</strong>; the player opens for any visitor. Categories follow the{" "}
+            Library list from Mongo via <code className="text-xs">/api/videos</code> (same entries as Command Center).{" "}
+            <strong>Browse anytime</strong>; in-app playback requires Pro. Categories follow the{" "}
             <strong>category name</strong> set when publishing.
-            {isSubscribed && (
+            {isPro === true && tier != null && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}
               </Badge>
@@ -426,7 +446,11 @@ export default function VideoVault() {
                 </Button>
               </div>
               {active.videoUrl.trim() ? (
-                <PlayerFrame key={active.id} url={active.videoUrl} title={active.title} />
+                isPro === true ? (
+                  <PlayerFrame key={active.id} url={active.videoUrl} title={active.title} />
+                ) : isPro === false ? (
+                  <VaultUpgradeInline />
+                ) : null
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-8 rounded-lg border border-dashed">
                   No playable URL for this lesson. Re-save the video in Command Center with a YouTube link, Vimeo, or

@@ -65,22 +65,44 @@ export function useSubscription() {
     subNorm === "mentoring" ||
     subNorm === "elite";
 
-  const isMentoring =
+  const mentorResolved =
     subscriptionHydrated &&
     mentorLabel &&
     (manualProUnlock || mongoSubTierUnlock || !!subscription?.active);
 
-  const isPro =
-    masterBypass ||
-    manualProUnlock ||
-    mongoSubTierUnlock ||
-    (subscriptionHydrated &&
-      !!subscription?.active &&
-      (subscription.tier === "pro" || subscription.tier === "mentoring" || subscription.tier === "elite"));
+  const proResolved =
+    subscriptionHydrated &&
+    (manualProUnlock ||
+      mongoSubTierUnlock ||
+      (!!subscription?.active &&
+        (subscription.tier === "pro" ||
+          subscription.tier === "mentoring" ||
+          subscription.tier === "elite")));
 
-  const isFree = subscriptionHydrated && !isPro && !masterBypass;
+  let isPro: boolean | null;
+  let isMentoring: boolean | null;
+
+  if (!syncEnabled) {
+    isPro = false;
+    isMentoring = false;
+  } else if (masterBypass) {
+    isPro = true;
+    isMentoring = true;
+  } else if (isSyncError) {
+    isPro = null;
+    isMentoring = null;
+  } else if (!subscriptionHydrated) {
+    isPro = null;
+    isMentoring = null;
+  } else {
+    isPro = proResolved;
+    isMentoring = mentorResolved;
+  }
+
+  const isFree = subscriptionHydrated && isPro === false && !masterBypass;
 
   const hasAccess = (feature: PremiumFeature): boolean => {
+    if (isPro === null || isMentoring === null) return false;
     switch (feature) {
       case "ai_signals":
       case "advanced_education":
@@ -88,11 +110,11 @@ export function useSubscription() {
       case "live_trading":
       case "trade_journal":
       case "video_library":
-        return !!isPro;
+        return isPro;
       case "heatmap":
-        return !!isPro;
+        return isPro;
       case "coaching":
-        return !!isMentoring;
+        return isMentoring;
       default:
         return false;
     }
@@ -111,9 +133,16 @@ export function useSubscription() {
     /** @deprecated use isMentoring */
     isElite: isMentoring,
     isFree,
-    /** Alias for an active Pro or Mentoring plan (Mongo + Postgres + Stripe, after sync). */
-    isSubscribed: !!isPro,
-    tier: masterBypass ? "mentoring" : (subscriptionHydrated ? subscription?.tier : undefined) || "free",
+    /** True only when subscription tier is known and user has Pro/Mentor access (never true while `isPro === null`). */
+    isSubscribed: isPro === true,
+    tier:
+      masterBypass
+        ? "mentoring"
+        : !syncEnabled
+          ? "free"
+          : !subscriptionHydrated
+            ? undefined
+            : (subscription?.tier ?? "free"),
     masterBypass,
     hasAccess,
     isConnected,
