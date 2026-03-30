@@ -12,10 +12,7 @@ import {
 } from "./master-admin";
 import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
-
-/** Default `tutorial_videos` — override with `MONGO_VIDEOS_COLLECTION` if needed. Legacy `videos` is merged on read. */
-const VIDEOS_COLL = process.env.MONGO_VIDEOS_COLLECTION?.trim() || "tutorial_videos";
-const LEGACY_VIDEOS_COLL = "videos";
+import { deleteVaultVideoById, listAllVaultVideos, upsertVaultVideo, vaultVideoDocToApi } from "./video-service";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
 /** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
@@ -145,31 +142,6 @@ export type MongoVaultHandle = {
   handleGetSupportConversations(req: Request, res: Response): Promise<void>;
   handleMarkSupportRead(req: Request, res: Response): Promise<void>;
 };
-
-function absolutizeMediaUrl(pathOrUrl: string | null | undefined, origin: string): string | null {
-  if (pathOrUrl == null || String(pathOrUrl).trim() === "") return null;
-  const s = String(pathOrUrl).trim();
-  if (/^https?:\/\//i.test(s)) return s;
-  const base = origin.replace(/\/$/, "");
-  return `${base}${s.startsWith("/") ? "" : "/"}${s}`;
-}
-
-function videoDocToApi(doc: Document & { _id: ObjectId }, publicOrigin?: string) {
-  const created = doc.createdAt instanceof Date ? doc.createdAt : new Date(doc.createdAt || Date.now());
-  const origin = (publicOrigin || getPublicAppBaseUrl()).replace(/\/$/, "");
-  return {
-    id: doc._id.toString(),
-    title: String(doc.title ?? ""),
-    description: String(doc.description ?? ""),
-    duration: String(doc.duration ?? ""),
-    category: String(doc.category ?? ""),
-    youtubeId: doc.youtubeId != null ? String(doc.youtubeId) : null,
-    videoPath: absolutizeMediaUrl(doc.videoPath != null ? String(doc.videoPath) : null, origin),
-    thumbnailPath: absolutizeMediaUrl(doc.thumbnailPath != null ? String(doc.thumbnailPath) : null, origin),
-    academySection: doc.academySection != null ? String(doc.academySection) : null,
-    createdAt: created.toISOString(),
-  };
-}
 
 function rowToSupportMessage(doc: Document): SupportMessage {
   const createdAt =
@@ -635,7 +607,6 @@ function mongoDocToCrmRow(u: Document) {
 }
 
 function createHandle(db: Db): MongoVaultHandle {
-  const videos: Collection<Document> = db.collection(VIDEOS_COLL);
   const crm: Collection<Document> = db.collection(mongoCrmUsersCollectionName());
   const tickets: Collection<Document> = db.collection(SUPPORT_COLL);
 
@@ -646,8 +617,8 @@ function createHandle(db: Db): MongoVaultHandle {
         const host = req.get("host");
         const origin =
           host && proto ? `${proto}://${host}`.replace(/\/$/, "") : getPublicAppBaseUrl();
-        const docs = await videos.find({}).sort({ createdAt: -1 }).toArray();
-        res.json(docs.map((d) => videoDocToApi(d as Document & { _id: ObjectId }, origin)));
+        const list = await listAllVaultVideos(db, origin);
+        res.json(list);
       } catch (e) {
         console.error("[mongo-vault] GET /api/videos:", e);
         res.status(500).json({ error: "Failed to fetch videos" });
@@ -673,37 +644,25 @@ function createHandle(db: Db): MongoVaultHandle {
           return;
         }
         const row = parsed.data;
+        if (row.id != null && String(row.id).trim() !== "" && !ObjectId.isValid(String(row.id).trim())) {
+          res.status(400).json({ error: "Invalid video id — must be a 24-character Mongo ObjectId hex" });
+          return;
+        }
         if (!row.youtubeId?.trim() && !row.videoPath?.trim()) {
           res.status(400).json({ error: "Could not resolve video URL (YouTube, Vimeo, or direct link)" });
           return;
         }
-        const now = new Date();
-        const insertDoc: Record<string, unknown> = {
-          title: String(row.title),
-          description: String(row.description),
-          duration: String(row.duration ?? ""),
-          category: String(row.category),
-          youtubeId: row.youtubeId?.trim() ? String(row.youtubeId).trim() : null,
-          videoPath: row.videoPath?.trim() ? String(row.videoPath).trim() : null,
-          thumbnailPath: row.thumbnailPath?.trim() ? String(row.thumbnailPath).trim() : null,
-          academySection: row.academySection ? String(row.academySection) : null,
-          createdAt: now,
-        };
-        const r = await videos.insertOne(insertDoc);
-        res.json(
-          videoDocToApi(
-            {
-              ...insertDoc,
-              _id: r.insertedId,
-            } as Document & { _id: ObjectId },
-            getPublicAppBaseUrl(),
-          ),
-        );
+        const saved = await upsertVaultVideo(db, row);
+        const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
+        const host = req.get("host");
+        const origin =
+          host && proto ? `${proto}://${host}`.replace(/\/$/, "") : getPublicAppBaseUrl();
+        res.json(vaultVideoDocToApi(saved, origin));
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
         console.error("[mongo-vault] POST /api/videos:", e);
         res.status(500).json({
-          error: "Failed to create video",
+          error: "Failed to persist video to MongoDB",
           detail,
         });
       }
@@ -721,20 +680,8 @@ function createHandle(db: Db): MongoVaultHandle {
       }
       try {
         const raw = req.params.id;
-        let deleted = 0;
-        if (ObjectId.isValid(raw)) {
-          try {
-            const dr = await videos.deleteOne({ _id: new ObjectId(raw) });
-            deleted = dr.deletedCount;
-          } catch {
-            /* ignore invalid hex */
-          }
-        }
-        if (!deleted) {
-          const dr = await videos.deleteOne({ id: raw });
-          deleted = dr.deletedCount;
-        }
-        if (deleted) res.json({ success: true });
+        const ok = await deleteVaultVideoById(db, raw);
+        if (ok) res.json({ success: true });
         else res.status(404).json({ error: "Video not found" });
       } catch (e) {
         console.error("[mongo-vault] DELETE /api/videos/:id:", e);

@@ -411,10 +411,18 @@ export default function AdminDashboard() {
       setUploadedFileLabel("");
       void queryClient.invalidateQueries({ queryKey: ["admin-rest", "vault-videos"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
-      toast({ title: "Video published", description: "Stored in the database video library." });
+      toast({
+        title: "Video saved",
+        description: "MongoDB acknowledged the write (majority). The Educational Vault will list it on refresh.",
+      });
       void refetchVault();
     },
-    onError: (e: Error) => toast({ title: "Add failed", description: e.message, variant: "destructive" }),
+    onError: (e: Error) =>
+      toast({
+        title: "Not saved",
+        description: e.message || "Mongo write failed or was rejected — nothing was persisted.",
+        variant: "destructive",
+      }),
   });
 
   const deleteVaultVideo = useMutation({

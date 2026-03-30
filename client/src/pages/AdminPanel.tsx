@@ -3,7 +3,7 @@
  *
  * Persistence (when `MONGODB_URI` / `MONGO_VAULT_URI` connects — see server `DATABASE_SYNC_SUCCESS` log):
  * - **Live CRM**: `users` collection (wallet, email, joinDate, `subTier`, `subscriptionTier`, `manualProOverride`).
- * - **Educational vault**: `tutorial_videos` collection via POST/GET `/api/videos` (legacy `videos` merged on read).
+ * - **Educational vault**: Mongo `videos` (configurable) via `server/video-service.ts` + POST/GET `/api/videos`.
  * - **Manual Pro**: PATCH `/api/admin/update-tier` writes Postgres + Mongo so refresh keeps Pro.
  *
  * Hyperliquid builder fee recipient: `0xad9be64fd7a35d99a138b87cb212baefbcdcf045`.

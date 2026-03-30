@@ -17,7 +17,8 @@
  *   • `POST /api/user/hl-balance-snapshot` — persists perp + spot USDC + total USD to CRM after live HL poll.
  *   • `POST /api/wallet-user/register` + admin tier / CRM routes — call `syncWalletUserToMongoCrm` / vault
  *     handlers so Pro grants, videos, and CRM rows are written to Mongo immediately.
- *   • Videos: `tutorial_videos` collection; `GET /api/videos` returns absolute media URLs (host + path).
+ *   • Videos: Mongo primary `videos` (MONGO_VIDEOS_COLLECTION); `GET /api/videos` merges legacy `tutorial_videos`;
+ *     `POST` uses majority write concern upsert (`server/video-service.ts`).
  *
  * Client auth (`client/src/context/AuthContext.tsx`):
  *   • React Query `refetchInterval: 10_000` + `staleTime: 0` re-hydrates `subTier` and `totalBalance` from

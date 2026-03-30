@@ -234,6 +234,8 @@ export function extractVimeoVideoIdFromUrl(raw: string): string | undefined {
 /** Admin Command Center / POST /api/videos — accepts videoUrl, thumbnailUrl, free-text category → DB row. */
 export const adminVideoCreateSchema = z
   .object({
+    /** Existing Mongo `_id` hex — when set, row is updated in place (upsert). */
+    id: z.string().trim().optional(),
     title: z.string().trim().min(1, "Title is required"),
     description: z.string().trim().optional(),
     videoUrl: z.string().trim().min(1, "Video URL is required"),
@@ -305,8 +307,10 @@ export const adminVideoCreateSchema = z
       undefined;
 
     const desc = (data.description && data.description.trim()) || data.title.trim();
+    const existingId = data.id?.trim();
 
     return {
+      ...(existingId ? { id: existingId } : {}),
       title: data.title.trim(),
       description: desc,
       duration: "" as const,

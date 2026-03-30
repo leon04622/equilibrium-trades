@@ -233,11 +233,15 @@ export default function VideoVault() {
       const raw: unknown = await res.json();
       return parseVideosApiList(raw);
     },
-    staleTime: 30_000,
+    staleTime: 0,
     gcTime: 10 * 60_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
+
+  useEffect(() => {
+    void refetchVideos();
+  }, [refetchVideos]);
 
   const items = useMemo(() => mapApiToVaultItems(apiVideos), [apiVideos]);
 

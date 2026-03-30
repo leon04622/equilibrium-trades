@@ -377,7 +377,8 @@ export default function AdminCommandCenter() {
       void queryClient.invalidateQueries({ queryKey: ["fortress-videos"] });
       void queryClient.invalidateQueries({ queryKey: ["/api/videos"] });
       toast({
-        title: "Video Added Successfully",
+        title: "Video saved to MongoDB",
+        description: "Write acknowledged (majority). It will appear on /videos after list refresh.",
         className:
           "border-emerald-500/55 bg-emerald-950/95 text-emerald-50 shadow-lg shadow-emerald-900/20",
       });

@@ -1295,7 +1295,7 @@ export async function registerRoutes(
     }
   });
 
-  // Tutorial Videos API — explicit JSON shape so clients always receive camelCase fields.
+  // Tutorial Videos API — with Mongo vault: `server/video-service.ts` (primary `videos` + legacy merge). Else Postgres.
   app.get("/api/videos", async (req: Request, res: Response) => {
     if (mongoVaultHandle) {
       return mongoVaultHandle.handleGetVideos(req, res);
