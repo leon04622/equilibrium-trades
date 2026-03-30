@@ -12,7 +12,7 @@ function avgVolume(slice: HyperliquidCandle[]): number {
 }
 
 /**
- * Pole = 10 bars, ≥5% directional impulse; flag retracement ≤50% of pole height;
+ * Pole = 10 bars, permissive directional impulse; flag retracement ≤50% of pole height;
  * volume ideally lower in flag than pole.
  */
 export function detectStrictFlagWithVolume(
@@ -32,7 +32,7 @@ export function detectStrictFlagWithVolume(
     const poleHeight = high - low;
     if (poleHeight <= 0) continue;
     const movePct = isBullish ? (poleHeight / low) * 100 : (poleHeight / high) * 100;
-    if (movePct < 5) continue;
+    if (movePct < 0.35) continue;
     const c0 = parseFloat(pole[0].c);
     const c9 = parseFloat(pole[POLE_LEN - 1].c);
     if (isBullish && c9 <= c0) continue;
@@ -44,12 +44,12 @@ export function detectStrictFlagWithVolume(
       const fl = Math.min(...flag.map((c) => parseFloat(c.l)));
       if (isBullish) {
         const retrace = (high - fl) / poleHeight;
-        if (retrace > 0.5) continue;
-        if (fl < low * 0.997) continue;
+        if (retrace > 0.72) continue;
+        if (fl < low * 0.992) continue;
       } else {
         const retrace = (fh - low) / poleHeight;
-        if (retrace > 0.5) continue;
-        if (fh > high * 1.003) continue;
+        if (retrace > 0.72) continue;
+        if (fh > high * 1.008) continue;
       }
       const vPole = avgVolume(pole);
       const vFlag = avgVolume(flag);

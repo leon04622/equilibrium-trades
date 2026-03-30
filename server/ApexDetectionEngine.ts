@@ -12,28 +12,17 @@ import {
 const POLE_LEN = 15;
 const MIN_FLAG = 5;
 const MAX_FLAG = 28;
-const IMPULSE_MIN_PCT = 1.5;
-const BODY_RATIO_MIN = 0.7;
-const MAX_RETRACE = 0.5;
-
-const SHORT_TF_AGGRESSIVE = new Set(["1m", "3m", "5m"]);
+const IMPULSE_MIN_PCT = 0.24;
+const BODY_RATIO_MIN = 0.48;
+const MAX_RETRACE = 0.72;
 
 function apexThresholds(timeframe: string) {
-  if (SHORT_TF_AGGRESSIVE.has(timeframe)) {
-    return {
-      impulseMinPct: 0.32,
-      bodyRatioMin: 0.52,
-      maxRetrace: 0.62,
-      maxFlagSlopePct: 0.65,
-      loosePivot: true,
-    };
-  }
   return {
     impulseMinPct: IMPULSE_MIN_PCT,
     bodyRatioMin: BODY_RATIO_MIN,
     maxRetrace: MAX_RETRACE,
-    maxFlagSlopePct: 0.4,
-    loosePivot: false,
+    maxFlagSlopePct: 0.9,
+    loosePivot: true,
   };
 }
 

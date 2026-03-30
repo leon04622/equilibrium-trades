@@ -68,17 +68,17 @@ export function getThresholds(timeframe: string) {
     "1m":  { minMovePercent: 0.10, minBreakoutPercent: 0.04, lookback: 30 },
     "3m":  { minMovePercent: 0.14, minBreakoutPercent: 0.05, lookback: 32 },
     "5m":  { minMovePercent: 0.18, minBreakoutPercent: 0.06, lookback: 35 },
-    "15m": { minMovePercent: 0.4,  minBreakoutPercent: 0.10, lookback: 40 },
-    "30m": { minMovePercent: 0.5,  minBreakoutPercent: 0.12, lookback: 45 },
-    "1h":  { minMovePercent: 0.6,  minBreakoutPercent: 0.15, lookback: 50 },
-    "2h":  { minMovePercent: 0.8,  minBreakoutPercent: 0.18, lookback: 50 },
-    "4h":  { minMovePercent: 1.0,  minBreakoutPercent: 0.20, lookback: 50 },
-    "1d":  { minMovePercent: 2.0,  minBreakoutPercent: 0.30, lookback: 50 },
+    "15m": { minMovePercent: 0.20, minBreakoutPercent: 0.07, lookback: 40 },
+    "30m": { minMovePercent: 0.24, minBreakoutPercent: 0.08, lookback: 45 },
+    "1h":  { minMovePercent: 0.28, minBreakoutPercent: 0.10, lookback: 50 },
+    "2h":  { minMovePercent: 0.34, minBreakoutPercent: 0.12, lookback: 50 },
+    "4h":  { minMovePercent: 0.42, minBreakoutPercent: 0.14, lookback: 50 },
+    "1d":  { minMovePercent: 0.55, minBreakoutPercent: 0.18, lookback: 50 },
   };
   return thresholds[timeframe] || thresholds["1h"];
 }
 
-const SHORT_SCAN_TFS = new Set(["1m", "3m", "5m"]);
+const SHORT_SCAN_TFS = new Set(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]);
 
 /** Breakouts / pending formations rank above “forming only”; then higher confidence. */
 export function sortPatternCandidatesByActionability(patterns: DetectedPattern[]): void {
@@ -307,7 +307,11 @@ function detectFlagPatternInFixedWindow(
  */
 function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
   if (candles.length < 60) return null;
-  const offsets = [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 36, 42];
+  const maxOffset = Math.max(0, Math.min(candles.length - 60, 72));
+  const offsets: number[] = [];
+  for (let offset = 0; offset <= maxOffset; offset += 2) {
+    offsets.push(offset);
+  }
   let best: DetectedPattern | null = null;
   let bestScore = -1;
   for (const o of offsets) {
