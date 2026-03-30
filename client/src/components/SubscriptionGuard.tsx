@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useWallet } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
  */
 export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
   const { isConnected, connect } = useWallet();
-  const { isPro, isLoading } = useSubscription();
+  const { isPro, isLoading, isSyncError, refetch } = useSubscription();
 
   if (!isConnected) {
     return (
@@ -30,10 +31,31 @@ export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (isSyncError) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center p-6">
+        <Card className="max-w-md w-full text-center">
+          <CardHeader>
+            <CardTitle className="text-lg">Could not verify subscription</CardTitle>
+            <CardDescription>
+              The server did not return your tier. Your Pro or Mentor access is stored in Mongo — try again.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={() => void refetch()}>
+              Retry sync
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-        Checking subscription…
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
+        <span>Loading subscription from your account…</span>
       </div>
     );
   }

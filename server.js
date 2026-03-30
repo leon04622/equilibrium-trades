@@ -12,8 +12,8 @@
  *     (`client/src/lib/hyperliquid-platform-config.ts`, `server/routes.ts`, HL client)
  *
  * MongoDB hard-link (cures “amnesia”):
- *   • `GET /api/user/sync` — touches CRM via `upsertMongoCrmContactOnConnect`, merges Postgres + Stripe +
- *     Mongo; returns `hlBalance` / `totalBalance` snapshots from `users`.
+ *   • `GET /api/user/sync` — CRM `users.subTier` is merged first with Postgres + Stripe; admin tier changes use
+ *     `findOneAndUpdate` upsert (`upsertMongoCrmSubscriptionAuthority`) so Pro/Mentor survives refresh.
  *   • `POST /api/user/hl-balance-snapshot` — persists perp + spot USDC + total USD to CRM after live HL poll.
  *   • `POST /api/wallet-user/register` + admin tier / CRM routes — call `syncWalletUserToMongoCrm` / vault
  *     handlers so Pro grants, videos, and CRM rows are written to Mongo immediately.

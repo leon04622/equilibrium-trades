@@ -500,6 +500,13 @@ export async function fetchMongoCrmHlBalanceSnapshot(walletAddress: string): Pro
   };
 }
 
+function isPaidSubTierLabel(label: string): boolean {
+  const s = String(label ?? "")
+    .trim()
+    .toLowerCase();
+  return s === "pro" || s === "mentor" || s === "mentoring" || s === "elite";
+}
+
 export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): Promise<{
   subscriptionTier: string;
   subscriptionActive: boolean;
@@ -511,7 +518,6 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
   const doc = await findCrmUserDocumentByWallet(walletAddress);
   if (!doc) return null;
   const tierRaw = inferSubscriptionTierString(doc);
-  const active = Boolean(doc.subscriptionActive);
   const expRaw = doc.accessExpires ?? doc.subscriptionExpiresAt;
   let subscriptionExpiresAt: Date | null = null;
   if (expRaw instanceof Date) subscriptionExpiresAt = expRaw;
@@ -519,10 +525,16 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
     const d = new Date(String(expRaw));
     subscriptionExpiresAt = Number.isNaN(d.getTime()) ? null : d;
   }
+  const expMs = subscriptionExpiresAt instanceof Date ? subscriptionExpiresAt.getTime() : NaN;
+  const expOk = !Number.isFinite(expMs) || expMs > Date.now();
   const subTier =
     doc.subTier != null && String(doc.subTier).trim() !== ""
       ? String(doc.subTier)
       : crmDisplayTier(tierRaw);
+  /** CRM `subTier` + inferred tier are authoritative: do not mark paid users inactive because a boolean lagged. */
+  const paidByTier = tierRaw !== "free" || isPaidSubTierLabel(subTier);
+  let active = Boolean(doc.subscriptionActive);
+  if (paidByTier && expOk) active = true;
   return {
     subscriptionTier: tierRaw,
     subscriptionActive: active,
@@ -530,6 +542,57 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
     subTier,
     manualProOverride: Boolean(doc.manualProOverride),
   };
+}
+
+/**
+ * Admin / billing: hard-write subscription fields to the CRM `users` collection (findOneAndUpdate + upsert).
+ * Ensures Pro/Mentor survives refresh even if a later partial `$set` omitted tier fields.
+ */
+export async function upsertMongoCrmSubscriptionAuthority(params: {
+  walletAddress: string;
+  subscriptionTier: "free" | "pro" | "mentoring" | "elite";
+  subscriptionActive: boolean;
+  manualProOverride: boolean;
+  subscriptionExpiresAt: Date | null;
+}): Promise<void> {
+  if (!vaultDb) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const w = params.walletAddress.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(w)) return;
+  const now = new Date();
+  const subTier = crmDisplayTier(params.subscriptionTier);
+  const status: "Active" | "Expired" =
+    params.subscriptionTier === "free"
+      ? "Active"
+      : params.subscriptionActive &&
+          (!params.subscriptionExpiresAt || params.subscriptionExpiresAt.getTime() > Date.now())
+        ? "Active"
+        : "Expired";
+  await coll.findOneAndUpdate(
+    { $or: [{ wallet: w }, { walletAddress: w }] },
+    {
+      $set: {
+        wallet: w,
+        walletAddress: w,
+        updatedAt: now,
+        subTier,
+        subscriptionTier: params.subscriptionTier,
+        subscriptionActive: params.subscriptionActive,
+        manualProOverride: params.manualProOverride,
+        subscriptionExpiresAt: params.subscriptionExpiresAt,
+        accessExpires: params.subscriptionExpiresAt,
+        status,
+      },
+      $setOnInsert: {
+        source: "equilibrium_app",
+        joinDate: now,
+        createdAt: now,
+        isBuilderLinked: false,
+        email: null,
+      },
+    },
+    { upsert: true },
+  );
 }
 
 function mongoDocToCrmRow(u: Document) {

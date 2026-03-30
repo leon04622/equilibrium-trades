@@ -206,7 +206,7 @@ function PlayerFrame({ url, title }: { url: string; title: string }) {
 /** Educational Vault — lessons from GET /api/videos, grouped by the category name set in Command Center. */
 export default function VideoVault() {
   const { isConnected } = useWallet();
-  const { isSubscribed, isLoading: subLoading, tier } = useSubscription();
+  const { isSubscribed, isLoading: subLoading, tier, isSyncError, refetch: refetchUserSync } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
   /** Same /api/videos list as Admin Command Center; refetched for all visitors (playback stays Pro). */
@@ -259,7 +259,7 @@ export default function VideoVault() {
   }, [items]);
 
   const accessChecking = isConnected && subLoading;
-  const canPlayVideos = isConnected && !subLoading && isSubscribed;
+  const canPlayVideos = isConnected && !subLoading && !isSyncError && isSubscribed;
 
   return (
     <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto min-h-[60vh] bg-background">
@@ -296,26 +296,37 @@ export default function VideoVault() {
                   <p className="font-medium text-sm">
                     {!isConnected
                       ? "Connect your wallet to unlock playback"
-                      : accessChecking
-                        ? "Checking your subscription…"
-                        : `Pro subscription required to watch — $${TIER_PRO}/mo`}
+                      : isSyncError
+                        ? "Could not load your subscription tier"
+                        : accessChecking
+                          ? "Loading subscription from your account…"
+                          : `Pro subscription required to watch — $${TIER_PRO}/mo`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 max-w-xl">
                     {!isConnected
                       ? "Anyone can browse lessons below. Connect so we can verify Pro from billing."
-                      : accessChecking
-                        ? "One moment while we confirm your plan."
-                        : "Browse the library below. Upgrade to stream lessons added in Command Center → Videos."}
+                      : isSyncError
+                        ? "Your tier is stored on the server. Retry sync — do not assume Free until this succeeds."
+                        : accessChecking
+                          ? "Confirming your plan from Mongo-backed /api/user/sync."
+                          : "Browse the library below. Upgrade to stream lessons added in Command Center → Videos."}
                   </p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 shrink-0">
-                <Button asChild variant="default" className="gap-2">
-                  <Link to="/pricing" data-testid="vault-upgrade-pricing">
-                    <Sparkles className="h-4 w-4" />
-                    Upgrade to Pro
-                  </Link>
-                </Button>
+                {isSyncError ? (
+                  <Button variant="default" className="gap-2" onClick={() => void refetchUserSync()}>
+                    <Loader2 className="h-4 w-4" />
+                    Retry subscription sync
+                  </Button>
+                ) : (
+                  <Button asChild variant="default" className="gap-2">
+                    <Link to="/pricing" data-testid="vault-upgrade-pricing">
+                      <Sparkles className="h-4 w-4" />
+                      Upgrade to Pro
+                    </Link>
+                  </Button>
+                )}
               </div>
             </div>
           )}

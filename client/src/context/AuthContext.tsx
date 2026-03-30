@@ -56,23 +56,27 @@ export type UserSyncResponse = {
 const AuthContext = createContext<UseQueryResult<UserSyncResponse> | undefined>(undefined);
 
 /**
- * Fetches `GET /api/user/sync` whenever a wallet is connected — subscription, profile, and journal
- * snapshot from **Mongo + Postgres** so tier survives refresh.
+ * Single wallet hydration: **`GET /api/user/sync`** on every connect. Server merges **Mongo CRM `users`**
+ * (authoritative `subTier`) with Postgres + Stripe so Pro/Mentor survives refresh.
  *
- * Admin Panel **Pro / Mentor** writes go through `persistUserAccessTier` → `await syncWalletUserToMongoCrm`
- * on the server; this query uses `staleTime: 0`, `refetchOnMount: "always"`, and a 10s interval so
- * `manualProOverride` and `subTier` re-hydrate and **SubscriptionGuard** does not stick on “Upgrade” blur.
+ * UI must not assume **Free** until `status === "success"` — use `useSubscription().isLoading` /
+ * `subscriptionHydrated` for gates (Videos, Signals, SubscriptionGuard).
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useWallet();
+  const syncEnabled = !!address && isConnected;
 
   const syncQuery = useQuery({
     queryKey: ["/api/user/sync", address ?? ""],
-    enabled: !!address && isConnected,
+    enabled: syncEnabled,
     staleTime: 0,
-    refetchInterval: 10_000,
+    gcTime: 30 * 60_000,
+    refetchInterval: syncEnabled ? 10_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
+    retryDelay: (i) => Math.min(1500 * 2 ** i, 12_000),
     queryFn: async (): Promise<UserSyncResponse> => {
       const res = await fetch("/api/user/sync", {
         credentials: "include",

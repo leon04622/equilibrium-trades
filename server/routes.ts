@@ -47,6 +47,7 @@ import {
   fetchMongoCrmHlBalanceSnapshot,
   fetchMongoCrmCctpBridgeProgress,
   persistMongoCrmCctpBridgeProgress,
+  upsertMongoCrmSubscriptionAuthority,
   type MongoVaultHandle,
 } from "./mongo-vault";
 import {
@@ -353,7 +354,8 @@ async function buildWalletSubscriptionPayload(walletAddressRaw: string): Promise
       }
     : null;
 
-  const best = pickBestPaidSubscriptionPayload([stripePayload, pgPayload, mongoPayload]);
+  /** Mongo CRM `subTier` / inferred tier is evaluated first so admin grants survive Postgres/Stripe lag. */
+  const best = pickBestPaidSubscriptionPayload([mongoPayload, stripePayload, pgPayload]);
   if (best) return best;
 
   if (user) {
@@ -388,6 +390,25 @@ function parseAdminNewTierInput(raw: string): {
   return null;
 }
 
+/** After any Postgres subscription change: hard-write CRM tier (`findOneAndUpdate` + upsert) then full CRM row sync. */
+async function flushWalletSubscriptionToMongoCrm(walletAddress: string): Promise<void> {
+  const w = walletAddress.trim().toLowerCase();
+  const u = await storage.getWalletUser(w);
+  if (u) {
+    const tier = (u.subscriptionTier || "free").toLowerCase();
+    const mappedTier: "free" | "pro" | "mentoring" | "elite" =
+      tier === "mentoring" || tier === "elite" ? "mentoring" : tier === "pro" ? "pro" : "free";
+    await upsertMongoCrmSubscriptionAuthority({
+      walletAddress: w,
+      subscriptionTier: mappedTier,
+      subscriptionActive: u.subscriptionActive,
+      manualProOverride: u.manualProOverride ?? false,
+      subscriptionExpiresAt: u.subscriptionExpiresAt,
+    });
+  }
+  await syncWalletUserToMongoCrm(w);
+}
+
 async function persistUserAccessTier(
   paramWallet: string,
   subscriptionTier: "free" | "pro" | "mentoring" | "elite",
@@ -417,7 +438,7 @@ async function persistUserAccessTier(
   if (!user) {
     throw new Error(`persistUserAccessTier: no row after upsert for ${normalized}`);
   }
-  await syncWalletUserToMongoCrm(normalized);
+  await flushWalletSubscriptionToMongoCrm(normalized);
   return user;
 }
 
@@ -1607,7 +1628,8 @@ export async function registerRoutes(
 
   /**
    * Unified hydration for the connected wallet (header `x-wallet-address` or `Authorization: Bearer 0x…`):
-   * subscription (Postgres + Stripe + Mongo), profile, trade journal rows + stats.
+   * subscription merges **Mongo CRM `users` first** (`subTier` / inferred tier), then Stripe + Postgres
+   * (`buildWalletSubscriptionPayload`), profile, trade journal, HL balance, CCTP progress.
    */
   app.get("/api/user/sync", async (req: Request, res: Response) => {
     try {
@@ -1955,7 +1977,7 @@ export async function registerRoutes(
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
 
-      await syncWalletUserToMongoCrm(paramWallet);
+      await flushWalletSubscriptionToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("Error updating subscription:", error);
@@ -2457,7 +2479,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
-      await syncWalletUserToMongoCrm(paramWallet);
+      await flushWalletSubscriptionToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("command-center subscription:", error);
@@ -2613,7 +2635,7 @@ export async function registerRoutes(
         await storage.setManualProOverride(paramWallet, manualProOverride);
         user = (await storage.getWalletUser(paramWallet)) ?? user;
       }
-      await syncWalletUserToMongoCrm(paramWallet);
+      await flushWalletSubscriptionToMongoCrm(paramWallet);
       res.json({ success: true, user });
     } catch (error) {
       console.error("admin-equilibrium subscription:", error);

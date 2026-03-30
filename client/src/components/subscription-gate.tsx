@@ -36,17 +36,34 @@ export function SubscriptionGate({
   description,
   variant = "card",
 }: SubscriptionGateProps) {
-  const { hasAccess, isLoading, tier } = useSubscription();
+  const { hasAccess, isLoading, tier, isSyncError, refetch } = useSubscription();
   const { isConnected } = useWallet();
   const { openPaywall } = usePaywall();
 
   const requirement = featureRequirements[feature];
   const featureName = requirement?.name || "Premium Feature";
 
+  if (isSyncError) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[40vh] p-8">
+        <Card className="max-w-md w-full text-center">
+          <CardHeader>
+            <CardTitle className="text-lg">Subscription sync failed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full min-h-[40vh]">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+        <div className="animate-pulse text-muted-foreground">Loading subscription…</div>
       </div>
     );
   }
