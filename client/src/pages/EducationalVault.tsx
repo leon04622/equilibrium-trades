@@ -1,13 +1,9 @@
 /**
- * Pro Educational Vault (`/videos`). Gated by {@link SubscriptionGuard}; player UI stays in `VideoVault.tsx`.
+ * Educational Vault (`/videos`). Catalog is loaded from Mongo via `GET /api/videos` for everyone;
+ * {@link VideoVault} gates **playback** to Pro so titles/thumbnails stay visible after logout.
  */
-import { SubscriptionGuard } from "@/components/SubscriptionGuard";
 import VideoVault from "./VideoVault";
 
 export default function EducationalVault() {
-  return (
-    <SubscriptionGuard>
-      <VideoVault />
-    </SubscriptionGuard>
-  );
+  return <VideoVault />;
 }

@@ -4,8 +4,16 @@
  *
  * Hyperliquid-only candles — gold proxy: PAXG (+ XAUT-style when listed).
  *
- * Pattern **visibility** is decided in `universal-scanner.ts` / `MultiPatternEngine.ts` (geometry-first).
- * 21/200 SMMA on charts is separate; do not use SMMA here to suppress setups.
+ * ── External documentation (Hyperliquid / partners) ────────────────────────────
+ * Default **institutional** scan universe: **top 50 perps** by 24h notional (`PATTERN_SCAN_TOP_VOLUME_COUNT`)
+ * from `scanner-controller.ts`, with **PAXG** forced in when listed. Product-facing TFs include **1m, 5m, 1h, 4h**
+ * inside the full MTF set (`FAST_TRACK_SCAN_TIMEFRAMES` + `SLOW_SCAN_TIMEFRAMES`).
+ *
+ * Pattern **library** (flags, wedges, triangles, doubles, H&S, Apex pole+flag, strict volume flags) runs in
+ * `universal-scanner.ts` / `MultiPatternEngine.ts` / `sma-detection.ts` — **geometry-first**.
+ * **Bearish patterns are not hidden in bullish SMMA regimes** (and vice versa); SMMA is context on educational cards only.
+ *
+ * Deep TF candle pulls re-exported from `scanner-controller.ts` (`patternScanCandleLimitForInterval`, `PATTERN_SCAN_MIN_BARS`).
  */
 import { getPerpUniverseCoinNames, getSpotTickers } from "./hyperliquid";
 import { getDefaultPatternScanTickerList, PATTERN_SCAN_TOP_VOLUME_COUNT } from "./scanner-controller";

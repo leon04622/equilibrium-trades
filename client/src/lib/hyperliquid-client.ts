@@ -1519,6 +1519,7 @@ export {
   getArbitrumUsdcBalance,
   encodeCctpForwardHookData,
   type CctpDepositConfig,
+  type CctpDepositStep,
   type HyperliquidDepositConfig,
   type CctpDepositProgressStage,
   type HyperliquidDepositProgressStage,

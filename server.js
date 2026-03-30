@@ -35,6 +35,12 @@
  *   • REST poll every 10s; WebSocket clearinghouse UI updates throttled to 3s for chart smoothness.
  *
  * Strict rule: do not change 21/200 SMMA chart math in the client chart worker / `pattern-chart.tsx`.
+ *
+ * Hyperliquid “Docs” / review pack:
+ *   • Repo: `docs/EQUILIBRIUM_PLATFORM.md` — strategy, scanner spec, quick start, wallets.
+ *   • In-app: client route `/docs` (`client/src/pages/Docs.tsx`).
+ *   • Admin Pro/Mentor: `PATCH` tier routes **await** `syncWalletUserToMongoCrm` so Mongo mirrors Postgres
+ *     before the HTTP response returns.
  */
 import "dotenv/config";
 

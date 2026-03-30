@@ -33,6 +33,7 @@ import Learn from "@/pages/learn";
 import Signals from "@/pages/signals";
 import Heatmap from "@/pages/heatmap";
 import EducationalVault from "@/pages/EducationalVault";
+import Docs from "@/pages/Docs";
 import Portfolio from "@/pages/portfolio";
 import Pricing from "@/pages/pricing";
 import Settings from "@/pages/settings";
@@ -128,6 +129,7 @@ function TradingLayout() {
               <Route path="/signals" element={<Signals />} />
               <Route path="/heatmap" element={<Heatmap />} />
               <Route path="/videos" element={<EducationalVault />} />
+              <Route path="/docs" element={<Docs />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/journal" element={<JournalView />} />
               <Route path="/pricing" element={<Pricing />} />

@@ -1,98 +1,76 @@
 import type { JsonRpcSigner } from "ethers";
-import { getAddress } from "ethers";
-import { signTypedDataHyperliquid } from "@/lib/eip712-typed-data";
+import { getAddress, getBytes, hexlify, keccak256, Interface } from "ethers";
+import type { CctpBridgeProgressSync } from "@/context/AuthContext";
+import { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
+
+export { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
 
 const USDC_DECIMALS = 6;
 
-/** @see https://developers.circle.com/cctp/howtos/transfer-usdc-from-arbitrum-to-hypercore */
-const CCTP_EXTENSION_ABI = [
-  {
-    name: "batchDepositForBurnWithAuth",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "_receiveWithAuthorizationData",
-        type: "tuple",
-        components: [
-          { name: "amount", type: "uint256" },
-          { name: "authValidAfter", type: "uint256" },
-          { name: "authValidBefore", type: "uint256" },
-          { name: "authNonce", type: "bytes32" },
-          { name: "v", type: "uint8" },
-          { name: "r", type: "bytes32" },
-          { name: "s", type: "bytes32" },
-        ],
-      },
-      {
-        name: "_depositForBurnData",
-        type: "tuple",
-        components: [
-          { name: "amount", type: "uint256" },
-          { name: "destinationDomain", type: "uint32" },
-          { name: "mintRecipient", type: "bytes32" },
-          { name: "destinationCaller", type: "bytes32" },
-          { name: "maxFee", type: "uint256" },
-          { name: "minFinalityThreshold", type: "uint32" },
-          { name: "hookData", type: "bytes" },
-        ],
-      },
-    ],
-    outputs: [],
-  },
-] as const;
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+];
 
-const USDC_MINIMAL_ABI = ["function balanceOf(address owner) view returns (uint256)"];
+const TOKEN_MESSENGER_ABI = [
+  "function depositForBurnWithHook(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,uint256 maxFee,uint32 minFinalityThreshold,bytes hookData) external",
+];
+
+const MESSAGE_TRANSMITTER_ABI = [
+  "event MessageSent(bytes message)",
+  "function receiveMessage(bytes message, bytes attestation) external returns (bool)",
+];
 
 export type CctpDepositConfig = {
-  cctpExtension: string;
+  tokenMessenger: string;
+  messageTransmitterArbitrum: string;
   usdc: string;
-  chainId: number;
   cctpForwarder: string;
+  messageTransmitterHyperEvm: string;
+  chainId: number;
+  hyperevmChainId: number;
   destinationDomain: number;
   sourceDomain: number;
   minDepositUsdc: number;
   minFinalityThreshold: number;
-  usdcEip712: {
-    name: string;
-    version: string;
-    chainId: number;
-    verifyingContract: string;
-  };
+  verifiedHyperliquidBridge2Arbitrum: string;
 };
 
-/** @deprecated Use {@link CctpDepositConfig} — alias for existing imports. */
 export type HyperliquidDepositConfig = CctpDepositConfig;
 
-export type CctpDepositProgressStage =
-  | "quoting_fees"
-  | "sign_receive_auth"
-  | "submit_burn"
-  | "await_confirm";
+export type CctpDepositStep =
+  | "idle"
+  | "approve"
+  | "burn"
+  | "attestation"
+  | "mint"
+  | "done"
+  | "error";
 
-/** Portfolio modal maps these labels to user-facing copy. */
-export type HyperliquidDepositProgressStage =
-  | "quoting_fees"
-  | "sign_receive_auth"
-  | "submit_burn"
-  | "await_confirm";
+export type HyperliquidDepositProgressStage = CctpDepositStep;
+export type CctpDepositProgressStage = CctpDepositStep;
 
 let depositConfigCache: { config: CctpDepositConfig; at: number } | null = null;
 const DEPOSIT_CONFIG_TTL_MS = 10 * 60 * 1000;
+const ATTEST_POLL_MS = 3000;
+const ATTEST_MAX_MS = 20 * 60 * 1000;
 
 function parseCctpConfig(data: unknown): CctpDepositConfig {
   if (!data || typeof data !== "object") throw new Error("Invalid CCTP config");
   const o = data as Record<string, unknown>;
-  const permit = o.usdcEip712;
-  if (
-    typeof o.cctpExtension !== "string" ||
-    typeof o.usdc !== "string" ||
-    typeof o.cctpForwarder !== "string"
-  ) {
-    throw new Error("Invalid CCTP config: addresses");
+  const need = [
+    "tokenMessenger",
+    "messageTransmitterArbitrum",
+    "usdc",
+    "cctpForwarder",
+    "messageTransmitterHyperEvm",
+  ] as const;
+  for (const k of need) {
+    if (typeof o[k] !== "string") throw new Error(`Invalid CCTP config: ${k}`);
   }
   if (
     typeof o.chainId !== "number" ||
+    typeof o.hyperevmChainId !== "number" ||
     typeof o.destinationDomain !== "number" ||
     typeof o.sourceDomain !== "number" ||
     typeof o.minDepositUsdc !== "number" ||
@@ -100,31 +78,22 @@ function parseCctpConfig(data: unknown): CctpDepositConfig {
   ) {
     throw new Error("Invalid CCTP config: numeric fields");
   }
-  if (!permit || typeof permit !== "object") throw new Error("Invalid CCTP config: usdcEip712");
-  const p = permit as Record<string, unknown>;
-  if (
-    typeof p.name !== "string" ||
-    typeof p.version !== "string" ||
-    typeof p.chainId !== "number" ||
-    typeof p.verifyingContract !== "string"
-  ) {
-    throw new Error("Invalid CCTP config: EIP-712 fields");
+  if (typeof o.verifiedHyperliquidBridge2Arbitrum !== "string") {
+    throw new Error("Invalid CCTP config: verified bridge");
   }
   return {
-    cctpExtension: getAddress(o.cctpExtension),
-    usdc: getAddress(o.usdc),
+    tokenMessenger: getAddress(o.tokenMessenger as string),
+    messageTransmitterArbitrum: getAddress(o.messageTransmitterArbitrum as string),
+    usdc: getAddress(o.usdc as string),
+    cctpForwarder: getAddress(o.cctpForwarder as string),
+    messageTransmitterHyperEvm: getAddress(o.messageTransmitterHyperEvm as string),
     chainId: o.chainId,
-    cctpForwarder: getAddress(o.cctpForwarder),
+    hyperevmChainId: o.hyperevmChainId,
     destinationDomain: o.destinationDomain,
     sourceDomain: o.sourceDomain,
     minDepositUsdc: o.minDepositUsdc,
     minFinalityThreshold: o.minFinalityThreshold,
-    usdcEip712: {
-      name: p.name,
-      version: p.version,
-      chainId: p.chainId,
-      verifyingContract: getAddress(p.verifyingContract),
-    },
+    verifiedHyperliquidBridge2Arbitrum: getAddress(o.verifiedHyperliquidBridge2Arbitrum as string),
   };
 }
 
@@ -153,47 +122,16 @@ export async function fetchCctpDepositConfig(forceRefresh = false): Promise<Cctp
   return config;
 }
 
-/** @deprecated Use {@link fetchCctpDepositConfig}. */
 export const fetchHyperliquidDepositConfig = fetchCctpDepositConfig;
-
-function utf8ToHex(s: string): string {
-  return Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Hook data for HyperCore forwarder (perps = 0, spot = 0xffffffff). */
-export function encodeCctpForwardHookData(
-  hyperCoreMintRecipient: string,
-  hyperCoreDestinationDex: number = 0,
-): `0x${string}` {
-  const a = getAddress(hyperCoreMintRecipient);
-  const magicHex = utf8ToHex("cctp-forward").padEnd(48, "0");
-  const version = "00000000";
-  const dataLength = "00000018";
-  const address = a.slice(2).toLowerCase();
-  const dex = (hyperCoreDestinationDex >>> 0).toString(16).padStart(8, "0");
-  return `0x${magicHex}${version}${dataLength}${address}${dex}` as `0x${string}`;
-}
 
 function addressToBytes32(addr: string): `0x${string}` {
   const a = getAddress(addr).slice(2).toLowerCase();
   return `0x${a.padStart(64, "0")}` as `0x${string}`;
 }
 
-function randomNonceBytes32(): `0x${string}` {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return `0x${[...arr].map((b) => b.toString(16).padStart(2, "0")).join("")}` as `0x${string}`;
-}
-
 async function postBridgeProgress(
   wallet: string,
-  payload: {
-    stage: string;
-    txHash?: string | null;
-    amountUsdc?: number | null;
-    forwardFeeMax?: number | null;
-    error?: string | null;
-  },
+  payload: Record<string, string | number | null | undefined>,
 ): Promise<void> {
   try {
     await fetch("/api/user/cctp-bridge-progress", {
@@ -204,7 +142,7 @@ async function postBridgeProgress(
         "x-wallet-address": wallet,
         Authorization: `Bearer ${wallet}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ stage: payload.stage, ...payload }),
     });
   } catch (e) {
     console.warn("[CCTP] persist bridge progress failed:", e);
@@ -216,7 +154,7 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
     const { JsonRpcProvider, Contract } = await import("ethers");
     const token = getAddress(usdcToken);
     const provider = new JsonRpcProvider("https://arb1.arbitrum.io/rpc");
-    const contract = new Contract(token, USDC_MINIMAL_ABI, provider);
+    const contract = new Contract(token, ["function balanceOf(address) view returns (uint256)"], provider);
     const raw: bigint = await contract.balanceOf(address);
     return Number(raw) / 10 ** USDC_DECIMALS;
   } catch (error) {
@@ -225,54 +163,204 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
   }
 }
 
+async function pollAttestationViaServer(messageHash: string): Promise<string> {
+  const deadline = Date.now() + ATTEST_MAX_MS;
+  while (Date.now() < deadline) {
+    const r = await fetch(`/api/cctp/attestation/${encodeURIComponent(messageHash)}`, {
+      credentials: "include",
+    });
+    if (!r.ok) {
+      await new Promise((r2) => setTimeout(r2, ATTEST_POLL_MS));
+      continue;
+    }
+    const j = (await r.json()) as { status?: string; attestation?: string | null };
+    if (j.status === "complete" && j.attestation && j.attestation.startsWith("0x")) {
+      return j.attestation;
+    }
+    await new Promise((r2) => setTimeout(r2, ATTEST_POLL_MS));
+  }
+  throw new Error("Circle attestation timed out — your burn is still safe; open Portfolio later to retry mint.");
+}
+
+function extractMessageFromBurnReceipt(
+  receipt: { logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data: string }> },
+  messageTransmitterArbitrum: string,
+): `0x${string}` {
+  const iface = new Interface(MESSAGE_TRANSMITTER_ABI);
+  const want = messageTransmitterArbitrum.toLowerCase();
+  for (const log of receipt.logs) {
+    if (log.address.toLowerCase() !== want) continue;
+    try {
+      const parsed = iface.parseLog({
+        topics: [...log.topics],
+        data: log.data,
+      });
+      if (parsed?.name === "MessageSent") {
+        return hexlify(parsed.args.message) as `0x${string}`;
+      }
+    } catch {
+      /* next log */
+    }
+  }
+  throw new Error("Could not find MessageSent in burn receipt — save your burn tx hash and contact support.");
+}
+
+async function ensureHyperEvmInWallet(ethereum: { request: (a: unknown) => Promise<unknown> }, chainId: number) {
+  const idHex = "0x" + chainId.toString(16);
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: idHex }],
+    });
+  } catch (e: unknown) {
+    const err = e as { code?: number };
+    if (err?.code === 4902) {
+      await ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: idHex,
+            chainName: "HyperEVM",
+            nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+            rpcUrls: ["https://rpc.hyperliquid.xyz/evm"],
+            blockExplorerUrls: ["https://hyperscan.com"],
+          },
+        ],
+      });
+      return;
+    }
+    throw e;
+  }
+}
+
 /**
- * Deposit native USDC on Arbitrum to **HyperCore** via Circle CCTP (burn on Arbitrum → mint on HyperEVM → forward).
- * Contract addresses come only from the server — nothing hardcoded in the client bundle.
+ * Circle CCTP (professional): Approve → TokenMessenger `depositForBurnWithHook` → Iris attestation →
+ * `receiveMessage` on HyperEVM MessageTransmitter. HyperCore credit follows the forwarder hook.
  */
 export async function depositUsdcToHyperliquid(
   signer: JsonRpcSigner,
   amount: number,
   options?: {
     depositConfig?: CctpDepositConfig;
-    /** Receives USDC on HyperCore (typically the connected wallet). */
     hyperCoreRecipient?: string;
-    /** 0 = perp margin, 4294967295 = spot per Circle docs. */
     hyperCoreDestinationDex?: number;
-    onProgress?: (stage: CctpDepositProgressStage) => void;
+    resumeFrom?: CctpBridgeProgressSync | null;
+    onStep?: (step: CctpDepositStep, detail?: string) => void;
+    /** Fires once Circle Iris returns a complete attestation (before HyperEVM mint). */
+    onAttestationConfirmed?: () => void;
   },
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; error?: string; messageHash?: string }> {
   const wallet = (await signer.getAddress()).toLowerCase();
   let cfg: CctpDepositConfig;
   try {
     cfg = options?.depositConfig ?? (await fetchCctpDepositConfig());
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Could not load CCTP configuration from the server.";
-    await postBridgeProgress(wallet, { stage: "failed_config", error: msg });
+    const msg = e instanceof Error ? e.message : "Could not load CCTP configuration.";
+    await postBridgeProgress(wallet, { stage: "error_config", error: msg });
     return { success: false, error: msg };
   }
 
   if (!Number.isFinite(amount) || amount < cfg.minDepositUsdc) {
-    return {
-      success: false,
-      error: `Minimum deposit is ${cfg.minDepositUsdc} USDC.`,
-    };
+    return { success: false, error: `Minimum deposit is ${cfg.minDepositUsdc} USDC.` };
   }
 
-  const recipientRaw = options?.hyperCoreRecipient ?? wallet;
   let recipient: string;
   try {
-    recipient = getAddress(recipientRaw);
+    recipient = getAddress(options?.hyperCoreRecipient ?? wallet);
   } catch {
     return { success: false, error: "Invalid HyperCore recipient address." };
   }
 
-  let maxFee: bigint;
-  let minFinality: number;
+  const resume = options?.resumeFrom;
+  let messageHex: string | null = resume?.cctpMessageHex ?? null;
+  let messageHash: string | null = resume?.messageHash ?? null;
+  let attestationHex: string | null = resume?.attestationHex ?? null;
+
+  const onStep = options?.onStep ?? (() => {});
+  const onAttestationConfirmed = options?.onAttestationConfirmed;
+  const amtForLog = resume?.amountUsdc ?? amount;
+
+  async function executeMintOnHyperEvm(
+    burnTxHash: string | null,
+    msgHex: string,
+    msgHash: string,
+    attestHex: string,
+  ): Promise<{ mintTxHash: string; messageHash: string }> {
+    onStep("mint", "Switch to HyperEVM and confirm mint");
+    await postBridgeProgress(wallet, {
+      stage: "mint",
+      burnTxHash,
+      txHash: burnTxHash,
+      messageHash: msgHash,
+      cctpMessageHex: msgHex,
+      attestationHex: attestHex,
+      amountUsdc: amtForLog,
+    });
+    const eth = (globalThis as unknown as { ethereum?: { request: (x: unknown) => Promise<unknown> } }).ethereum;
+    if (!eth?.request) throw new Error("Wallet cannot switch networks — add HyperEVM (chain 999), then tap Resume.");
+    await ensureHyperEvmInWallet(eth, cfg.hyperevmChainId);
+    const { BrowserProvider, Contract: C } = await import("ethers");
+    const hp = new BrowserProvider(eth);
+    const hSigner = await hp.getSigner();
+    const mt = new C(cfg.messageTransmitterHyperEvm, MESSAGE_TRANSMITTER_ABI, hSigner);
+    const mintTx = await mt.receiveMessage(msgHex, attestHex);
+    const mintReceipt = await mintTx.wait();
+    await postBridgeProgress(wallet, {
+      stage: "done",
+      burnTxHash,
+      txHash: burnTxHash,
+      messageHash: msgHash,
+      cctpMessageHex: msgHex,
+      attestationHex: attestHex,
+      amountUsdc: amtForLog,
+    });
+    onStep("done");
+    return { mintTxHash: mintReceipt?.hash ?? mintTx.hash, messageHash: msgHash };
+  }
+
   try {
+    /* ── Resume: mint only (attestation already in Mongo) ── */
+    if (messageHex && messageHash && attestationHex) {
+      const out = await executeMintOnHyperEvm(
+        resume?.burnTxHash ?? resume?.txHash ?? null,
+        messageHex,
+        messageHash,
+        attestationHex,
+      );
+      return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
+    }
+
+    /* ── Resume: wait for attestation, then mint ── */
+    if (messageHex && messageHash && !attestationHex) {
+      onStep("attestation", messageHash);
+      await postBridgeProgress(wallet, {
+        stage: "attestation",
+        messageHash,
+        cctpMessageHex: messageHex,
+        amountUsdc: amtForLog,
+      });
+      attestationHex = await pollAttestationViaServer(messageHash);
+      onAttestationConfirmed?.();
+      await postBridgeProgress(wallet, {
+        stage: "attestation_complete",
+        messageHash,
+        cctpMessageHex: messageHex,
+        attestationHex,
+        amountUsdc: amtForLog,
+      });
+      const out = await executeMintOnHyperEvm(
+        resume?.burnTxHash ?? resume?.txHash ?? null,
+        messageHex,
+        messageHash,
+        attestationHex,
+      );
+      return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
+    }
+
     const feesRes = await fetch("/api/cctp/fees", { credentials: "include" });
     const feesText = await feesRes.text();
     if (!feesRes.ok) {
-      let msg = feesText || feesRes.statusText;
+      let msg = feesText || "Fee request failed";
       try {
         const j = JSON.parse(feesText) as { error?: string };
         if (typeof j.error === "string") msg = j.error;
@@ -281,139 +369,88 @@ export async function depositUsdcToHyperliquid(
       }
       throw new Error(msg);
     }
-    const feesJson = JSON.parse(feesText) as {
-      maxFee?: string;
-      minFinalityThreshold?: number;
-    };
-    if (!feesJson.maxFee || !/^\d+$/.test(feesJson.maxFee)) {
-      throw new Error("Invalid fee quote");
-    }
-    maxFee = BigInt(feesJson.maxFee);
-    minFinality = feesJson.minFinalityThreshold ?? cfg.minFinalityThreshold;
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Could not load CCTP fees.";
-    await postBridgeProgress(wallet, { stage: "failed_fees", amountUsdc: amount, error: msg });
-    return { success: false, error: msg };
-  }
+    const feesJson = JSON.parse(feesText) as { maxFee?: string; minFinalityThreshold?: number };
+    if (!feesJson.maxFee || !/^\d+$/.test(feesJson.maxFee)) throw new Error("Invalid fee quote");
+    const maxFee = BigInt(feesJson.maxFee);
+    const minFinality = feesJson.minFinalityThreshold ?? cfg.minFinalityThreshold;
 
-  await postBridgeProgress(wallet, {
-    stage: "quoting_fees",
-    amountUsdc: amount,
-    forwardFeeMax: Number(maxFee) / 1e6,
-  });
-  options?.onProgress?.("quoting_fees");
-
-  try {
-    const { Contract, parseUnits, Signature } = await import("ethers");
+    const { Contract, parseUnits } = await import("ethers");
     const amountWei = parseUnits(amount.toFixed(USDC_DECIMALS), USDC_DECIMALS);
     const amountBn = BigInt(amountWei.toString());
     if (amountBn <= maxFee) {
-      const msg = `Deposit must exceed the Circle HyperCore forward fee (~${(Number(maxFee) / 1e6).toFixed(2)} USDC).`;
-      await postBridgeProgress(wallet, { stage: "failed_amount", amountUsdc: amount, error: msg });
-      return { success: false, error: msg };
+      throw new Error(
+        `Amount must exceed forward fee (~${(Number(maxFee) / 1e6).toFixed(2)} USDC).`,
+      );
     }
 
-    const provider = signer.provider;
-    if (!provider) {
-      return { success: false, error: "Wallet provider unavailable." };
-    }
+    if (!signer.provider) throw new Error("Wallet provider unavailable.");
 
-    const validAfter = Math.floor(Date.now() / 1000) - 3600;
-    const validBefore = Math.floor(Date.now() / 1000) + 3600;
-    const nonce = randomNonceBytes32();
-
-    const domain = {
-      name: cfg.usdcEip712.name,
-      version: cfg.usdcEip712.version,
-      chainId: cfg.usdcEip712.chainId,
-      verifyingContract: cfg.usdcEip712.verifyingContract,
-    };
-    const types = {
-      ReceiveWithAuthorization: [
-        { name: "from", type: "address" },
-        { name: "to", type: "address" },
-        { name: "value", type: "uint256" },
-        { name: "validAfter", type: "uint256" },
-        { name: "validBefore", type: "uint256" },
-        { name: "nonce", type: "bytes32" },
-      ],
-    };
-    const message = {
-      from: wallet,
-      to: cfg.cctpExtension,
-      value: amountBn,
-      validAfter: BigInt(validAfter),
-      validBefore: BigInt(validBefore),
-      nonce,
-    };
-
-    await postBridgeProgress(wallet, { stage: "sign_receive_auth", amountUsdc: amount });
-    options?.onProgress?.("sign_receive_auth");
-
-    const sigHex = await signTypedDataHyperliquid(
-      signer,
-      domain,
-      types,
-      "ReceiveWithAuthorization",
-      message,
-    );
-    const split = Signature.from(sigHex);
-    const v = split.v;
-    const r = split.r as `0x${string}`;
-    const s = split.s as `0x${string}`;
-
-    const hookData = encodeCctpForwardHookData(
-      recipient,
-      options?.hyperCoreDestinationDex ?? 0,
-    );
-    const mintRecipient = addressToBytes32(cfg.cctpForwarder);
-    const destinationCaller = mintRecipient;
-
-    await postBridgeProgress(wallet, { stage: "submit_burn", amountUsdc: amount });
-    options?.onProgress?.("submit_burn");
-
-    const ext = new Contract(cfg.cctpExtension, CCTP_EXTENSION_ABI, signer);
-    const tx = await ext.batchDepositForBurnWithAuth(
-      {
-        amount: amountBn,
-        authValidAfter: validAfter,
-        authValidBefore: validBefore,
-        authNonce: nonce,
-        v,
-        r,
-        s,
-      },
-      {
-        amount: amountBn,
-        destinationDomain: cfg.destinationDomain,
-        mintRecipient,
-        destinationCaller,
-        maxFee,
-        minFinalityThreshold: minFinality,
-        hookData,
-      },
-    );
-
-    await postBridgeProgress(wallet, { stage: "await_confirm", amountUsdc: amount, txHash: tx.hash });
-    options?.onProgress?.("await_confirm");
-
-    const receipt = await tx.wait();
+    onStep("approve");
     await postBridgeProgress(wallet, {
-      stage: "completed",
+      stage: "approve",
       amountUsdc: amount,
-      txHash: receipt?.hash ?? tx.hash,
-      error: null,
+      forwardFeeMax: Number(maxFee) / 1e6,
     });
-    return { success: true, txHash: receipt?.hash ?? tx.hash };
+    const usdc = new Contract(cfg.usdc, ERC20_ABI, signer);
+    const allowance: bigint = await usdc.allowance(wallet, cfg.tokenMessenger);
+    if (allowance < amountBn) {
+      const approveTx = await usdc.approve(cfg.tokenMessenger, amountBn);
+      await approveTx.wait();
+    }
+
+    onStep("burn");
+    await postBridgeProgress(wallet, {
+      stage: "burn",
+      amountUsdc: amount,
+      forwardFeeMax: Number(maxFee) / 1e6,
+    });
+    const hookData = encodeCctpForwardHookData(recipient, options?.hyperCoreDestinationDex ?? 0);
+    const fwd32 = addressToBytes32(cfg.cctpForwarder);
+    const tm = new Contract(cfg.tokenMessenger, TOKEN_MESSENGER_ABI, signer);
+    const burnTx = await tm.depositForBurnWithHook(
+      amountBn,
+      cfg.destinationDomain,
+      fwd32,
+      cfg.usdc,
+      fwd32,
+      maxFee,
+      minFinality,
+      hookData,
+    );
+    const receipt = await burnTx.wait();
+    if (!receipt) throw new Error("Burn receipt missing");
+
+    messageHex = extractMessageFromBurnReceipt(receipt, cfg.messageTransmitterArbitrum);
+    messageHash = keccak256(getBytes(messageHex));
+
+    await postBridgeProgress(wallet, {
+      stage: "wait_attestation",
+      burnTxHash: receipt.hash,
+      txHash: receipt.hash,
+      messageHash,
+      cctpMessageHex: messageHex,
+      amountUsdc: amount,
+    });
+
+    onStep("attestation", messageHash);
+    attestationHex = await pollAttestationViaServer(messageHash);
+    onAttestationConfirmed?.();
+    await postBridgeProgress(wallet, {
+      stage: "attestation_complete",
+      burnTxHash: receipt.hash,
+      messageHash,
+      cctpMessageHex: messageHex,
+      attestationHex,
+      amountUsdc: amount,
+    });
+
+    const out = await executeMintOnHyperEvm(receipt.hash, messageHex, messageHash, attestationHex);
+    return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
   } catch (error: unknown) {
     const msg =
-      error && typeof error === "object" && "reason" in error
-        ? String((error as { reason?: string }).reason)
-        : error instanceof Error
-          ? error.message
-          : "CCTP deposit failed";
+      error instanceof Error ? error.message : typeof error === "string" ? error : "CCTP deposit failed";
     console.error("[CCTP] deposit error:", error);
-    await postBridgeProgress(wallet, { stage: "failed", amountUsdc: amount, error: msg });
-    return { success: false, error: msg };
+    await postBridgeProgress(wallet, { stage: "error", error: msg });
+    return { success: false, error: msg, messageHash: messageHash ?? undefined };
   }
 }

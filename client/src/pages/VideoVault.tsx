@@ -271,9 +271,9 @@ export default function VideoVault() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
           <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Pro-only library loaded from <code className="text-xs">/api/videos</code> (same entries as Command Center).
-            Lessons are grouped by the <strong>category name</strong> you type when publishing — use the built-in names
-            or your own (each distinct name becomes a section).
+            Library list from Mongo via <code className="text-xs">/api/videos</code> (same entries as Command Center) —{" "}
+            <strong>browsable while logged out</strong>; playback stays Pro. Categories follow the{" "}
+            <strong>category name</strong> set when publishing.
             {isSubscribed && (
               <Badge variant="secondary" className="ml-2 align-middle">
                 {tier}

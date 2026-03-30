@@ -363,6 +363,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
   }, [walletAddress]);
 
+  // After a successful Arbitrum deposit, refresh HL balances (Trading + any consumer of useTrading).
+  useEffect(() => {
+    if (!walletConnected || !walletAddress) return;
+    const onDepositConfirmed = () => {
+      void refreshAccount();
+    };
+    window.addEventListener("equilibrium-deposit-confirmed", onDepositConfirmed);
+    return () => window.removeEventListener("equilibrium-deposit-confirmed", onDepositConfirmed);
+  }, [walletConnected, walletAddress, refreshAccount]);
+
   // Refresh account when wallet connects
   useEffect(() => {
     if (walletConnected && walletAddress) {

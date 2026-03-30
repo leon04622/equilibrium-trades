@@ -361,7 +361,14 @@ export async function persistMongoCrmHlBalanceSnapshot(
 export type CctpBridgeProgressPublic = {
   stage: string;
   updatedAt: string | null;
+  /** Burn tx on Arbitrum (TokenMessenger). */
   txHash?: string | null;
+  burnTxHash?: string | null;
+  /** keccak256(message) for Iris `/v1/attestations/{messageHash}`. */
+  messageHash?: string | null;
+  /** Raw `message` bytes from `MessageSent` (hex) — required to call `receiveMessage` on HyperEVM. */
+  cctpMessageHex?: string | null;
+  attestationHex?: string | null;
   amountUsdc?: number | null;
   forwardFeeMax?: number | null;
   error?: string | null;
@@ -377,7 +384,11 @@ function cctpProgressFromDoc(doc: Document | null): CctpBridgeProgressPublic | n
   return {
     stage,
     updatedAt,
-    txHash: p.txHash != null ? String(p.txHash) : null,
+    txHash: p.txHash != null ? String(p.txHash) : p.burnTxHash != null ? String(p.burnTxHash) : null,
+    burnTxHash: p.burnTxHash != null ? String(p.burnTxHash) : null,
+    messageHash: p.messageHash != null ? String(p.messageHash) : null,
+    cctpMessageHex: p.cctpMessageHex != null ? String(p.cctpMessageHex) : null,
+    attestationHex: p.attestationHex != null ? String(p.attestationHex) : null,
     amountUsdc: typeof p.amountUsdc === "number" ? p.amountUsdc : undefined,
     forwardFeeMax: typeof p.forwardFeeMax === "number" ? p.forwardFeeMax : undefined,
     error: p.error != null ? String(p.error) : null,
@@ -400,6 +411,10 @@ export async function persistMongoCrmCctpBridgeProgress(
   progress: {
     stage: string;
     txHash?: string | null;
+    burnTxHash?: string | null;
+    messageHash?: string | null;
+    cctpMessageHex?: string | null;
+    attestationHex?: string | null;
     amountUsdc?: number | null;
     forwardFeeMax?: number | null;
     error?: string | null;
@@ -410,19 +425,30 @@ export async function persistMongoCrmCctpBridgeProgress(
   const w = walletAddress.trim().toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(w)) return;
   const now = new Date();
-  const blob = {
+  const existing = await coll.findOne({ $or: [{ wallet: w }, { walletAddress: w }] });
+  const prevRaw = existing?.cctpBridgeProgress;
+  const prev =
+    prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
+      ? { ...(prevRaw as Record<string, unknown>) }
+      : {};
+  const burnTx = progress.burnTxHash ?? progress.txHash ?? null;
+  const next: Record<string, unknown> = {
+    ...prev,
     stage: progress.stage,
     updatedAt: now,
-    txHash: progress.txHash ?? null,
-    amountUsdc: progress.amountUsdc ?? null,
-    forwardFeeMax: progress.forwardFeeMax ?? null,
-    error: progress.error ?? null,
+    ...(burnTx != null ? { burnTxHash: burnTx, txHash: burnTx } : {}),
+    ...(progress.messageHash !== undefined ? { messageHash: progress.messageHash } : {}),
+    ...(progress.cctpMessageHex !== undefined ? { cctpMessageHex: progress.cctpMessageHex } : {}),
+    ...(progress.attestationHex !== undefined ? { attestationHex: progress.attestationHex } : {}),
+    ...(progress.amountUsdc !== undefined ? { amountUsdc: progress.amountUsdc } : {}),
+    ...(progress.forwardFeeMax !== undefined ? { forwardFeeMax: progress.forwardFeeMax } : {}),
+    ...(progress.error !== undefined ? { error: progress.error } : {}),
   };
   await coll.updateOne(
     { $or: [{ wallet: w }, { walletAddress: w }] },
     {
       $set: {
-        cctpBridgeProgress: blob,
+        cctpBridgeProgress: next,
         updatedAt: now,
       },
       $setOnInsert: {

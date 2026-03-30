@@ -31,13 +31,19 @@ export function useSubscription() {
 
   const isLoadingEffective = !!(isConnected && address && isLoading);
 
+  /** Admin “Grant Pro” / CRM `manualProOverride` must unlock UI even if `active` lags one frame. */
+  const manualProUnlock = sync?.profile?.manualProOverride === true;
+
   const isMentoring =
-    subscription?.active &&
-    (subscription.tier === "mentoring" || subscription.tier === "elite");
+    (subscription?.active || manualProUnlock) &&
+    (subscription?.tier === "mentoring" || subscription?.tier === "elite");
   const isPro =
-    subscription?.active &&
-    (subscription.tier === "pro" || subscription.tier === "mentoring" || subscription.tier === "elite");
-  const isFree = !subscription?.active || subscription?.tier === "free";
+    manualProUnlock ||
+    (!!subscription?.active &&
+      (subscription.tier === "pro" ||
+        subscription.tier === "mentoring" ||
+        subscription.tier === "elite"));
+  const isFree = !isPro;
 
   const hasAccess = (feature: PremiumFeature): boolean => {
     switch (feature) {

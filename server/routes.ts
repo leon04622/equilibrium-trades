@@ -49,7 +49,11 @@ import {
   persistMongoCrmCctpBridgeProgress,
   type MongoVaultHandle,
 } from "./mongo-vault";
-import { loadCctpServerConfig, fetchCctpBurnForwardFeeMax } from "./cctp-config";
+import {
+  loadProfessionalDepositConfig,
+  fetchCctpBurnForwardFeeMax,
+  fetchCircleAttestation,
+} from "./deposit-service";
 import {
   getScannerHealthSnapshot,
   getScannerHealthMonitoringEnabled,
@@ -742,28 +746,27 @@ export async function registerRoutes(
   // ============ HYPERLIQUID API ROUTES ============
 
   /**
-   * Circle CCTP deposit config — **no contract addresses in the client bundle**.
-   * Set `CCTP_EXTENSION_ADDRESS`, `CCTP_USDC_ADDRESS`, `CCTP_FORWARDER_ADDRESS` (and optional domain overrides) on the server.
+   * Professional Circle CCTP config (TokenMessenger burn + Iris attestation + HyperEVM `receiveMessage`).
+   * `verifiedHyperliquidBridge2Arbitrum` is the **only** HL GitBook Bridge2 reference; burns use TokenMessenger, not Bridge2.
    * @see https://developers.circle.com/cctp/howtos/transfer-usdc-from-arbitrum-to-hypercore
    */
   app.get("/api/cctp/deposit-config", async (_req: Request, res: Response) => {
     try {
-      const cfg = loadCctpServerConfig();
+      const cfg = loadProfessionalDepositConfig();
       res.json({
-        cctpExtension: cfg.cctpExtension,
+        tokenMessenger: cfg.tokenMessenger,
+        messageTransmitterArbitrum: cfg.messageTransmitterArbitrum,
         usdc: cfg.usdc,
-        chainId: cfg.chainIdArbitrum,
         cctpForwarder: cfg.cctpForwarder,
+        messageTransmitterHyperEvm: cfg.messageTransmitterHyperEvm,
+        chainId: cfg.chainIdArbitrum,
+        hyperevmChainId: cfg.hyperevmChainId,
         destinationDomain: cfg.destinationDomain,
         sourceDomain: cfg.sourceDomain,
         minDepositUsdc: cfg.minDepositUsdc,
         minFinalityThreshold: cfg.minFinalityThreshold,
-        usdcEip712: {
-          name: cfg.usdcEip712Name,
-          version: cfg.usdcEip712Version,
-          chainId: cfg.chainIdArbitrum,
-          verifyingContract: cfg.usdc,
-        },
+        verifiedHyperliquidBridge2Arbitrum: cfg.verifiedHyperliquidBridge2Arbitrum,
+        irisAttestationPath: "/v1/attestations/{messageHash}",
       });
     } catch (e) {
       console.error("GET /api/cctp/deposit-config:", e);
@@ -775,7 +778,7 @@ export async function registerRoutes(
   /** Proxy Circle Iris forward-fee quote (avoids browser CORS; no secrets). */
   app.get("/api/cctp/fees", async (_req: Request, res: Response) => {
     try {
-      const cfg = loadCctpServerConfig();
+      const cfg = loadProfessionalDepositConfig();
       const { maxFee, minFinalityThreshold } = await fetchCctpBurnForwardFeeMax(cfg);
       res.json({
         maxFee: maxFee.toString(),
@@ -786,6 +789,19 @@ export async function registerRoutes(
       console.error("GET /api/cctp/fees:", e);
       const msg = e instanceof Error ? e.message : String(e);
       res.status(502).json({ error: msg });
+    }
+  });
+
+  /** Proxy Circle Iris attestation status (keccak256(message) from `MessageSent`). */
+  app.get("/api/cctp/attestation/:messageHash", async (req: Request, res: Response) => {
+    try {
+      const cfg = loadProfessionalDepositConfig();
+      const out = await fetchCircleAttestation(req.params.messageHash, cfg.irisApiBase);
+      res.json(out);
+    } catch (e) {
+      console.error("GET /api/cctp/attestation:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ error: msg });
     }
   });
 
@@ -1693,10 +1709,18 @@ export async function registerRoutes(
       if (!stage || stage.length > 64) {
         return res.status(400).json({ error: "Invalid stage" });
       }
-      const txHash =
-        (body as any).txHash != null && String((body as any).txHash).trim() !== ""
-          ? String((body as any).txHash).trim()
-          : null;
+      const optStr = (k: string): string | null => {
+        const v = (body as any)[k];
+        if (v == null || String(v).trim() === "") return null;
+        const s = String(v).trim();
+        if (s.length > 16_384) return s.slice(0, 16_384);
+        return s;
+      };
+      const txHash = optStr("txHash");
+      const burnTxHash = optStr("burnTxHash");
+      const messageHash = optStr("messageHash");
+      const cctpMessageHex = optStr("cctpMessageHex");
+      const attestationHex = optStr("attestationHex");
       const amountUsdc = parseFloat(String((body as any).amountUsdc ?? ""));
       const forwardFeeMax = parseFloat(String((body as any).forwardFeeMax ?? ""));
       const error =
@@ -1706,6 +1730,10 @@ export async function registerRoutes(
       await persistMongoCrmCctpBridgeProgress(wallet, {
         stage,
         txHash,
+        burnTxHash,
+        messageHash,
+        cctpMessageHex,
+        attestationHex,
         amountUsdc: Number.isFinite(amountUsdc) ? amountUsdc : null,
         forwardFeeMax: Number.isFinite(forwardFeeMax) ? forwardFeeMax : null,
         error,

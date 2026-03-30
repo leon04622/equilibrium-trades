@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,7 @@ import {
   getArbitrumUsdcBalance,
   fetchHyperliquidDepositConfig,
   type HyperliquidDepositConfig,
+  type CctpDepositStep,
   type SpotBalance,
 } from "@/lib/hyperliquid-client";
 import { queryClient } from "@/lib/queryClient";
@@ -96,6 +97,7 @@ export default function Portfolio() {
   const [depositAwaitingChain, setDepositAwaitingChain] = useState(false);
   const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
   const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
+  const cctpAttestationCelebratedRef = useRef(false);
 
   const totalEquity = accountValue || 0;
   const availableBalance = balance || 0;
@@ -336,6 +338,7 @@ export default function Portfolio() {
   };
 
   const openDepositDialog = async () => {
+    cctpAttestationCelebratedRef.current = false;
     setDepositAmount("");
     setDepositResult(null);
     setDepositStep("");
@@ -410,7 +413,7 @@ export default function Portfolio() {
         setDepositStep("");
         const msg =
           e?.message ||
-          "Deposit is not configured. Set CCTP_EXTENSION_ADDRESS, CCTP_USDC_ADDRESS, and CCTP_FORWARDER_ADDRESS on the server.";
+          "Deposit is not configured. Set professional CCTP env vars on the server (TokenMessenger, forwarder, MessageTransmitter, USDC).";
         setDepositResult({ success: false, error: msg });
         return;
       }
@@ -439,24 +442,50 @@ export default function Portfolio() {
 
     setDepositing(true);
     setDepositAwaitingChain(false);
-    setDepositStep("Fetching Circle CCTP fee quote…");
+    setDepositStep("Fetching Circle CCTP forward fee quote…");
 
     try {
       const result = await depositUsdcToHyperliquid(activeSigner, amount, {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
-        onProgress: (stage) => {
-          if (stage === "quoting_fees") setDepositStep("Fetching Circle CCTP fee quote…");
-          else if (stage === "sign_receive_auth") {
-            setDepositStep("Sign USDC ReceiveWithAuthorization (EIP-3009) in your wallet…");
-          } else if (stage === "submit_burn") {
-            setDepositStep("Submitting CCTP burn on Arbitrum…");
-          } else if (stage === "await_confirm") {
+        onStep: (step: CctpDepositStep, detail?: string) => {
+          if (step === "approve") setDepositStep("Approve USDC for Circle TokenMessenger…");
+          else if (step === "burn") {
+            setDepositAwaitingChain(true);
+            setDepositStep("Burn USDC on Arbitrum (CCTP) with HyperCore forward hook…");
+          } else if (step === "attestation") {
             setDepositAwaitingChain(true);
             setDepositStep(
-              "Confirming on Arbitrum — CCTP will mint on HyperEVM and forward to HyperCore (often a few minutes).",
+              detail
+                ? `Waiting for Circle attestation (Iris)… ${detail.slice(0, 12)}…`
+                : "Waiting for Circle attestation (Iris)…",
             );
+          } else if (step === "mint") {
+            setDepositAwaitingChain(true);
+            setDepositStep(detail ?? "Switch to HyperEVM (999) and confirm mint — forwarder credits HyperCore…");
+          } else if (step === "done") {
+            setDepositAwaitingChain(false);
+            setDepositStep("");
           }
+        },
+        onAttestationConfirmed: () => {
+          cctpAttestationCelebratedRef.current = true;
+          void (async () => {
+            try {
+              const confetti = (await import("canvas-confetti")).default;
+              const burst = { particleCount: 100, spread: 68, origin: { y: 0.65 } as const };
+              void confetti(burst);
+              void confetti({ ...burst, angle: 55, origin: { x: 0, y: 0.65 } });
+              void confetti({ ...burst, angle: 125, origin: { x: 1, y: 0.65 } });
+            } catch {
+              /* optional dependency / dynamic import */
+            }
+            toast({
+              title: "Success: Funds are now live on Hyperliquid",
+              description:
+                "Circle attestation is ready. If your wallet asks, confirm the mint on HyperEVM to finalize delivery to HyperCore.",
+            });
+          })();
         },
       });
       setDepositAwaitingChain(false);
@@ -466,10 +495,12 @@ export default function Portfolio() {
       if (result.success) {
         window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
         void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
-        toast({
-          title: "CCTP burn confirmed on Arbitrum",
-          description: `${amount} USDC burn submitted. Circle routes USDC to HyperCore; balances refresh as the forward completes.`,
-        });
+        if (!cctpAttestationCelebratedRef.current) {
+          toast({
+            title: "CCTP deposit complete",
+            description: `Mint submitted on HyperEVM. ${amount} USDC (net of fees) should appear on HyperCore shortly — refresh balances if needed.`,
+          });
+        }
         handleRefresh();
         setTimeout(() => handleRefresh(), 5_000);
         setTimeout(() => handleRefresh(), 15_000);
@@ -1026,18 +1057,20 @@ export default function Portfolio() {
               Deposit USDC to Your Account
             </DialogTitle>
             <DialogDescription>
-              <strong>Circle CCTP:</strong> native USDC on Arbitrum is burned via{" "}
-              <code className="text-xs bg-muted px-1 rounded">batchDepositForBurnWithAuth</code> and{" "}
-              <strong>EIP-3009 ReceiveWithAuthorization</strong>, then minted on HyperEVM and forwarded to your address on{" "}
-              <strong>HyperCore</strong> (perps by default). Contract addresses are loaded from the server only — no hardcoded
-              bridge recipients. A small <strong>HyperCore forward fee</strong> (quoted live) is deducted from the credited
-              amount. Minimum {depositCfg ? `${depositCfg.minDepositUsdc}` : "—"} USDC from server config.
+              <strong>Circle CCTP (professional):</strong> you approve USDC, then{" "}
+              <code className="text-xs bg-muted px-1 rounded">depositForBurnWithHook</code> on Arbitrum burns USDC and attaches{" "}
+              <strong>forward hook data</strong> for Hyperliquid’s <strong>CctpForwarder</strong> on HyperEVM, so minted USDC is
+              credited to your <strong>HyperCore</strong> trading account (not stranded on HyperEVM). After Circle Iris attests,
+              you confirm <code className="text-xs bg-muted px-1 rounded">receiveMessage</code> on HyperEVM. Minimum{" "}
+              {depositCfg ? `${depositCfg.minDepositUsdc}` : "—"} USDC. Forward fee is quoted live from Circle.
             </DialogDescription>
           </DialogHeader>
 
           {userSync?.cctpBridgeProgress &&
+            userSync.cctpBridgeProgress.stage !== "done" &&
             userSync.cctpBridgeProgress.stage !== "completed" &&
-            !String(userSync.cctpBridgeProgress.stage).startsWith("failed") && (
+            !String(userSync.cctpBridgeProgress.stage).startsWith("failed") &&
+            !String(userSync.cctpBridgeProgress.stage).startsWith("error") && (
               <div className="flex items-start gap-2 p-3 rounded-lg text-xs bg-muted/60 border border-border">
                 <Info className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
@@ -1130,6 +1163,10 @@ export default function Portfolio() {
               {arbUsdcBalance !== null && arbUsdcBalance <= 0 && (
                 <p className="text-xs text-amber-500">No USDC found in your Arbitrum wallet. Please fund your wallet on Arbitrum first.</p>
               )}
+              <p className="text-xs text-muted-foreground border border-border/80 rounded-md px-2 py-1.5 bg-muted/40">
+                <strong className="text-foreground">First deposit?</strong> 1 USDC will be used for account initialization (HyperCore).
+                Your send amount should also cover Circle forward fees so the balance after fees is not unexpectedly short.
+              </p>
             </div>
 
             {/* Info note */}
@@ -1137,14 +1174,13 @@ export default function Portfolio() {
               <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="h-3 w-3 shrink-0 mt-0.5" />
                 <span>
-                  Native USDC on Arbitrum One. View the configured{" "}
-                  <strong>CctpExtension</strong> on{" "}
+                  Native USDC on Arbitrum One. Verified Hyperliquid Bridge2 reference (read-only) on{" "}
                   <a
-                    href={`https://arbiscan.io/address/${depositCfg.cctpExtension}`}
+                    href={`https://arbiscan.io/address/${depositCfg.verifiedHyperliquidBridge2Arbitrum}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline inline-flex items-center gap-0.5"
-                    data-testid="link-cctp-extension-contract"
+                    data-testid="link-verified-hl-bridge2-arb"
                   >
                     Arbiscan
                     <ExternalLink className="h-2.5 w-2.5" />
@@ -1190,7 +1226,7 @@ export default function Portfolio() {
                 )}
                 <span className="break-all">
                   {depositResult.success
-                    ? `CCTP burn of ${depositAmount} USDC submitted on Arbitrum. USDC will route to HyperCore after Circle attestation; amount credited is net of the forward fee.${depositResult.txHash ? ` Tx: ${depositResult.txHash.slice(0, 10)}...` : ""}`
+                    ? `CCTP flow finished: mint on HyperEVM submitted. ${depositAmount} USDC gross from Arbitrum — net to HyperCore after forward fee and any HyperCore account fee.${depositResult.txHash ? ` Last tx: ${depositResult.txHash.slice(0, 10)}…` : ""}`
                     : depositResult.error || "Deposit failed"}
                 </span>
               </div>

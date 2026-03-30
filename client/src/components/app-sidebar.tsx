@@ -15,6 +15,7 @@ import {
   Shield,
   MessageCircle,
   NotebookPen,
+  BookMarked,
 } from "lucide-react";
 import {
   Sidebar,
@@ -83,6 +84,7 @@ const toolsNavItems = [
 const accountNavItems = [
   { title: "Journal", url: "/journal", icon: NotebookPen },
   { title: "Portfolio", url: "/portfolio", icon: Wallet },
+  { title: "Docs", url: "/docs", icon: BookMarked },
   { title: "Subscription", url: "/pricing", icon: CreditCard },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

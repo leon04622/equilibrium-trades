@@ -21,6 +21,10 @@ export type CctpBridgeProgressSync = {
   stage: string;
   updatedAt: string | null;
   txHash?: string | null;
+  burnTxHash?: string | null;
+  messageHash?: string | null;
+  cctpMessageHex?: string | null;
+  attestationHex?: string | null;
   amountUsdc?: number | null;
   forwardFeeMax?: number | null;
   error?: string | null;
