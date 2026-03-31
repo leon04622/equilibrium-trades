@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { RefreshCw, Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES, type ScanTimeframe } from "@shared/scan-timeframes";
@@ -47,7 +46,7 @@ function isFastTf(tf: string): boolean {
   return (FAST_TRACK_TFS as readonly string[]).includes(tf);
 }
 
-type ScannerMarketsPayload = { tickers: string[]; spotDisplayByCoin?: Record<string, string> };
+type ScannerMarketsPayload = { tickers: string[]; displayByCoin?: Record<string, string> };
 
 function playSetupChime(): void {
   try {
@@ -123,11 +122,7 @@ export function PatternScannerUI() {
   });
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
-  const marketLabels = useMemo(() => {
-    const tickers = marketsQuery.data?.tickers ?? [];
-    const map = marketsQuery.data?.spotDisplayByCoin ?? {};
-    return tickers.map((ticker) => (ticker.startsWith("@") ? map[ticker] || ticker : ticker));
-  }, [marketsQuery.data]);
+  const displayByCoin = marketsQuery.data?.displayByCoin;
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -198,27 +193,25 @@ export function PatternScannerUI() {
   const isFetching =
     (!!fastTfParam && fastQuery.isFetching) || (!!slowTfParam && slowQuery.isFetching);
 
-  const spotDisplayByCoin = marketsQuery.data?.spotDisplayByCoin;
-
   const signals = useMemo(() => {
     if (isError) return [];
     const map = new Map<string, PatternSignal>();
-    const dedupeKey = (p: PatternSignal) => `${p.coin}|${p.timeframe}|${p.patternName}`;
+    const dedupeKey = (p: PatternSignal) =>
+      `${p.coin}|${p.timeframe}|${p.patternName}|${p.patternStatus}`;
     for (const p of fastQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
     for (const p of slowQuery.data?.patterns ?? []) map.set(dedupeKey(p), p);
     const merged = [...map.values()].sort(
       (a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime(),
     );
-    if (!spotDisplayByCoin || Object.keys(spotDisplayByCoin).length === 0) return merged;
+    if (!displayByCoin || Object.keys(displayByCoin).length === 0) return merged;
     return merged.map((s) => {
-      if (!s.coin.startsWith("@")) return s;
       const fromServer = s.coinDisplay?.trim();
       if (fromServer) return s;
-      const fromMap = spotDisplayByCoin[s.coin]?.trim();
+      const fromMap = displayByCoin[s.coin]?.trim();
       if (!fromMap) return s;
       return { ...s, coinDisplay: fromMap };
     });
-  }, [isError, fastQuery.data, slowQuery.data, spotDisplayByCoin]);
+  }, [isError, fastQuery.data, slowQuery.data, displayByCoin]);
 
   const scanMeta = useMemo(() => {
     if (isError) return null;
@@ -331,6 +324,15 @@ export function PatternScannerUI() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 text-[10px] md:text-xs">
+        <div className="rounded-full border bg-card/40 px-3 py-1.5 text-muted-foreground">
+          Universe: <strong className="text-foreground">{universeCount ?? "..."}</strong> markets
+        </div>
+        <div className="rounded-full border bg-card/40 px-3 py-1.5 text-muted-foreground">
+          Mode: <strong className="text-foreground">{selectedTimeframe === "all" ? "All timeframes" : selectedTimeframe}</strong>
+        </div>
+      </div>
+
       <div className="space-y-1.5">
         <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">Timeframe</p>
         <ToggleGroup
@@ -353,24 +355,6 @@ export function PatternScannerUI() {
           ))}
         </ToggleGroup>
       </div>
-
-      {marketLabels.length > 0 ? (
-        <div className="rounded-lg border bg-card/40 p-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">
-              Scanned markets
-            </p>
-            <span className="text-[10px] md:text-xs text-muted-foreground">{marketLabels.length} total</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-            {marketLabels.map((label) => (
-              <Badge key={label} variant="outline" className="text-[10px] md:text-xs">
-                {label}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       {alerts.length > 0 ? (
         <Alert className="border-emerald-500/40 bg-emerald-500/[0.07]">
@@ -405,11 +389,11 @@ export function PatternScannerUI() {
 
       {universeCount != null && universeCount < 25 ? (
         <Alert className="border-amber-500/40 bg-amber-500/[0.06]">
-          <AlertTitle className="text-sm">Limited market list ({universeCount} symbols)</AlertTitle>
+          <AlertTitle className="text-sm">Limited market universe ({universeCount} symbols)</AlertTitle>
           <AlertDescription className="text-xs text-muted-foreground">
-            The scanner is only evaluating the markets above. If Hyperliquid&apos;s full universe cannot be loaded from
-            this deployment (network, API, or config), you&apos;ll see a short default list — fewer symbols means fewer
-            chances for a pattern on any given pass. Fix HL connectivity or host config for the full perp + spot set.
+            This deployment is using a reduced fallback universe instead of Hyperliquid&apos;s full live market list.
+            Fewer markets means fewer setups. Once the host can load the live HL universe reliably, this count should
+            jump much higher automatically.
           </AlertDescription>
         </Alert>
       ) : null}

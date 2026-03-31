@@ -1382,9 +1382,22 @@ export async function registerRoutes(
   app.get("/api/scanner/markets", async (_req: Request, res: Response) => {
     try {
       const tickers = await resolveScanCoins(undefined);
-      const spotDisplayByCoin =
-        tickers.some((t) => t.startsWith("@")) ? await getSpotAtIndexDisplayMap() : {};
-      res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO, spotDisplayByCoin });
+      const displayByCoin: Record<string, string> = {};
+      if (tickers.some((t) => !t.startsWith("@"))) {
+        try {
+          const perpTickers = await getAllTickers();
+          for (const t of perpTickers) {
+            const label = t.displayName?.trim();
+            if (label) displayByCoin[t.coin] = label;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (tickers.some((t) => t.startsWith("@"))) {
+        Object.assign(displayByCoin, await getSpotAtIndexDisplayMap());
+      }
+      res.json({ tickers, goldNote: GLOBAL_SCANNER_GOLD_PROXY_INFO, displayByCoin });
     } catch (error) {
       console.error("Error building scanner markets list:", error);
       res.status(500).json({ error: "Failed to load markets" });

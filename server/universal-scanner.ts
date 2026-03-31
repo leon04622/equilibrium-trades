@@ -229,6 +229,13 @@ function buildDynamicEducation(
   return { educationalNote: base.trim(), whatToWatch: watch.trim() };
 }
 
+function stableLevelKey(value: number): string {
+  if (!Number.isFinite(value)) return "na";
+  if (Math.abs(value) >= 1000) return value.toFixed(2);
+  if (Math.abs(value) >= 1) return value.toFixed(4);
+  return value.toFixed(6);
+}
+
 function buildEducationalSignalFromCandidate(
   coin: string,
   timeframe: string,
@@ -303,9 +310,16 @@ function buildEducationalSignalFromCandidate(
       : "";
 
   const apexNoteForRow = sameApex ? apexResult.note : "";
+  const stableId = [
+    coin,
+    timeframe,
+    best.p.name,
+    patternStatus,
+    stableLevelKey(best.p.breakoutLevel),
+  ].join(":");
 
   return {
-    id: `${coin}-${timeframe}-${best.p.name}-${idSalt}-${Date.now()}`,
+    id: stableId,
     coin,
     timeframe,
     bias,
@@ -403,7 +417,7 @@ export async function analyzeEducationalUniversal(
     );
     return [
       {
-        id: `${coin}-${timeframe}-cross-${Date.now()}`,
+        id: `${coin}:${timeframe}:cross:${crossBias}`,
         coin,
         timeframe,
         bias: crossBias,
