@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GraduationCap, Loader2, Lock, Play, Sparkles, X } from "lucide-react";
+import { GraduationCap, Loader2, Lock, Play, Sparkles, X, Clock3, ShieldCheck, Film } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,15 @@ export type VaultItem = {
 const ACADEMY_IDS = new Set<AcademySection>(["beginner_patterns", "sma_masterclass", "live_sessions"]);
 
 const PRESET_VAULT_LABELS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
+
+function estimateLessonDuration(description: string, title: string): string {
+  const source = `${description} ${title}`.toLowerCase();
+  const explicit = source.match(/(\d+)\s*(min|mins|minute|minutes)\b/);
+  if (explicit) return `${explicit[1]} min`;
+  const words = source.trim().split(/\s+/).filter(Boolean).length;
+  const estimated = Math.min(24, Math.max(6, Math.round(words / 22) || 8));
+  return `${estimated} min`;
+}
 
 /** Stable section title on /videos: admin category string, or legacy inferred preset label. */
 function vaultHeadingForVideo(v: TutorialVideo): string {
@@ -297,25 +306,64 @@ export default function VideoVault() {
 
   return (
     <div className="p-4 md:p-6 space-y-8 max-w-6xl mx-auto min-h-[60vh] bg-background">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-primary mb-1">
-            <GraduationCap className="h-6 w-6" />
-            <span className="text-xs font-semibold uppercase tracking-wider">Pro</span>
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/12 via-background to-background shadow-xl shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="grid gap-6 xl:grid-cols-[1.2fr_0.95fr] xl:items-end">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-primary/90 text-primary-foreground">
+                  <GraduationCap className="mr-1 h-3 w-3" />
+                  Members Vault
+                </Badge>
+                <Badge variant="outline" className="border-primary/20 bg-background/70">
+                  Premium playback and walkthroughs
+                </Badge>
+                {isPro === true && tier != null && (
+                  <Badge variant="secondary" className="capitalize">
+                    {tier}
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-display font-bold tracking-tight md:text-4xl">
+                  A premium lesson library designed around the exact workflows your members are paying for.
+                </h1>
+                <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
+                  Vault content is grouped by practical use inside the product, so members can move from education to
+                  execution without losing context.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              <div className="rounded-2xl border bg-background/80 p-4">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                  <Film className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-semibold">{items.length}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Published lessons currently live in the vault.</p>
+              </div>
+              <div className="rounded-2xl border bg-background/80 p-4">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-semibold">Persistent member access</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Lessons are served from the live backend so members keep the same access after refresh or deploy.
+                </p>
+              </div>
+              <div className="rounded-2xl border bg-background/80 p-4">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                  <Clock3 className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-semibold">On-demand walkthroughs</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Members can open lessons without leaving the platform workflow.
+                </p>
+              </div>
+            </div>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Educational Vault</h1>
-          <p className="text-muted-foreground mt-1 max-w-xl text-sm md:text-base">
-            Library list from Mongo via <code className="text-xs">/api/videos</code> (same entries as Command Center).{" "}
-            <strong>Browse anytime</strong>; in-app playback requires Pro. Categories follow the{" "}
-            <strong>category name</strong> set when publishing.
-            {isPro === true && tier != null && (
-              <Badge variant="secondary" className="ml-2 align-middle">
-                {tier}
-              </Badge>
-            )}
-          </p>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       <div className="relative rounded-xl border bg-card/40">
         <div className="p-4 md:p-6 space-y-10">
@@ -377,7 +425,7 @@ export default function VideoVault() {
           ) : (
             vaultGroups.map((group) => (
               <section key={group.title} className="space-y-4">
-                <div>
+                <div className="rounded-2xl border border-border/70 bg-background/70 p-5 shadow-sm">
                   <h2 className="text-xl font-semibold">{group.title}</h2>
                   <p className="text-sm text-muted-foreground">{group.description}</p>
                 </div>
@@ -385,24 +433,42 @@ export default function VideoVault() {
                   {group.items.map((item) => (
                     <Card
                       key={item.id}
-                      className="overflow-hidden cursor-pointer hover-elevate transition-shadow"
+                      className="overflow-hidden cursor-pointer transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/5"
                       onClick={() => setActive(item)}
                       data-testid={`vault-card-${item.id}`}
                     >
-                      <div className="aspect-video relative bg-muted">
+                      <div className="aspect-video relative bg-muted overflow-hidden">
                         <img
                           src={item.thumbnailUrl}
                           alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
+                          className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                           loading="lazy"
                         />
-                        <div className="absolute inset-0 bg-black/35 flex items-center justify-center opacity-90 hover:opacity-100 transition-opacity">
-                          <Play className="h-12 w-12 text-white drop-shadow-md" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+                        <div className="absolute left-3 top-3">
+                          <Badge variant="secondary" className="bg-black/45 text-white backdrop-blur">
+                            {item.vaultHeading}
+                          </Badge>
+                        </div>
+                        <div className="absolute inset-0 flex items-center justify-center opacity-95 group-hover:opacity-100 transition-opacity">
+                          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/92 text-black shadow-lg ring-4 ring-white/20">
+                            <Play className="h-6 w-6 fill-current" />
+                          </div>
                         </div>
                       </div>
-                      <CardContent className="p-4">
+                      <CardContent className="p-4 space-y-3">
                         <h3 className="font-semibold line-clamp-2 leading-snug">{item.title}</h3>
                         <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{item.description}</p>
+                        <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock3 className="h-3.5 w-3.5" />
+                            {estimateLessonDuration(item.description, item.title)}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-primary">
+                            <Play className="h-3.5 w-3.5" />
+                            Open lesson
+                          </span>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}
