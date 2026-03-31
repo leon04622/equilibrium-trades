@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from "react";
-import { Check, Sparkles, Crown, ArrowRight, Shield, Zap, BookOpen, Share2, Quote } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Sparkles, Crown, ArrowRight, Shield, Zap, BookOpen, Share2, Quote, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
 import { proCheckoutUrl, mentoringCheckoutUrl } from "@/lib/stripe-payment-links";
+import { getPricingReferralWallet, PRICING_REF_SESSION_KEY } from "@/lib/pricing-referral";
 
 const proFeatures = [
   "AI-powered pattern detection",
@@ -32,13 +33,14 @@ const mentoringFeatures = [
 export default function Pricing() {
   const { toast } = useToast();
   const { address, isConnected, connect } = useWallet();
+  const [checkoutBusy, setCheckoutBusy] = useState<null | "pro" | "mentoring">(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const refWallet = urlParams.get("ref")?.trim();
     if (refWallet && /^0x[a-fA-F0-9]{40}$/i.test(refWallet)) {
       try {
-        sessionStorage.setItem("equilibrium_pricing_ref_wallet", refWallet.toLowerCase());
+        sessionStorage.setItem(PRICING_REF_SESSION_KEY, refWallet.toLowerCase());
       } catch {
         /* ignore quota / private mode */
       }
@@ -77,11 +79,70 @@ export default function Pricing() {
       return;
     }
 
-    window.location.href = proCheckoutUrl(address);
+    const referralWallet = getPricingReferralWallet();
+    setCheckoutBusy("pro");
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          walletAddress: address,
+          tier: "pro",
+          ...(referralWallet ? { referralWallet } : {}),
+        }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || "Checkout failed");
+      }
+      window.location.href = data.url;
+    } catch {
+      toast({
+        title: "Using backup checkout",
+        description:
+          "The payment link will open instead. Referral details may not appear in Stripe for this attempt.",
+        variant: "destructive",
+      });
+      window.location.href = proCheckoutUrl(address);
+    } finally {
+      setCheckoutBusy(null);
+    }
   };
 
-  const handleMentoringCheckout = () => {
-    window.location.href = mentoringCheckoutUrl(isConnected ? address : null);
+  const handleMentoringCheckout = async () => {
+    if (!isConnected || !address) {
+      window.location.href = mentoringCheckoutUrl(null);
+      return;
+    }
+
+    const referralWallet = getPricingReferralWallet();
+    setCheckoutBusy("mentoring");
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          walletAddress: address,
+          tier: "mentoring",
+          ...(referralWallet ? { referralWallet } : {}),
+        }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || "Checkout failed");
+      }
+      window.location.href = data.url;
+    } catch {
+      toast({
+        title: "Using backup checkout",
+        description:
+          "The payment link will open instead. Referral details may not appear in Stripe for this attempt.",
+        variant: "destructive",
+      });
+      window.location.href = mentoringCheckoutUrl(address);
+    } finally {
+      setCheckoutBusy(null);
+    }
   };
 
   const shareUrl = useMemo(() => {
@@ -260,11 +321,18 @@ export default function Pricing() {
             <Button
               className="w-full"
               size="lg"
-              onClick={handleProCheckout}
+              onClick={() => void handleProCheckout()}
+              disabled={checkoutBusy !== null}
               data-testid="button-subscribe-pro"
             >
-              Get Pro Access
-              <ArrowRight className="h-4 w-4 ml-2" />
+              {checkoutBusy === "pro" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  Get Pro Access
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </>
+              )}
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               Cancel anytime from the Stripe customer portal. No long-term lock-in.
@@ -313,11 +381,18 @@ export default function Pricing() {
               className="w-full"
               size="lg"
               variant="outline"
-              onClick={handleMentoringCheckout}
+              onClick={() => void handleMentoringCheckout()}
+              disabled={checkoutBusy !== null}
               data-testid="button-subscribe-mentoring"
             >
-              Book Mentoring
-              <ArrowRight className="h-4 w-4 ml-2" />
+              {checkoutBusy === "mentoring" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  Book Mentoring
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </>
+              )}
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               One-time payment. Pro platform access granted after payment.

@@ -3247,29 +3247,57 @@ export async function registerRoutes(
   // Create checkout session for subscription
   app.post("/api/stripe/checkout", stripeCheckoutLimiter, async (req: Request, res: Response) => {
     try {
-      let { priceId, walletAddress, email, tier } = req.body;
-      
-      if (!walletAddress) {
+      let { priceId, walletAddress, email, tier, referralWallet } = req.body;
+
+      if (!walletAddress || typeof walletAddress !== "string") {
         return res.status(400).json({ error: "Wallet address is required" });
       }
+      walletAddress = walletAddress.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/i.test(walletAddress)) {
+        return res.status(400).json({ error: "Invalid wallet address" });
+      }
+      walletAddress = walletAddress.toLowerCase();
 
-      // Auto-select the correct £50 price for AI Pro if no priceId provided
+      const tierStr = typeof tier === "string" ? tier.trim().toLowerCase() : "";
+      const wantMentoring = tierStr === "mentoring" || tierStr === "mentor";
+
+      let referralForStripe: string | undefined;
+      if (referralWallet != null && String(referralWallet).trim()) {
+        const r = String(referralWallet).trim().toLowerCase();
+        if (/^0x[a-f0-9]{40}$/.test(r) && r !== walletAddress) {
+          referralForStripe = r;
+        }
+      }
+
+      // Auto-select price when none provided
       if (!priceId) {
-        const PRO_PRODUCT_ID = 'prod_TpGvzRznydzDhy';
         try {
           const stripe = await getUncachableStripeClient();
-          const prices = await stripe.prices.list({ product: PRO_PRODUCT_ID, active: true, limit: 10 });
-          // Prefer £50 (5000 pence), then highest amount as fallback
-          const sorted = prices.data.sort((a, b) => (b.unit_amount || 0) - (a.unit_amount || 0));
-          const monthly = sorted.find(p => p.recurring?.interval === 'month') || sorted[0];
-          if (monthly) priceId = monthly.id;
+          if (wantMentoring) {
+            const MENTORING_PRODUCT_ID = "prod_TpGvGOpqOoE8xL";
+            const prices = await stripe.prices.list({
+              product: MENTORING_PRODUCT_ID,
+              active: true,
+              limit: 20,
+            });
+            const oneTime = prices.data.find((p) => !p.recurring) || prices.data[0];
+            if (oneTime) priceId = oneTime.id;
+          } else {
+            const PRO_PRODUCT_ID = "prod_TpGvzRznydzDhy";
+            const prices = await stripe.prices.list({ product: PRO_PRODUCT_ID, active: true, limit: 10 });
+            const sorted = prices.data.sort((a, b) => (b.unit_amount || 0) - (a.unit_amount || 0));
+            const monthly = sorted.find((p) => p.recurring?.interval === "month") || sorted[0];
+            if (monthly) priceId = monthly.id;
+          }
         } catch (e) {
-          console.error('Failed to auto-select price:', e);
+          console.error("Failed to auto-select Stripe price:", e);
         }
       }
 
       if (!priceId) {
-        return res.status(400).json({ error: "No active price found for Pro plan" });
+        return res.status(400).json({
+          error: wantMentoring ? "No active price found for Mentoring plan" : "No active price found for Pro plan",
+        });
       }
 
       // Get or create wallet user
@@ -3306,13 +3334,15 @@ export async function registerRoutes(
       }
 
       const baseUrl = getPublicAppBaseUrl();
+      const successTier = wantMentoring ? "mentoring" : "pro";
       const session = await stripeService.createCheckoutSession(
         customerId,
         priceId,
         walletAddress,
-        `${baseUrl}/pricing?success=true&tier=${tier || 'pro'}`,
+        `${baseUrl}/pricing?success=true&tier=${successTier}`,
         `${baseUrl}/pricing?canceled=true`,
-        mode
+        mode,
+        referralForStripe ? { referralWallet: referralForStripe } : undefined,
       );
 
       res.json({ url: session.url, sessionId: session.id });

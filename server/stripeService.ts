@@ -28,22 +28,31 @@ export class StripeService {
   }
 
   async createCheckoutSession(
-    customerId: string, 
-    priceId: string, 
+    customerId: string,
+    priceId: string,
     walletAddress: string,
-    successUrl: string, 
+    successUrl: string,
     cancelUrl: string,
-    mode: 'subscription' | 'payment' = 'subscription'
+    mode: "subscription" | "payment" = "subscription",
+    options?: { referralWallet?: string },
   ) {
     const stripe = await getUncachableStripeClient();
+    const meta: Record<string, string> = { walletAddress };
+    if (options?.referralWallet) {
+      meta.referral_wallet = options.referralWallet;
+    }
+
     return await stripe.checkout.sessions.create({
       customer: customerId,
-      payment_method_types: ['card'],
+      payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
       mode,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { walletAddress },
+      metadata: meta,
+      ...(mode === "subscription"
+        ? { subscription_data: { metadata: meta } }
+        : { payment_intent_data: { metadata: meta } }),
     });
   }
 
