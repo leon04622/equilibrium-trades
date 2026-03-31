@@ -25,11 +25,18 @@ function scoreCandidate(p: DetectedPattern, volumeOk: boolean): number {
   return s;
 }
 
+function patternLifecycleKey(p: DetectedPattern): "confirmed" | "pending" | "forming" {
+  if (p.status === "breakout_confirmed") return "confirmed";
+  if (p.status === "breakout_pending") return "pending";
+  return "forming";
+}
+
+/** One row per pattern name **and** lifecycle stage so forming setups are not replaced by breakouts. */
 function upsertByScore(
   map: Map<string, { p: DetectedPattern; volumeOk: boolean }>,
   item: { p: DetectedPattern; volumeOk: boolean },
 ) {
-  const k = item.p.name;
+  const k = `${item.p.name}::${patternLifecycleKey(item.p)}`;
   const ex = map.get(k);
   const sNew = scoreCandidate(item.p, item.volumeOk);
   const sOld = ex ? scoreCandidate(ex.p, ex.volumeOk) : -Infinity;

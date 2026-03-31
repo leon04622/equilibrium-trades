@@ -152,8 +152,8 @@ export function PatternScannerUI() {
     queryFn: () =>
       fetchPatternScanPayload(fastTfParam, address, forceNocacheRef.current),
     refetchInterval: (q) =>
-      q.state.status === "error" || !fastTfParam ? false : 20_000,
-    staleTime: 12_000,
+      q.state.status === "error" || !fastTfParam ? false : 10_000,
+    staleTime: 5_000,
     retry: 1,
   });
 

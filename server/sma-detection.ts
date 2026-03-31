@@ -91,6 +91,13 @@ export function sortPatternCandidatesByActionability(patterns: DetectedPattern[]
   });
 }
 
+export function patternsLooselyEqual(a: DetectedPattern, b: DetectedPattern): boolean {
+  return (
+    a.name === b.name &&
+    Math.abs(a.entryPrice - b.entryPrice) / Math.max(Math.abs(a.entryPrice), 1e-12) < 0.003
+  );
+}
+
 function flagPatternScore(p: DetectedPattern): number {
   const tier = p.status === "breakout_confirmed" ? 300 : p.status === "breakout_pending" ? 200 : 100;
   return tier + p.confidence;
@@ -101,15 +108,22 @@ function patternActionabilityScore(p: DetectedPattern): number {
   return tier + p.confidence;
 }
 
+/**
+ * Scans sliding windows; returns the best-matching pattern plus, when the best is already
+ * breaking out, a stronger **forming** instance from another offset so the scanner surfaces
+ * developing setups (not only completed breaks).
+ */
 function scanPatternWindows(
   candles: HyperliquidCandle[],
   windowSizes: number[],
   maxOffset: number,
   step: number,
   detector: (window: HyperliquidCandle[]) => DetectedPattern | null,
-): DetectedPattern | null {
+): DetectedPattern[] {
   let best: DetectedPattern | null = null;
   let bestScore = -Infinity;
+  let bestForming: DetectedPattern | null = null;
+  let bestFormingScore = -Infinity;
 
   for (const windowSize of windowSizes) {
     if (candles.length < windowSize) continue;
@@ -125,10 +139,22 @@ function scanPatternWindows(
         bestScore = score;
         best = pattern;
       }
+      if (pattern.status === "forming") {
+        const fScore = pattern.confidence;
+        if (fScore > bestFormingScore) {
+          bestFormingScore = fScore;
+          bestForming = pattern;
+        }
+      }
     }
   }
 
-  return best;
+  if (!best) return [];
+  if (best.status === "forming") return [best];
+  if (bestForming && !patternsLooselyEqual(best, bestForming)) {
+    return [bestForming, best];
+  }
+  return [best];
 }
 
 // SMMA (Smoothed Moving Average) — matches Hyperliquid exactly
@@ -340,8 +366,9 @@ function detectFlagPatternInFixedWindow(
  * Try several alignments of the 60-bar template. A fixed slice(-60) often misses when the pole
  * ended a few bars earlier on 1m–5m charts.
  */
-function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
-  if (candles.length < 60) return null;
+/** Same as sliding-window triangle/wedge logic: keep a forming offset when a higher-scoring breakout exists. */
+function detectFlagPatterns(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern[] {
+  if (candles.length < 60) return [];
   const maxOffset = Math.max(0, Math.min(candles.length - 60, 72));
   const offsets: number[] = [];
   for (let offset = 0; offset <= maxOffset; offset += 2) {
@@ -349,6 +376,8 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
   }
   let best: DetectedPattern | null = null;
   let bestScore = -1;
+  let bestForming: DetectedPattern | null = null;
+  let bestFormingConf = -1;
   for (const o of offsets) {
     if (candles.length < 60 + o) continue;
     const window = candles.slice(candles.length - 60 - o, candles.length - o);
@@ -359,8 +388,17 @@ function detectFlagPattern(candles: HyperliquidCandle[], isBullish: boolean, tim
       bestScore = sc;
       best = p;
     }
+    if (p.status === "forming" && p.confidence > bestFormingConf) {
+      bestFormingConf = p.confidence;
+      bestForming = p;
+    }
   }
-  return best;
+  if (!best) return [];
+  if (best.status === "forming") return [best];
+  if (bestForming && !patternsLooselyEqual(best, bestForming)) {
+    return [bestForming, best];
+  }
+  return [best];
 }
 
 // Detect Triangle patterns (Ascending, Descending, Symmetrical)
@@ -482,7 +520,7 @@ function detectTrianglePatternInWindow(
   };
 }
 
-function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+function detectTrianglePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern[] {
   return scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
     detectTrianglePatternInWindow(window, isBullish, timeframe),
   );
@@ -637,7 +675,7 @@ function detectDoublePatternInWindow(
   return null;
 }
 
-function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern[] {
   return scanPatternWindows(candles, [80, 96, 112, 128], 48, 4, (window) =>
     detectDoublePatternInWindow(window, isBullish, timeframe),
   );
@@ -766,16 +804,9 @@ function detectWedgePatternInWindow(
   return null;
 }
 
-function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern | null {
+function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern[] {
   return scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
     detectWedgePatternInWindow(window, isBullish, timeframe),
-  );
-}
-
-function patternsLooselyEqual(a: DetectedPattern, b: DetectedPattern): boolean {
-  return (
-    a.name === b.name &&
-    Math.abs(a.entryPrice - b.entryPrice) / Math.max(Math.abs(a.entryPrice), 1e-12) < 0.003
   );
 }
 
@@ -814,16 +845,19 @@ export function collectPatternCandidates(
     if (candidates.some((c) => patternsLooselyEqual(c, p))) return;
     candidates.push(p);
   };
+  const addAll = (arr: DetectedPattern[]) => {
+    for (const p of arr) add(p);
+  };
   if (!options?.skipFlags) {
-    add(detectFlagPattern(candles, true, timeframe));
-    add(detectFlagPattern(candles, false, timeframe));
+    addAll(detectFlagPatterns(candles, true, timeframe));
+    addAll(detectFlagPatterns(candles, false, timeframe));
   }
-  add(detectTrianglePattern(candles, true, timeframe));
-  add(detectTrianglePattern(candles, false, timeframe));
-  add(detectDoublePattern(candles, true, timeframe));
-  add(detectDoublePattern(candles, false, timeframe));
-  add(detectWedgePattern(candles, true, timeframe));
-  add(detectWedgePattern(candles, false, timeframe));
+  addAll(detectTrianglePattern(candles, true, timeframe));
+  addAll(detectTrianglePattern(candles, false, timeframe));
+  addAll(detectDoublePattern(candles, true, timeframe));
+  addAll(detectDoublePattern(candles, false, timeframe));
+  addAll(detectWedgePattern(candles, true, timeframe));
+  addAll(detectWedgePattern(candles, false, timeframe));
   return candidates;
 }
 

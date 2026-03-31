@@ -48,7 +48,8 @@ export const SLOW_SCAN_TIMEFRAMES = [
   "1d",
 ] as const;
 
-export const PATTERN_SCAN_FAST_CACHE_TTL_MS = 20_000;
+/** Short TF scans: tighter TTL so Market scanner / AI page feel live on 1m–5m. */
+export const PATTERN_SCAN_FAST_CACHE_TTL_MS = 12_000;
 export const PATTERN_SCAN_SLOW_CACHE_TTL_MS = 180_000;
 
 export const GLOBAL_SCANNER_GOLD_PROXY_INFO =
