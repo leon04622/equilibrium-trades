@@ -68,6 +68,12 @@ async function buildGlobalScannerTickerListOnce(): Promise<string[]> {
   for (const c of spotCoins) {
     if (c) set.add(c);
   }
+  if (set.size === 0) {
+    const fromTickers = await getDefaultPatternScanTickerList();
+    for (const c of fromTickers) {
+      if (c) set.add(c);
+    }
+  }
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 

@@ -2,6 +2,9 @@
 // Using Hyperliquid's public API endpoints
 
 const HYPERLIQUID_API_URL = "https://api.hyperliquid.xyz/info";
+let cachedPerpUniverseCoins: string[] = [];
+let cachedAllTickers: HyperliquidTicker[] = [];
+let cachedSpotScannerCoinIds: string[] = [];
 
 export interface HyperliquidMeta {
   universe: {
@@ -84,7 +87,19 @@ export async function getAvailableCoins(): Promise<HyperliquidMeta> {
 /** All perp coin symbols from Hyperliquid meta (e.g. BTC, ETH, …). */
 export async function getPerpUniverseCoinNames(): Promise<string[]> {
   const meta = await getAvailableCoins();
-  return (meta.universe || []).map((u) => u.name).filter(Boolean);
+  const direct = (meta.universe || []).map((u) => u.name).filter(Boolean);
+  if (direct.length > 0) {
+    cachedPerpUniverseCoins = direct;
+    return direct;
+  }
+
+  const fromTickers = (await getAllTickers()).map((t) => t.coin).filter(Boolean);
+  if (fromTickers.length > 0) {
+    cachedPerpUniverseCoins = fromTickers;
+    return fromTickers;
+  }
+
+  return cachedPerpUniverseCoins;
 }
 
 // Get all ticker data for all coins with proper 24h stats
@@ -116,7 +131,7 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
     const assetCtxs = metaAndAssetCtxs[1] || [];
     
     // Combine into ticker format with 24h change and market metadata
-    return meta.universe.map((coin: any, index: number) => {
+    const tickers = meta.universe.map((coin: any, index: number) => {
       const currentPrice = parseFloat(mids[coin.name] || "0");
       const assetCtx = assetCtxs[index] || {};
       
@@ -137,11 +152,12 @@ export async function getAllTickers(): Promise<HyperliquidTicker[]> {
         onlyIsolated: coin.onlyIsolated || false,
       };
     });
+    cachedAllTickers = tickers;
+    return tickers;
   } catch (error) {
     console.error("Error fetching tickers:", error);
-    // Return empty array on failure — callers guard against empty results.
-    // Returning stale hardcoded prices would corrupt live PNL calculations.
-    return [];
+    // Prefer last good market universe over collapsing to a tiny hardcoded list.
+    return cachedAllTickers;
   }
 }
 
@@ -326,10 +342,11 @@ export async function getSpotScannerCoinIds(): Promise<string[]> {
       const px = parseFloat(ctx.markPx || ctx.midPx || "0");
       if (px > 0) out.push(`@${i}`);
     }
+    cachedSpotScannerCoinIds = out;
     return out;
   } catch (error) {
     console.error("Error fetching spot scanner coin ids:", error);
-    return [];
+    return cachedSpotScannerCoinIds;
   }
 }
 
