@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { RefreshCw, Activity, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES, type ScanTimeframe } from "@shared/scan-timeframes";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useWallet } from "@/lib/wallet-context";
@@ -48,6 +48,13 @@ function isFastTf(tf: string): boolean {
 }
 
 type ScannerMarketsPayload = { tickers: string[]; displayByCoin?: Record<string, string> };
+type ScannerWatchlistPayload = {
+  allMarkets: boolean;
+  coins: string[];
+  mongoConfigured: boolean;
+  watchlistVaultConnected: boolean;
+  storageBackend: string;
+};
 
 async function fetchPatternScanPayload(
   timeframes: string,
@@ -94,6 +101,7 @@ function buildScannerMarketLabel(coin: string, displayByCoin?: Record<string, st
 /** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
+  const queryClient = useQueryClient();
   const forceNocacheRef = useRef(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
@@ -101,6 +109,9 @@ export function PatternScannerUI() {
   const [selectedMarketLabels, setSelectedMarketLabels] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string>("");
+  const [isSavingSet, setIsSavingSet] = useState(false);
+  const [isApplyingSavedSet, setIsApplyingSavedSet] = useState(false);
 
   const marketsQuery = useQuery<ScannerMarketsPayload>({
     queryKey: ["/api/scanner/markets"],
@@ -112,16 +123,32 @@ export function PatternScannerUI() {
     staleTime: 60_000,
     retry: 1,
   });
+  const savedSetQuery = useQuery<ScannerWatchlistPayload>({
+    queryKey: ["/api/scanner/watchlist", address ?? ""],
+    enabled: !!address,
+    queryFn: async () => {
+      const res = await fetch("/api/scanner/watchlist", {
+        headers: scannerAuthHeaders(address),
+      });
+      if (!res.ok) throw new Error("Failed to load saved scan set");
+      return (await res.json()) as ScannerWatchlistPayload;
+    },
+    staleTime: 30_000,
+    retry: 1,
+  });
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
   const displayByCoin = marketsQuery.data?.displayByCoin;
+  const tickers = marketsQuery.data?.tickers ?? [];
+  const savedSetCoinCount = savedSetQuery.data?.allMarkets
+    ? 0
+    : (savedSetQuery.data?.coins.length ?? 0);
   const searchTerms = useMemo(
     () => [...selectedMarketLabels, searchInput.trim()].filter(Boolean),
     [selectedMarketLabels, searchInput],
   );
   const matchedScanCoins = useMemo(() => {
     if (searchTerms.length === 0) return [];
-    const tickers = marketsQuery.data?.tickers ?? [];
     const out = new Set<string>();
     for (const term of searchTerms) {
       const norm = normalizeScanText(term);
@@ -140,7 +167,7 @@ export function PatternScannerUI() {
       }
     }
     return [...out];
-  }, [searchTerms, marketsQuery.data?.tickers, displayByCoin]);
+  }, [searchTerms, tickers, displayByCoin]);
   const scopedCoinsParam = matchedScanCoins.join(",");
   const usingSearchScope = searchTerms.length > 0;
   const noSearchMatches = usingSearchScope && matchedScanCoins.length === 0;
@@ -148,7 +175,6 @@ export function PatternScannerUI() {
   const autocompleteOptions = useMemo(() => {
     const fragment = normalizeScanText(searchInput);
     if (!fragment) return [];
-    const tickers = marketsQuery.data?.tickers ?? [];
     const ranked = tickers
       .map((coin) => {
         const label = buildScannerMarketLabel(coin, displayByCoin);
@@ -177,7 +203,12 @@ export function PatternScannerUI() {
         return a.label.localeCompare(b.label);
       });
     return ranked.slice(0, 12);
-  }, [searchInput, marketsQuery.data?.tickers, displayByCoin, selectedMarketLabels]);
+  }, [searchInput, tickers, displayByCoin, selectedMarketLabels]);
+
+  const currentScopedCoins = useMemo(() => {
+    if (matchedScanCoins.length === 0) return [];
+    return matchedScanCoins;
+  }, [matchedScanCoins]);
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -318,6 +349,87 @@ export function PatternScannerUI() {
     );
   }
 
+  async function saveCurrentScanSet() {
+    if (!address) {
+      setSaveStatus("Connect your wallet first to save a scan set.");
+      return;
+    }
+    if (currentScopedCoins.length === 0) {
+      setSaveStatus("Pick at least one market before saving.");
+      return;
+    }
+    setIsSavingSet(true);
+    setSaveStatus("");
+    try {
+      const res = await fetch("/api/scanner/watchlist", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...scannerAuthHeaders(address),
+        },
+        body: JSON.stringify({ allMarkets: false, coins: currentScopedCoins }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to save scan set");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/scanner/watchlist", address] });
+      setSaveStatus(`Saved ${currentScopedCoins.length} market${currentScopedCoins.length === 1 ? "" : "s"} to your scan set.`);
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : "Failed to save scan set.");
+    } finally {
+      setIsSavingSet(false);
+    }
+  }
+
+  function labelsFromCoins(coins: string[]): string[] {
+    return coins.map((coin) => buildScannerMarketLabel(coin, displayByCoin));
+  }
+
+  function applySavedScanSet() {
+    setIsApplyingSavedSet(true);
+    try {
+      const saved = savedSetQuery.data;
+      if (!saved) {
+        setSaveStatus("No saved scan set available yet.");
+        return;
+      }
+      if (saved.allMarkets || saved.coins.length === 0) {
+        setSelectedMarketLabels([]);
+        setSearchInput("");
+        setSaveStatus("Saved scan set uses the full market universe.");
+        return;
+      }
+      setSelectedMarketLabels(labelsFromCoins(saved.coins));
+      setSearchInput("");
+      setSaveStatus(`Loaded saved scan set (${saved.coins.length} market${saved.coins.length === 1 ? "" : "s"}).`);
+    } finally {
+      setIsApplyingSavedSet(false);
+    }
+  }
+
+  async function clearSavedScanSet() {
+    if (!address) return;
+    setIsSavingSet(true);
+    setSaveStatus("");
+    try {
+      const res = await fetch("/api/scanner/watchlist", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...scannerAuthHeaders(address),
+        },
+        body: JSON.stringify({ allMarkets: true, coins: [] }),
+      });
+      if (!res.ok) throw new Error("Failed to clear saved scan set");
+      await queryClient.invalidateQueries({ queryKey: ["/api/scanner/watchlist", address] });
+      setSaveStatus("Saved scan set cleared back to all markets.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : "Failed to clear saved scan set.");
+    } finally {
+      setIsSavingSet(false);
+    }
+  }
+
   const tabRows = useMemo(() => {
     const formingSignals = signals.filter((s) => s.patternStatus === "forming");
     const developedSignals = signals.filter(
@@ -453,6 +565,47 @@ export function PatternScannerUI() {
             </Button>
           </div>
         ) : null}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-7 px-2 text-xs"
+            onClick={() => {
+              void saveCurrentScanSet();
+            }}
+            disabled={isSavingSet || currentScopedCoins.length === 0}
+          >
+            {isSavingSet ? "Saving..." : "Save current set"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={applySavedScanSet}
+            disabled={isApplyingSavedSet || savedSetQuery.isPending || !address}
+          >
+            {isApplyingSavedSet ? "Loading..." : `Load saved${savedSetCoinCount > 0 ? ` (${savedSetCoinCount})` : ""}`}
+          </Button>
+          {address && savedSetCoinCount > 0 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                void clearSavedScanSet();
+              }}
+              disabled={isSavingSet}
+            >
+              Clear saved
+            </Button>
+          ) : null}
+          {saveStatus ? (
+            <span className="text-[10px] md:text-xs text-muted-foreground">{saveStatus}</span>
+          ) : null}
+        </div>
         <p className="text-[10px] md:text-xs text-muted-foreground">
           Leave blank to scan the whole universe. Pick one or more markets to scope the scan instantly.
         </p>
