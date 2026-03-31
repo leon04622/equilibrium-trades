@@ -14,6 +14,7 @@
     "install:legacy": "npm install --legacy-peer-deps",
     "check": "tsc",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "verify": "npm run check && npm run test && npm run build && node script/verify.mjs",
     "verify:live": "node script/smoke-live.mjs",
     "verify:uptime": "node script/uptime-ping.mjs",
@@ -109,6 +110,7 @@
     "zod-validation-error": "^3.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.18",
     "@types/connect-pg-simple": "^7.0.3",

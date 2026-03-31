@@ -27,7 +27,17 @@ jobs:
 
       - run: npm run check
 
+      - run: npm run test
+
       - run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: E2E smoke (Chromium)
+        run: npm run test:e2e
+        env:
+          CI: true
 
       - name: Smoke test production bundle
         run: node script/verify.mjs
