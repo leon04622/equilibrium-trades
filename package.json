@@ -14,6 +14,7 @@
     "install:legacy": "npm install --legacy-peer-deps",
     "check": "tsc",
     "verify": "npm run check && npm run build && node script/verify.mjs",
+    "verify:live": "node script/smoke-live.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

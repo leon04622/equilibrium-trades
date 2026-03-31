@@ -63,6 +63,7 @@ See **[HOSTING.md](./HOSTING.md)** for Railway, Render, and VPS. Env checklist: 
 | `npm start` | Run production build |
 | `npm run check` | TypeScript (`tsc`) |
 | `npm run verify` | `check` + `build` + HTTP smoke test (spawns prod server briefly) |
+| `npm run verify:live` | Smoke-test a live deployment (`LIVE_BASE_URL=https://…`) |
 
 ## Project layout
 
@@ -71,3 +72,5 @@ See **[HOSTING.md](./HOSTING.md)** for Railway, Render, and VPS. Env checklist: 
 - `shared/` — Shared types / Drizzle schema
 
 Legacy Replit-era notes: `replit.md`. Design: `design_guidelines.md`.
+
+Ops runbook: `docs/PRODUCTION_RUNBOOK.md`.
