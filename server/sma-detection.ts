@@ -65,7 +65,8 @@ export interface CrossoverSignal {
 // Timeframe-specific thresholds (minMovePercent = minimum pole size vs price; slightly looser on 1m–5m for real flags)
 export function getThresholds(timeframe: string) {
   const thresholds: Record<string, { minMovePercent: number; minBreakoutPercent: number; lookback: number }> = {
-    "1m":  { minMovePercent: 0.10, minBreakoutPercent: 0.04, lookback: 30 },
+    // 1m is noisy — keep rules meaningful but slightly looser so the scanner isn’t empty every pass.
+    "1m":  { minMovePercent: 0.06, minBreakoutPercent: 0.028, lookback: 30 },
     "3m":  { minMovePercent: 0.14, minBreakoutPercent: 0.05, lookback: 32 },
     "5m":  { minMovePercent: 0.18, minBreakoutPercent: 0.06, lookback: 35 },
     "15m": { minMovePercent: 0.20, minBreakoutPercent: 0.07, lookback: 40 },

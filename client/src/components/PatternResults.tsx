@@ -207,6 +207,8 @@ export interface PatternResultsProps {
   refetchAll: () => Promise<void>;
   /** Shown in loading / empty copy, e.g. "all timeframes" or "15m only". */
   timeframeScopeLabel?: string;
+  /** User filtered to a single short TF (e.g. 1m only) — explain why empty passes are normal. */
+  singleFastTimeframeOnly?: boolean;
 }
 
 export function PatternResults({
@@ -221,6 +223,7 @@ export function PatternResults({
   scanHasCompleted,
   refetchAll,
   timeframeScopeLabel = "all timeframes",
+  singleFastTimeframeOnly = false,
 }: PatternResultsProps) {
   const { formingSignals, developedSignals } = tabRows;
 
@@ -311,6 +314,14 @@ export function PatternResults({
                   {(scanMeta!.durationMs / 1000).toFixed(1)}s
                   {scanMeta!.cached ? " (cached)" : ""}.
                 </p>
+                {signals.length === 0 && singleFastTimeframeOnly ? (
+                  <p className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border/60 mt-2">
+                    On <strong>1m–5m only</strong>, the engine looks for <strong>specific chart structures</strong> (flags,
+                    triangles, wedges, doubles, etc.). It is normal to see <strong>no match</strong> on many passes — 1m
+                    moves fast and rarely lines up with a full pattern template. Try <strong>5m</strong>,{" "}
+                    <strong>15m</strong>, or <strong>All TF</strong> for more frequent hits.
+                  </p>
+                ) : null}
                 {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") && scanMeta!.coinsPreview ? (
                   <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
                     Sample: {scanMeta!.coinsPreview}
@@ -375,12 +386,20 @@ export function PatternResults({
                 <div className="text-center py-12">
                   <Activity className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-lg font-medium">No patterns yet</p>
-                  <p className="text-muted-foreground mb-4">
+                  <p className="text-muted-foreground mb-2">
                     {scanHasCompleted
                       ? `No setups on ${timeframeScopeLabel} for this pass — try another timeframe or scan again.`
                       : `Scanner is updating (${timeframeScopeLabel}).`}
                   </p>
+                  {scanHasCompleted && singleFastTimeframeOnly ? (
+                    <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto leading-relaxed">
+                      This is often expected on <strong>1m</strong>: patterns need a clear pole, consolidation, or triangle
+                      geometry. Use <strong>All TF</strong> or <strong>15m+</strong> if you want the same rules applied
+                      across slower bars (usually more structure).
+                    </p>
+                  ) : null}
                   <Button
+                    className="mt-2"
                     onClick={() => {
                       void refetchAll();
                     }}

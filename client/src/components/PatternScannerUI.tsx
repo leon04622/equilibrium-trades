@@ -405,6 +405,17 @@ export function PatternScannerUI() {
         </Alert>
       ) : null}
 
+      {universeCount != null && universeCount < 25 ? (
+        <Alert className="border-amber-500/40 bg-amber-500/[0.06]">
+          <AlertTitle className="text-sm">Limited market list ({universeCount} symbols)</AlertTitle>
+          <AlertDescription className="text-xs text-muted-foreground">
+            The scanner is only evaluating the markets above. If Hyperliquid&apos;s full universe cannot be loaded from
+            this deployment (network, API, or config), you&apos;ll see a short default list — fewer symbols means fewer
+            chances for a pattern on any given pass. Fix HL connectivity or host config for the full perp + spot set.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <PatternResults
         signals={signals}
         tabRows={tabRows}
@@ -417,6 +428,7 @@ export function PatternScannerUI() {
         scanHasCompleted={scanHasCompleted}
         refetchAll={refetchAll}
         timeframeScopeLabel={timeframeScopeLabel}
+        singleFastTimeframeOnly={selectedTimeframe !== "all" && isFastTf(selectedTimeframe)}
       />
     </div>
   );
