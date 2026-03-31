@@ -406,6 +406,34 @@ export interface MarketCondition {
 }
 
 // Trade Grading Types
+export const tradeGradesTable = pgTable("trade_grades", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletAddress: text("wallet_address").notNull(),
+  coin: text("coin").notNull(),
+  side: text("side").notNull(),
+  entryPrice: real("entry_price").notNull(),
+  exitPrice: real("exit_price").notNull(),
+  stopLoss: real("stop_loss").notNull(),
+  takeProfit: real("take_profit").notNull(),
+  leverage: real("leverage").notNull(),
+  size: real("size").notNull(),
+  pnl: real("pnl").notNull(),
+  pnlPercent: real("pnl_percent").notNull(),
+  entryScore: integer("entry_score").notNull(),
+  stopScore: integer("stop_score").notNull(),
+  rrScore: integer("rr_score").notNull(),
+  leverageScore: integer("leverage_score").notNull(),
+  setupScore: integer("setup_score").notNull(),
+  totalScore: integer("total_score").notNull(),
+  setupGrade: text("setup_grade").notNull(),
+  executionGrade: text("execution_grade").notNull(),
+  patternType: text("pattern_type"),
+  timeframe: text("timeframe"),
+  notes: text("notes").array().notNull(),
+  tradedAt: timestamp("traded_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  gradedAt: timestamp("graded_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export interface TradeGrade {
   id: string;
   walletAddress: string;

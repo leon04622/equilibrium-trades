@@ -10,7 +10,7 @@ import {
   type WalletSubscriptionTier,
   type SupportMessage, type InsertSupportMessage,
   type Lead, type InsertLead,
-  tutorialVideos, supportTickets, walletUsers, leads
+  tutorialVideos, supportTickets, walletUsers, leads, tradeGradesTable
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -190,6 +190,36 @@ export class MemStorage implements IStorage {
     tiers.forEach(tier => this.subscriptionTiers.set(tier.id, tier));
   }
 
+  private mapDbTradeGrade(row: any): TradeGrade {
+    return {
+      id: row.id,
+      walletAddress: String(row.walletAddress).toLowerCase(),
+      coin: row.coin,
+      side: row.side === "short" ? "short" : "long",
+      entryPrice: row.entryPrice,
+      exitPrice: row.exitPrice,
+      stopLoss: row.stopLoss,
+      takeProfit: row.takeProfit,
+      leverage: row.leverage,
+      size: row.size,
+      pnl: row.pnl,
+      pnlPercent: row.pnlPercent,
+      entryScore: row.entryScore,
+      stopScore: row.stopScore,
+      rrScore: row.rrScore,
+      leverageScore: row.leverageScore,
+      setupScore: row.setupScore,
+      totalScore: row.totalScore,
+      setupGrade: row.setupGrade,
+      executionGrade: row.executionGrade,
+      patternType: row.patternType ?? undefined,
+      timeframe: row.timeframe ?? undefined,
+      notes: Array.isArray(row.notes) ? row.notes.map((n: unknown) => String(n)) : [],
+      tradedAt: row.tradedAt instanceof Date ? row.tradedAt : new Date(row.tradedAt),
+      gradedAt: row.gradedAt instanceof Date ? row.gradedAt : new Date(row.gradedAt),
+    };
+  }
+
   // Users
   async getUser(id: string): Promise<User | undefined> {
     return this.users.get(id);
@@ -305,6 +335,19 @@ export class MemStorage implements IStorage {
 
   // Trade Grades
   async getTradeGrades(walletAddress: string, limit: number = 50): Promise<TradeGrade[]> {
+    if (db) {
+      try {
+        const rows = await db
+          .select()
+          .from(tradeGradesTable)
+          .where(eq(tradeGradesTable.walletAddress, walletAddress.toLowerCase()))
+          .orderBy(desc(tradeGradesTable.tradedAt))
+          .limit(limit);
+        return rows.map((row) => this.mapDbTradeGrade(row));
+      } catch {
+        // Fall back to process memory if DB is temporarily unavailable.
+      }
+    }
     return Array.from(this.tradeGrades.values())
       .filter(g => g.walletAddress.toLowerCase() === walletAddress.toLowerCase())
       .sort((a, b) => b.tradedAt.getTime() - a.tradedAt.getTime())
@@ -312,10 +355,54 @@ export class MemStorage implements IStorage {
   }
 
   async getTradeGrade(id: string): Promise<TradeGrade | undefined> {
+    if (db) {
+      try {
+        const [grade] = await db.select().from(tradeGradesTable).where(eq(tradeGradesTable.id, id));
+        if (grade) return this.mapDbTradeGrade(grade);
+      } catch {
+        // Fall back to process memory if DB is temporarily unavailable.
+      }
+    }
     return this.tradeGrades.get(id);
   }
 
   async createTradeGrade(grade: InsertTradeGrade): Promise<TradeGrade> {
+    if (db) {
+      try {
+        const [saved] = await db
+          .insert(tradeGradesTable)
+          .values({
+            walletAddress: grade.walletAddress.toLowerCase(),
+            coin: grade.coin,
+            side: grade.side,
+            entryPrice: grade.entryPrice,
+            exitPrice: grade.exitPrice,
+            stopLoss: grade.stopLoss,
+            takeProfit: grade.takeProfit,
+            leverage: grade.leverage,
+            size: grade.size,
+            pnl: grade.pnl,
+            pnlPercent: grade.pnlPercent,
+            entryScore: grade.entryScore,
+            stopScore: grade.stopScore,
+            rrScore: grade.rrScore,
+            leverageScore: grade.leverageScore,
+            setupScore: grade.setupScore,
+            totalScore: grade.totalScore,
+            setupGrade: grade.setupGrade,
+            executionGrade: grade.executionGrade,
+            patternType: grade.patternType ?? null,
+            timeframe: grade.timeframe ?? null,
+            notes: grade.notes,
+            tradedAt: grade.tradedAt,
+            gradedAt: new Date(),
+          })
+          .returning();
+        return this.mapDbTradeGrade(saved);
+      } catch {
+        // Fall back to process memory if DB is temporarily unavailable.
+      }
+    }
     const id = randomUUID();
     const newGrade: TradeGrade = {
       ...grade,
@@ -336,12 +423,33 @@ export class MemStorage implements IStorage {
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 7);
     
-    const weekTrades = Array.from(this.tradeGrades.values())
-      .filter(g => 
-        g.walletAddress.toLowerCase() === walletAddress.toLowerCase() &&
-        g.tradedAt >= weekStart &&
-        g.tradedAt < weekEnd
-      );
+    let weekTrades: TradeGrade[];
+    if (db) {
+      try {
+        const allWalletTrades = await db
+          .select()
+          .from(tradeGradesTable)
+          .where(eq(tradeGradesTable.walletAddress, walletAddress.toLowerCase()))
+          .orderBy(desc(tradeGradesTable.tradedAt));
+        weekTrades = allWalletTrades.map((row) => this.mapDbTradeGrade(row)).filter(
+          (g) => g.tradedAt >= weekStart && g.tradedAt < weekEnd,
+        );
+      } catch {
+        weekTrades = Array.from(this.tradeGrades.values())
+          .filter(g => 
+            g.walletAddress.toLowerCase() === walletAddress.toLowerCase() &&
+            g.tradedAt >= weekStart &&
+            g.tradedAt < weekEnd
+          );
+      }
+    } else {
+      weekTrades = Array.from(this.tradeGrades.values())
+        .filter(g => 
+          g.walletAddress.toLowerCase() === walletAddress.toLowerCase() &&
+          g.tradedAt >= weekStart &&
+          g.tradedAt < weekEnd
+        );
+    }
     
     if (weekTrades.length === 0) return null;
     

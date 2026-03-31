@@ -95,9 +95,85 @@ import {
   getTradeJournalStats,
   isTradeJournalBackedByMongo,
 } from "./trade-journal-store";
+import { getDatabaseStatus } from "./db";
 
 let mongoVaultHandle: MongoVaultHandle | null = null;
 let mongoBackgroundReconnectBusy = false;
+
+function shouldRejectEphemeralWrites(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function hasPersistentSubscriptionAccessBackend(): boolean {
+  return getDatabaseStatus().configured || getMongoVaultHealth().connected;
+}
+
+function requirePersistentSubscriptionAccessBackend(res: Response): boolean {
+  if (!shouldRejectEphemeralWrites() || hasPersistentSubscriptionAccessBackend()) {
+    return true;
+  }
+  res.status(503).json({
+    error:
+      "Persistent subscription storage is unavailable. Configure PostgreSQL DATABASE_URL or reconnect MongoDB CRM before changing user access.",
+  });
+  return false;
+}
+
+function requirePersistentTradeJournalBackend(res: Response): boolean {
+  if (!shouldRejectEphemeralWrites() || isTradeJournalBackedByMongo()) {
+    return true;
+  }
+  res.status(503).json({
+    error:
+      "Trade journal persistence is unavailable. Connect MongoDB with MONGO_VAULT_URI before saving journal entries in production.",
+  });
+  return false;
+}
+
+function hasPersistentSupportBackend(): boolean {
+  return getDatabaseStatus().configured || getMongoVaultHealth().connected;
+}
+
+function requirePersistentSupportBackend(res: Response): boolean {
+  if (!shouldRejectEphemeralWrites() || hasPersistentSupportBackend()) {
+    return true;
+  }
+  res.status(503).json({
+    error:
+      "Support message storage is unavailable. Configure PostgreSQL DATABASE_URL or reconnect MongoDB support storage before sending messages in production.",
+  });
+  return false;
+}
+
+function hasPersistentLeadBackend(): boolean {
+  return getDatabaseStatus().configured;
+}
+
+function requirePersistentLeadBackend(res: Response): boolean {
+  if (!shouldRejectEphemeralWrites() || hasPersistentLeadBackend()) {
+    return true;
+  }
+  res.status(503).json({
+    error:
+      "Lead capture storage is unavailable. Configure PostgreSQL DATABASE_URL before collecting leads in production.",
+  });
+  return false;
+}
+
+function hasPersistentTradeGradesBackend(): boolean {
+  return getDatabaseStatus().configured;
+}
+
+function requirePersistentTradeGradesBackend(res: Response): boolean {
+  if (!shouldRejectEphemeralWrites() || hasPersistentTradeGradesBackend()) {
+    return true;
+  }
+  res.status(503).json({
+    error:
+      "Trade grading storage is unavailable. Configure PostgreSQL DATABASE_URL before using the graded trade journal in production.",
+  });
+  return false;
+}
 
 const PATTERN_SCAN_CACHE_MAX_KEYS = 8;
 type PatternScanCacheEntry = {
@@ -1151,6 +1227,9 @@ export async function registerRoutes(
   // Get trade grades for a wallet
   app.get("/api/journal/trades/:walletAddress", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeGradesBackend(res)) {
+        return;
+      }
       const limit = parseInt(req.query.limit as string) || 50;
       const trades = await storage.getTradeGrades(req.params.walletAddress, limit);
       res.json(trades);
@@ -1163,6 +1242,9 @@ export async function registerRoutes(
   // Get weekly stats for a wallet
   app.get("/api/journal/weekly/:walletAddress", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeGradesBackend(res)) {
+        return;
+      }
       const stats = await storage.getWeeklyStats(req.params.walletAddress);
       res.json(stats);
     } catch (error) {
@@ -1174,6 +1256,9 @@ export async function registerRoutes(
   // Grade and save a trade
   app.post("/api/journal/grade", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeGradesBackend(res)) {
+        return;
+      }
       // Import and validate with Zod schema
       const { tradeGradeInputSchema } = await import("@shared/schema");
       
@@ -1215,6 +1300,9 @@ export async function registerRoutes(
 
   app.post("/api/trade-journal/entries", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeJournalBackend(res)) {
+        return;
+      }
       const parsed = tradeJournalCreateBodySchema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: "Invalid input", details: parsed.error.flatten() });
@@ -1284,6 +1372,9 @@ export async function registerRoutes(
 
   app.patch("/api/trade-journal/entries/:id/notes", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeJournalBackend(res)) {
+        return;
+      }
       const header = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
       if (!header) {
         res.status(401).json({ error: "x-wallet-address required" });
@@ -1308,6 +1399,9 @@ export async function registerRoutes(
 
   app.post("/api/trade-journal/close-open", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentTradeJournalBackend(res)) {
+        return;
+      }
       const header = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
       if (!header) {
         res.status(401).json({ error: "x-wallet-address required" });
@@ -1840,6 +1934,9 @@ export async function registerRoutes(
       if (!isFortressSovereignAddress(adminWallet) && !master.ok) {
         return res.status(master.status).json({ error: master.error });
       }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
+        return;
+      }
 
       const { adminUpdateTierBodySchema } = await import("@shared/schema");
       const parsed = adminUpdateTierBodySchema.safeParse(req.body ?? {});
@@ -1892,6 +1989,9 @@ export async function registerRoutes(
       if (!isFortressSovereignAddress(adminWallet) && !master.ok) {
         return res.status(master.status).json({ error: master.error });
       }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
+        return;
+      }
 
       const { adminSetAccessBodySchema } = await import("@shared/schema");
       const parsed = adminSetAccessBodySchema.safeParse(req.body ?? {});
@@ -1931,6 +2031,9 @@ export async function registerRoutes(
       const got = String(req.headers["x-equilibrium-billing-secret"] ?? "").trim();
       if (!want || got !== want) {
         return res.status(401).json({ error: "Invalid or missing x-equilibrium-billing-secret" });
+      }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
+        return;
       }
       const { adminUpdateTierBodySchema } = await import("@shared/schema");
       const parsed = adminUpdateTierBodySchema.safeParse(req.body ?? {});
@@ -1982,6 +2085,9 @@ export async function registerRoutes(
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
       }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
+        return;
+      }
       
       const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
         validated.data;
@@ -2026,6 +2132,9 @@ export async function registerRoutes(
   // Capture email lead (no auth required - public)
   app.post("/api/leads", async (req: Request, res: Response) => {
     try {
+      if (!requirePersistentLeadBackend(res)) {
+        return;
+      }
       const { z } = await import("zod");
       const leadSchema = z.object({
         email: z.string().email("Valid email required"),
@@ -2112,6 +2221,9 @@ export async function registerRoutes(
       return mongoVaultHandle.handleGetSupportInbox(req, res);
     }
     try {
+      if (!requirePersistentSupportBackend(res)) {
+        return;
+      }
       const auth = requireMasterAdminWallet(req);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 2000);
@@ -2128,6 +2240,9 @@ export async function registerRoutes(
     try {
       if (mongoVaultHandle) {
         return mongoVaultHandle.handleSupportMessagesPost(req, res);
+      }
+      if (!requirePersistentSupportBackend(res)) {
+        return;
       }
       const { insertSupportMessageSchema } = await import("@shared/schema");
       const walletAddress =
@@ -2178,6 +2293,9 @@ export async function registerRoutes(
     try {
       if (mongoVaultHandle) {
         return await mongoVaultHandle.handleSupportSend(req, res);
+      }
+      if (!requirePersistentSupportBackend(res)) {
+        return;
       }
       const { supportSendBodySchema, insertSupportMessageSchema } = await import("@shared/schema");
       const parsed = supportSendBodySchema.safeParse(req.body);
@@ -2352,6 +2470,9 @@ export async function registerRoutes(
       if (mongoVaultHandle) {
         return mongoVaultHandle.handleMarkSupportRead(req, res);
       }
+      if (!requirePersistentSupportBackend(res)) {
+        return;
+      }
       const walletAddress = req.headers["x-wallet-address"] as string | undefined;
       if (!isMasterAdminAddress(walletAddress)) {
         return res.status(403).json({ error: "Master admin wallet required" });
@@ -2493,6 +2614,9 @@ export async function registerRoutes(
       const validated = updateSubscriptionSchema.safeParse(raw);
       if (!validated.success) {
         res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+        return;
+      }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
         return;
       }
       const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
@@ -2645,6 +2769,9 @@ export async function registerRoutes(
       });
       if (!validated.success) {
         return res.status(400).json({ error: "Invalid subscription data", details: validated.error.errors });
+      }
+      if (!requirePersistentSubscriptionAccessBackend(res)) {
+        return;
       }
       const { subscriptionTier, subscriptionActive, subscriptionExpiresAt, builderCodeApproved, manualProOverride } =
         validated.data;

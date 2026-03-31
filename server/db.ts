@@ -120,7 +120,64 @@ export async function ensurePostgresCoreTables(): Promise<void> {
         created_at timestamp DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log("[db] Ensured tables tutorial_videos, support_tickets (CREATE IF NOT EXISTS).");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wallet_users (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        wallet_address text NOT NULL UNIQUE,
+        email text,
+        builder_code_approved boolean DEFAULT false,
+        is_builder_linked boolean DEFAULT false,
+        manual_pro_override boolean DEFAULT false,
+        referral_builder_status text,
+        instant_trading_completed_at timestamp,
+        subscription_tier text DEFAULT 'free',
+        subscription_active boolean DEFAULT false,
+        subscription_expires_at timestamp,
+        subscribed_at timestamp,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+        updated_at timestamp DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        email text NOT NULL,
+        name text,
+        source text DEFAULT 'landing',
+        wallet_address text,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trade_grades (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        wallet_address text NOT NULL,
+        coin text NOT NULL,
+        side text NOT NULL,
+        entry_price real NOT NULL,
+        exit_price real NOT NULL,
+        stop_loss real NOT NULL,
+        take_profit real NOT NULL,
+        leverage real NOT NULL,
+        size real NOT NULL,
+        pnl real NOT NULL,
+        pnl_percent real NOT NULL,
+        entry_score integer NOT NULL,
+        stop_score integer NOT NULL,
+        rr_score integer NOT NULL,
+        leverage_score integer NOT NULL,
+        setup_score integer NOT NULL,
+        total_score integer NOT NULL,
+        setup_grade text NOT NULL,
+        execution_grade text NOT NULL,
+        pattern_type text,
+        timeframe text,
+        notes text[] NOT NULL,
+        traded_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        graded_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("[db] Ensured tables tutorial_videos, support_tickets, wallet_users, leads, trade_grades (CREATE IF NOT EXISTS).");
   } catch (err) {
     console.error("[db] ensurePostgresCoreTables failed:", err);
   } finally {

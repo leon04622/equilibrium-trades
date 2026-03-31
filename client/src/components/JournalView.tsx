@@ -71,7 +71,7 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
       try {
         return await fetchJson<{ persistedToVault: boolean }>("/api/trade-journal/config");
       } catch {
-        return { persistedToVault: true as boolean };
+        return { persistedToVault: false as boolean };
       }
     },
     enabled: !!walletAddress,
