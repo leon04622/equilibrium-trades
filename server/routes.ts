@@ -1976,6 +1976,21 @@ export async function registerRoutes(
         /* ignore */
       }
       const normalized = paramWallet.trim().toLowerCase();
+      if (!/^0x[a-f0-9]{40}$/.test(normalized)) {
+        return res.status(400).json({ error: "Invalid wallet address" });
+      }
+
+      const caller = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!caller || !/^0x[a-f0-9]{40}$/.test(caller)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const allowed =
+        caller === normalized ||
+        isMasterAdminAddress(caller) ||
+        isFortressSovereignAddress(caller);
+      if (!allowed) {
+        return res.status(403).json({ error: "Not authorized to update this wallet" });
+      }
 
       /** Postgres first so CRM merge + Mongo sync always read the email the member just saved. */
       let user = await storage.getWalletUser(normalized);

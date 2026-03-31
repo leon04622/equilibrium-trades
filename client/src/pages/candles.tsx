@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { candlestickPatterns, type CandlestickPattern } from "@/lib/candlestick-patterns";
+import { CandlestickPatternImage } from "@/components/candlestick-pattern-image";
 
 export default function Candles() {
   const [search, setSearch] = useState("");
@@ -159,15 +160,14 @@ export default function Candles() {
                   onClick={() => handlePatternClick(pattern)}
                   data-testid={`card-pattern-${pattern.id}`}
                 >
-                  {pattern.image && (
-                    <div className="relative w-full h-52 overflow-hidden rounded-t-lg bg-muted/30">
-                      <img 
-                        src={pattern.image} 
-                        alt={`${pattern.name} candlestick pattern`}
-                        className="w-full h-full object-contain p-3"
-                      />
-                    </div>
-                  )}
+                  {pattern.imageFile ? (
+                    <CandlestickPatternImage
+                      imageFile={pattern.imageFile}
+                      alt={`${pattern.name} candlestick pattern`}
+                      className="h-52 w-full rounded-t-lg border-b border-border/60"
+                      imgClassName="p-3"
+                    />
+                  ) : null}
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -239,15 +239,14 @@ export default function Candles() {
 
               <ScrollArea className="max-h-[60vh] pr-4">
                 <div className="space-y-6 py-4">
-                  {selectedPattern.image && (
-                    <div className="relative w-full h-64 overflow-hidden rounded-lg bg-muted/30 border">
-                      <img 
-                        src={selectedPattern.image} 
-                        alt={`${selectedPattern.name} candlestick pattern diagram`}
-                        className="w-full h-full object-contain p-4"
-                      />
-                    </div>
-                  )}
+                  {selectedPattern.imageFile ? (
+                    <CandlestickPatternImage
+                      imageFile={selectedPattern.imageFile}
+                      alt={`${selectedPattern.name} candlestick pattern diagram`}
+                      className="h-64 w-full rounded-lg border"
+                      imgClassName="p-4"
+                    />
+                  ) : null}
 
                   <div>
                     <h3 className="font-semibold flex items-center gap-2 mb-2">

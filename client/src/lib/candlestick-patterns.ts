@@ -9,35 +9,9 @@ export interface CandlestickPattern {
   tradingImplication: string;
   reliability: "low" | "moderate" | "high";
   iconType: "bullish" | "bearish" | "neutral";
-  image?: string;
+  /** Basename under `attached_assets/generated_images/` — loaded on demand. */
+  imageFile?: string;
 }
-
-// Import pattern images
-import hammerImg from "@assets/generated_images/hammer_candlestick_pattern_diagram.png";
-import invertedHammerImg from "@assets/generated_images/inverted_hammer_pattern_diagram.png";
-import bullishEngulfingImg from "@assets/generated_images/bullish_engulfing_pattern_diagram.png";
-import morningStarImg from "@assets/generated_images/morning_star_pattern_diagram.png";
-import shootingStarImg from "@assets/generated_images/shooting_star_pattern_diagram.png";
-import bearishEngulfingImg from "@assets/generated_images/bearish_engulfing_pattern_diagram.png";
-import eveningStarImg from "@assets/generated_images/evening_star_pattern_diagram.png";
-import dojiImg from "@assets/generated_images/doji_candlestick_pattern_diagram.png";
-import threeWhiteSoldiersImg from "@assets/generated_images/three_white_soldiers_pattern.png";
-import threeBlackCrowsImg from "@assets/generated_images/three_black_crows_pattern.png";
-import hangingManImg from "@assets/generated_images/hanging_man_pattern_diagram.png";
-import piercingLineImg from "@assets/generated_images/piercing_line_pattern_diagram.png";
-import darkCloudCoverImg from "@assets/generated_images/dark_cloud_cover_pattern.png";
-import bullishHaramiImg from "@assets/generated_images/bullish_harami_pattern_diagram.png";
-import bearishHaramiImg from "@assets/generated_images/bearish_harami_pattern_diagram.png";
-import spinningTopImg from "@assets/generated_images/spinning_top_pattern_diagram.png";
-import dragonflyDojiImg from "@assets/generated_images/dragonfly_doji_pattern_diagram.png";
-import gravestoneDojiImg from "@assets/generated_images/gravestone_doji_pattern_diagram.png";
-import marubozuImg from "@assets/generated_images/marubozu_candlestick_pattern.png";
-import tweezerTopsImg from "@assets/generated_images/tweezer_tops_pattern_diagram.png";
-import tweezerBottomsImg from "@assets/generated_images/tweezer_bottoms_pattern_diagram.png";
-import longLeggedDojiImg from "@assets/generated_images/long-legged_doji_pattern.png";
-import highWaveImg from "@assets/generated_images/high_wave_candlestick_pattern.png";
-import risingThreeMethodsImg from "@assets/generated_images/rising_three_methods_pattern.png";
-import fallingThreeMethodsImg from "@assets/generated_images/falling_three_methods_pattern.png";
 
 export const candlestickPatterns: CandlestickPattern[] = [
   // Single Candle Patterns - Bullish
@@ -57,7 +31,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Signals potential trend reversal from bearish to bullish. Confirmation comes from a bullish candle following the hammer.",
     reliability: "moderate",
     iconType: "bullish",
-    image: hammerImg
+    imageFile: "hammer_candlestick_pattern_diagram.png"
   },
   {
     id: "inverted-hammer",
@@ -75,7 +49,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Suggests buyers are testing resistance. Requires bullish confirmation on the next candle to confirm reversal.",
     reliability: "moderate",
     iconType: "bullish",
-    image: invertedHammerImg
+    imageFile: "inverted_hammer_pattern_diagram.png"
   },
   {
     id: "bullish-marubozu",
@@ -93,7 +67,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bullish momentum. Often indicates continuation of uptrend or start of new bullish move.",
     reliability: "high",
     iconType: "bullish",
-    image: marubozuImg
+    imageFile: "marubozu_candlestick_pattern.png"
   },
   {
     id: "dragonfly-doji",
@@ -111,7 +85,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Bullish reversal signal at the bottom of a downtrend. More significant with higher volume.",
     reliability: "moderate",
     iconType: "bullish",
-    image: dragonflyDojiImg
+    imageFile: "dragonfly_doji_pattern_diagram.png"
   },
 
   // Single Candle Patterns - Bearish
@@ -131,7 +105,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Warning sign that the uptrend may be ending. Confirmation needed from a bearish candle following.",
     reliability: "moderate",
     iconType: "bearish",
-    image: hangingManImg
+    imageFile: "hanging_man_pattern_diagram.png"
   },
   {
     id: "shooting-star",
@@ -149,7 +123,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bearish reversal signal. The longer the upper shadow, the more significant the rejection.",
     reliability: "high",
     iconType: "bearish",
-    image: shootingStarImg
+    imageFile: "shooting_star_pattern_diagram.png"
   },
   {
     id: "bearish-marubozu",
@@ -167,7 +141,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bearish momentum. Indicates continuation of downtrend or start of new bearish move.",
     reliability: "high",
     iconType: "bearish",
-    image: marubozuImg
+    imageFile: "marubozu_candlestick_pattern.png"
   },
   {
     id: "gravestone-doji",
@@ -185,7 +159,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Bearish reversal signal at the top of an uptrend. Stronger with higher volume.",
     reliability: "moderate",
     iconType: "bearish",
-    image: gravestoneDojiImg
+    imageFile: "gravestone_doji_pattern_diagram.png"
   },
 
   // Single Candle Patterns - Neutral
@@ -205,7 +179,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Signals indecision. Most significant after extended trends. Wait for confirmation candle.",
     reliability: "low",
     iconType: "neutral",
-    image: dojiImg
+    imageFile: "doji_candlestick_pattern_diagram.png"
   },
   {
     id: "spinning-top",
@@ -223,7 +197,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Indecision pattern. In a trend, may signal weakening momentum. Wait for confirmation.",
     reliability: "low",
     iconType: "neutral",
-    image: spinningTopImg
+    imageFile: "spinning_top_pattern_diagram.png"
   },
 
   // Double Candle Patterns - Bullish
@@ -243,7 +217,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bullish reversal signal. The larger the engulfing candle, the more significant.",
     reliability: "high",
     iconType: "bullish",
-    image: bullishEngulfingImg
+    imageFile: "bullish_engulfing_pattern_diagram.png"
   },
   {
     id: "piercing-line",
@@ -261,7 +235,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Bullish reversal signal. More reliable when the second candle closes closer to the first's open.",
     reliability: "moderate",
     iconType: "bullish",
-    image: piercingLineImg
+    imageFile: "piercing_line_pattern_diagram.png"
   },
   {
     id: "tweezer-bottom",
@@ -279,7 +253,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Suggests strong support level. Bullish reversal more likely when second candle is bullish.",
     reliability: "moderate",
     iconType: "bullish",
-    image: tweezerBottomsImg
+    imageFile: "tweezer_bottoms_pattern_diagram.png"
   },
   {
     id: "bullish-harami",
@@ -297,7 +271,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Potential reversal signal. Less reliable than engulfing; wait for confirmation.",
     reliability: "low",
     iconType: "bullish",
-    image: bullishHaramiImg
+    imageFile: "bullish_harami_pattern_diagram.png"
   },
 
   // Double Candle Patterns - Bearish
@@ -317,7 +291,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bearish reversal signal. Very reliable at resistance levels.",
     reliability: "high",
     iconType: "bearish",
-    image: bearishEngulfingImg
+    imageFile: "bearish_engulfing_pattern_diagram.png"
   },
   {
     id: "dark-cloud-cover",
@@ -335,7 +309,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Bearish reversal signal. More reliable when the second candle closes closer to the first's open.",
     reliability: "moderate",
     iconType: "bearish",
-    image: darkCloudCoverImg
+    imageFile: "dark_cloud_cover_pattern.png"
   },
   {
     id: "tweezer-top",
@@ -353,7 +327,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Suggests strong resistance level. Bearish reversal more likely when second candle is bearish.",
     reliability: "moderate",
     iconType: "bearish",
-    image: tweezerTopsImg
+    imageFile: "tweezer_tops_pattern_diagram.png"
   },
   {
     id: "bearish-harami",
@@ -371,7 +345,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Potential reversal signal. Requires confirmation from subsequent candles.",
     reliability: "low",
     iconType: "bearish",
-    image: bearishHaramiImg
+    imageFile: "bearish_harami_pattern_diagram.png"
   },
 
   // Triple Candle Patterns - Bullish
@@ -391,7 +365,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bullish reversal signal. More reliable when the third candle closes above the first's midpoint.",
     reliability: "high",
     iconType: "bullish",
-    image: morningStarImg
+    imageFile: "morning_star_pattern_diagram.png"
   },
   {
     id: "morning-doji-star",
@@ -409,7 +383,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Very strong bullish reversal signal. The doji adds significance to the pattern.",
     reliability: "high",
     iconType: "bullish",
-    image: morningStarImg
+    imageFile: "morning_star_pattern_diagram.png"
   },
   {
     id: "three-white-soldiers",
@@ -427,7 +401,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bullish continuation/reversal. Watch for exhaustion if candles get smaller.",
     reliability: "high",
     iconType: "bullish",
-    image: threeWhiteSoldiersImg
+    imageFile: "three_white_soldiers_pattern.png"
   },
   {
     id: "three-inside-up",
@@ -464,7 +438,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bearish reversal signal. More reliable when the third candle closes below the first's midpoint.",
     reliability: "high",
     iconType: "bearish",
-    image: eveningStarImg
+    imageFile: "evening_star_pattern_diagram.png"
   },
   {
     id: "evening-doji-star",
@@ -482,7 +456,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Very strong bearish reversal signal. The doji adds significance to the pattern.",
     reliability: "high",
     iconType: "bearish",
-    image: eveningStarImg
+    imageFile: "evening_star_pattern_diagram.png"
   },
   {
     id: "three-black-crows",
@@ -500,7 +474,7 @@ export const candlestickPatterns: CandlestickPattern[] = [
     tradingImplication: "Strong bearish continuation/reversal. Watch for exhaustion if candles get smaller.",
     reliability: "high",
     iconType: "bearish",
-    image: threeBlackCrowsImg
+    imageFile: "three_black_crows_pattern.png"
   },
   {
     id: "three-inside-down",
