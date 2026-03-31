@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Check, Sparkles, Crown, ArrowRight } from "lucide-react";
+import { Check, Sparkles, Crown, ArrowRight, Shield, Zap, BookOpen } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,17 +75,58 @@ export default function Pricing() {
     window.location.href = mentoringCheckoutUrl(isConnected ? address : null);
   };
 
+  const trustPoints = [
+    {
+      icon: Shield,
+      title: "Persistent member access",
+      body: "Pro access is loaded from the live backend so members do not lose their plan after refresh.",
+    },
+    {
+      icon: Zap,
+      title: "Single workspace",
+      body: "Signals, trading, journal, and vault content live inside one connected product flow.",
+    },
+    {
+      icon: BookOpen,
+      title: "Education included",
+      body: "The platform is built so every subscription unlocks practical education, not just raw tooling.",
+    },
+  ];
+
   return (
     <div className="p-6 space-y-10 max-w-5xl mx-auto">
-      {/* Header */}
+      <div className="rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-8 text-center shadow-xl shadow-primary/5">
+        <div className="space-y-3">
+          <Badge className="mb-2">
+            <Sparkles className="h-3 w-3 mr-1" />
+            Premium Trading Membership
+          </Badge>
+          <h1 className="text-4xl font-display font-bold md:text-5xl">
+            Choose the plan that matches how closely you want to work with Equilibrium.
+          </h1>
+          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+            Pro unlocks the platform. Mentoring adds direct guidance and a higher-touch experience for traders who want
+            personalised feedback.
+          </p>
+        </div>
+        <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {trustPoints.map(({ icon: Icon, title, body }) => (
+            <div key={title} className="rounded-2xl border bg-background/80 p-4 text-left">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                <Icon className="h-5 w-5" />
+              </div>
+              <p className="text-sm font-semibold">{title}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="text-center space-y-3">
         <Badge className="mb-2">
           <Sparkles className="h-3 w-3 mr-1" />
           Simple Pricing
         </Badge>
-        <h1 className="text-4xl font-display font-bold">
-          Choose Your Trading Edge
-        </h1>
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
           One plan for the full platform. One plan for those who want personalised coaching on top.
         </p>
@@ -200,7 +241,6 @@ export default function Pricing() {
         </Card>
       </div>
 
-      {/* Feature comparison note */}
       <div className="rounded-xl border bg-muted/30 p-6 space-y-4">
         <h3 className="font-display font-semibold text-center text-lg">
           What's included in Pro Access
@@ -235,6 +275,32 @@ export default function Pricing() {
           </div>
         </div>
       </div>
+
+      <Card className="border-primary/15 bg-gradient-to-r from-background to-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="grid gap-6 md:grid-cols-3">
+            <div>
+              <p className="text-sm font-semibold">What members are really buying</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Not just charts or lessons. The value is having execution, review, and learning tied together in one
+                environment.
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold">Best fit for Pro</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Members who want the full platform and can execute independently with better structure and guidance.
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold">Best fit for Mentoring</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Traders who want direct accountability, feedback on execution, and a more bespoke path.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

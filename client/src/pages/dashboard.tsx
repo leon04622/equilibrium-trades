@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
   TrendingUp, Target, BookOpen, Zap, ArrowRight, 
-  BarChart3, GraduationCap, Activity
+  BarChart3, GraduationCap, Activity, Shield, Sparkles, PlayCircle, BookMarked
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,15 +37,99 @@ export default function Dashboard() {
 
   const beginnerPatterns = tradingPatterns.filter(p => p.difficulty === "beginner").slice(0, 4);
   const patternsDetectedToday = activePatterns.length || 0;
+  const premiumHighlights = [
+    {
+      icon: Zap,
+      title: "Live AI workflow",
+      body: "Scan markets, validate structure, and move straight into execution without changing tools.",
+    },
+    {
+      icon: Shield,
+      title: "Built for discipline",
+      body: "Journal, education, and structured setups reinforce consistency instead of impulse trading.",
+    },
+    {
+      icon: GraduationCap,
+      title: "Education with context",
+      body: "Patterns, SMA methodology, and vault lessons are tied directly to the way the platform is used.",
+    },
+  ];
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-display font-bold">Welcome to Equilibrium</h1>
-        <p className="text-muted-foreground">
-          Your journey to mastering trading patterns starts here.
-        </p>
-      </div>
+      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/12 via-background to-background shadow-xl shadow-primary/5">
+        <CardContent className="relative p-6 md:p-8">
+          <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+          <div className="absolute bottom-0 left-0 h-24 w-24 rounded-full bg-primary/10 blur-2xl" aria-hidden />
+          <div className="relative grid grid-cols-1 gap-8 xl:grid-cols-[1.35fr_0.9fr]">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-primary/90 text-primary-foreground">
+                  <Sparkles className="mr-1 h-3 w-3" />
+                  Equilibrium Pro Workflow
+                </Badge>
+                <Badge variant="outline" className="border-primary/25 bg-background/70">
+                  Trade, learn, and review in one place
+                </Badge>
+              </div>
+              <div className="space-y-3">
+                <h1 className="text-3xl font-display font-bold tracking-tight md:text-5xl">
+                  A cleaner, calmer trading workspace built for disciplined execution.
+                </h1>
+                <p className="max-w-2xl text-base text-muted-foreground md:text-lg">
+                  Equilibrium combines market structure, live execution, education, and review so members can move
+                  from idea to decision without stitching together multiple tools.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-primary/20 bg-background/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Signals today</p>
+                  <p className="mt-2 text-2xl font-display font-bold">{patternsDetectedToday}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Live AI-detected setups currently in the feed</p>
+                </div>
+                <div className="rounded-xl border border-primary/20 bg-background/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Trading stack</p>
+                  <p className="mt-2 text-2xl font-display font-bold">21/200</p>
+                  <p className="mt-1 text-xs text-muted-foreground">SMA structure embedded into learning and execution</p>
+                </div>
+                <div className="rounded-xl border border-primary/20 bg-background/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Member flow</p>
+                  <p className="mt-2 text-2xl font-display font-bold">Journal</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Review decisions and build repeatable habits</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button asChild size="lg" className="gap-2">
+                  <Link to="/trading">
+                    Open Trading Workspace
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="gap-2 bg-background/70">
+                  <Link to="/videos">
+                    Watch The Vault
+                    <PlayCircle className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              {premiumHighlights.map(({ icon: Icon, title, body }) => (
+                <div
+                  key={title}
+                  className="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-sm backdrop-blur"
+                >
+                  <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/12 text-primary">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h2 className="text-sm font-semibold">{title}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
@@ -196,6 +280,32 @@ export default function Dashboard() {
         </div>
 
         <div className="space-y-6">
+          <Card className="border-primary/15 bg-gradient-to-br from-background to-primary/5">
+            <CardHeader>
+              <CardTitle className="font-display text-base">Platform Edge</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-xl border bg-background/80 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <BookMarked className="h-4 w-4 text-primary" />
+                  Education tied to execution
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Learn a concept, see it in the signal flow, then document the result in the same account.
+                </p>
+              </div>
+              <div className="rounded-xl border bg-background/80 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Shield className="h-4 w-4 text-primary" />
+                  Cleaner decision environment
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The product is built to reduce context switching and help members stick to one process.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="font-display text-base">Learning Progress</CardTitle>

@@ -195,14 +195,35 @@ export default function Learn() {
 
   return (
     <div className="p-6 space-y-6">
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <GraduationCap className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-display font-bold">Learn Trading</h1>
+              </div>
+              <p className="max-w-2xl text-muted-foreground">
+                Build skill with a structured path through technical analysis, the 21/200 SMA methodology, and the
+                exact pattern language used across the platform.
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-background/80 px-4 py-3 text-sm">
+              <p className="font-medium">Progress is saved per wallet</p>
+              <p className="mt-1 text-muted-foreground">
+                Your learning path stays tied to the wallet you use on the platform.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <GraduationCap className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-display font-bold">Learn Trading</h1>
+          <h2 className="text-2xl font-display font-bold">Curriculum Overview</h2>
         </div>
-        <p className="text-muted-foreground">
-          Master trading patterns with our structured curriculum
-        </p>
+        <p className="text-muted-foreground">Master trading patterns with a cleaner, structured curriculum.</p>
       </div>
 
       <Card>
