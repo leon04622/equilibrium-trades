@@ -87,13 +87,19 @@ function normalizeScanText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "");
 }
 
+function buildScannerMarketLabel(coin: string, displayByCoin?: Record<string, string>): string {
+  return displayByCoin?.[coin]?.trim() || coin;
+}
+
 /** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>("all");
   const [scanQuery, setScanQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const marketsQuery = useQuery<ScannerMarketsPayload>({
     queryKey: ["/api/scanner/markets"],
@@ -108,6 +114,10 @@ export function PatternScannerUI() {
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
   const displayByCoin = marketsQuery.data?.displayByCoin;
+  const currentSearchFragment = useMemo(() => {
+    const parts = scanQuery.split(",");
+    return parts[parts.length - 1]?.trim() ?? "";
+  }, [scanQuery]);
   const searchTerms = useMemo(
     () =>
       scanQuery
@@ -142,6 +152,34 @@ export function PatternScannerUI() {
   const usingSearchScope = searchTerms.length > 0;
   const noSearchMatches = usingSearchScope && matchedScanCoins.length === 0;
   const effectiveUniverseCount = usingSearchScope ? matchedScanCoins.length : universeCount;
+  const autocompleteOptions = useMemo(() => {
+    const fragment = normalizeScanText(currentSearchFragment);
+    if (!fragment) return [];
+    const tickers = marketsQuery.data?.tickers ?? [];
+    const ranked = tickers
+      .map((coin) => {
+        const label = buildScannerMarketLabel(coin, displayByCoin);
+        const rawNorm = normalizeScanText(coin);
+        const labelNorm = normalizeScanText(label);
+        const exact = rawNorm === fragment || labelNorm === fragment;
+        const starts =
+          rawNorm.startsWith(fragment) || labelNorm.startsWith(fragment);
+        const includes =
+          rawNorm.includes(fragment) || labelNorm.includes(fragment);
+        if (!exact && !starts && !includes) return null;
+        return {
+          coin,
+          label,
+          score: exact ? 0 : starts ? 1 : 2,
+        };
+      })
+      .filter((v): v is { coin: string; label: string; score: number } => v !== null)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        return a.label.localeCompare(b.label);
+      });
+    return ranked.slice(0, 12);
+  }, [currentSearchFragment, marketsQuery.data?.tickers, displayByCoin]);
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -255,6 +293,27 @@ export function PatternScannerUI() {
     }
   }, [isFetching]);
 
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      if (!searchBoxRef.current?.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  function applySearchSelection(label: string) {
+    const parts = scanQuery.split(",");
+    if (parts.length <= 1) {
+      setScanQuery(label);
+    } else {
+      parts[parts.length - 1] = ` ${label}`;
+      setScanQuery(parts.join(",").replace(/^ /, ""));
+    }
+    setSearchOpen(false);
+  }
+
   const tabRows = useMemo(() => {
     const formingSignals = signals.filter((s) => s.patternStatus === "forming");
     const developedSignals = signals.filter(
@@ -318,15 +377,41 @@ export function PatternScannerUI() {
 
       <div className="space-y-1.5">
         <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">Scan markets</p>
-        <div className="relative max-w-xl">
+        <div ref={searchBoxRef} className="relative max-w-xl">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={scanQuery}
             onChange={(e) => setScanQuery(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setSearchOpen(false);
+                return;
+              }
+              if (e.key === "Enter" && autocompleteOptions.length > 0) {
+                e.preventDefault();
+                applySearchSelection(autocompleteOptions[0]!.label);
+              }
+            }}
             placeholder="Type BTC, ETH, SOL, BTC-USDC, or comma-separated markets"
             className="pl-9"
             data-testid="input-scan-markets"
           />
+          {searchOpen && autocompleteOptions.length > 0 ? (
+            <div className="absolute z-30 mt-2 w-full rounded-md border bg-popover p-1 shadow-lg">
+              {autocompleteOptions.map((option) => (
+                <button
+                  key={option.coin}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => applySearchSelection(option.label)}
+                >
+                  <span className="truncate">{option.label}</span>
+                  <span className="ml-3 shrink-0 text-xs text-muted-foreground">{option.coin}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <p className="text-[10px] md:text-xs text-muted-foreground">
           Leave blank to scan the whole universe. Type one or more markets to scan only matching tickers.
