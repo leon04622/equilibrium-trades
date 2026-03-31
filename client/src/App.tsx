@@ -73,7 +73,7 @@ const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; su
   {
     match: (pathname) => pathname.startsWith("/guide/deposit"),
     title: "Deposit guide",
-    subtitle: "Fund your account from Rabby or MetaMask with USDC on Arbitrum.",
+    subtitle: "Fund your account with USDC on Arbitrum using the same EVM wallets Hyperliquid users rely on.",
   },
   { match: (pathname) => pathname.startsWith("/docs"), title: "Docs", subtitle: "Reference workflows, implementation notes, and platform details." },
   { match: (pathname) => pathname.startsWith("/admin"), title: "Command Center", subtitle: "Manage members, vault content, and support operations." },

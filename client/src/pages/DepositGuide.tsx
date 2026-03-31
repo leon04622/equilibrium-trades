@@ -45,8 +45,8 @@ function IllustrationWallets({ className }: { className?: string }) {
       <text x="220" y="134" textAnchor="middle" className="fill-primary-foreground text-[14px] font-semibold font-sans">
         Connect
       </text>
-      <text x="220" y="178" textAnchor="middle" className="fill-muted-foreground text-[12px] font-sans">
-        Choose Rabby or MetaMask — then approve Arbitrum One
+      <text x="220" y="178" textAnchor="middle" className="fill-muted-foreground text-[11px] font-sans">
+        MetaMask · Rabby · Coinbase · OKX · Trust · Phantom — Arbitrum One
       </text>
     </svg>
   );
@@ -119,9 +119,18 @@ export default function DepositGuide() {
         </div>
         <h1 className="text-3xl font-bold font-display tracking-tight">Deposit funds to your account</h1>
         <p className="text-muted-foreground text-sm md:text-base max-w-2xl leading-relaxed">
-          Use <strong className="text-foreground">Rabby</strong> or <strong className="text-foreground">MetaMask</strong> in
-          your browser, then move <strong className="text-foreground">native USDC on Arbitrum One</strong> into your
-          trading account through <strong className="text-foreground">Portfolio → Deposit</strong> on Equilibrium.
+          Use the <strong className="text-foreground">same EVM wallet stack as Hyperliquid</strong>: Equilibrium’s{" "}
+          <strong className="text-foreground">Connect</strong> panel supports{" "}
+          <strong className="text-foreground">MetaMask</strong>, <strong className="text-foreground">Rabby</strong>,{" "}
+          <strong className="text-foreground">Coinbase Wallet</strong>, <strong className="text-foreground">OKX Wallet</strong>,{" "}
+          <strong className="text-foreground">Trust Wallet</strong>, and <strong className="text-foreground">Phantom</strong>{" "}
+          (EVM), plus other wallets that expose a standard browser provider. On mobile, the sheet can open{" "}
+          <strong className="text-foreground">Rabby</strong>, <strong className="text-foreground">MetaMask</strong>,{" "}
+          <strong className="text-foreground">Trust</strong>, or <strong className="text-foreground">OKX</strong> in-app browsers.
+          <strong className="text-foreground"> Ledger</strong> and <strong className="text-foreground">Trezor</strong> pair
+          through those apps the same way as on Hyperliquid (see their FAQ below). Then fund{" "}
+          <strong className="text-foreground">native USDC on Arbitrum One</strong> via{" "}
+          <strong className="text-foreground">Portfolio → Deposit</strong>.
         </p>
       </div>
 
@@ -142,8 +151,8 @@ export default function DepositGuide() {
               confirm transactions.
             </li>
             <li>
-              <strong className="text-foreground">Rabby or MetaMask</strong> installed in the same browser you use for
-              Equilibrium.
+              A compatible <strong className="text-foreground">EVM wallet</strong> (extension, WalletConnect, or hardware)
+              in the same browser or device you use for Equilibrium.
             </li>
           </ul>
         </CardContent>
@@ -151,30 +160,59 @@ export default function DepositGuide() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">2. Connect your wallet (Rabby or MetaMask)</CardTitle>
-          <CardDescription>Same steps for either wallet — pick the one you use.</CardDescription>
+          <CardTitle className="text-lg">2. Connect your wallet</CardTitle>
+          <CardDescription>
+            Hyperliquid’s ecosystem uses standard EVM signing; Equilibrium’s <strong className="text-foreground">Connect</strong>{" "}
+            supports the same broad set of options (not only one brand).
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <IllustrationWallets className="w-full max-w-lg mx-auto drop-shadow-sm" />
-          <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-            <div>
-              <p className="font-medium text-foreground mb-2">Rabby</p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>Install the Rabby extension from the official source.</li>
-                <li>Open Equilibrium and click <strong className="text-foreground">Connect</strong> in the header.</li>
-                <li>Choose <strong className="text-foreground">Rabby</strong> and approve the connection.</li>
-                <li>If prompted, switch to <strong className="text-foreground">Arbitrum One</strong>.</li>
-              </ul>
-            </div>
+          <div className="rounded-lg border border-border/80 bg-muted/25 p-4 text-xs text-muted-foreground leading-relaxed space-y-2">
+            <p>
+              <strong className="text-foreground">Hyperliquid’s own FAQ</strong> discusses{" "}
+              <strong className="text-foreground">MetaMask</strong>, <strong className="text-foreground">Rabby</strong>,{" "}
+              <strong className="text-foreground">Coinbase Wallet</strong>, <strong className="text-foreground">Ledger</strong>, and{" "}
+              <strong className="text-foreground">Trezor</strong> (plus tips if something fails). Their app also offers{" "}
+              <strong className="text-foreground">WalletConnect</strong> for additional brands; Equilibrium’s in-app{" "}
+              <strong className="text-foreground">Connect</strong> uses direct detection for{" "}
+              <strong className="text-foreground">MetaMask, Rabby, Coinbase, OKX, Trust, Phantom</strong> and compatible injected
+              wallets. Read:{" "}
+              <a
+                className="text-primary underline font-medium"
+                href="https://hyperliquid.gitbook.io/hyperliquid-docs/support/faq/connectivity-issues/connected-via-wallet"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Hyperliquid: Connected via wallet
+              </a>
+              .
+            </p>
+            <p>
+              If your wallet only supports <strong className="text-foreground">WalletConnect</strong>, open Equilibrium inside a
+              wallet that provides an <strong className="text-foreground">in-app browser</strong>, or use an extension that
+              WalletConnect can drive through a supporting host (same pattern many Hyperliquid users follow on desktop).
+            </p>
+          </div>
+          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <p className="font-medium text-foreground">Steps (every wallet)</p>
+            <ol className="list-decimal pl-5 space-y-2">
+              <li>Open Equilibrium and click <strong className="text-foreground">Connect</strong> in the header.</li>
+              <li>
+                Pick <strong className="text-foreground">your wallet</strong> (extension, WalletConnect QR, or hardware flow).
+              </li>
+              <li>Approve the connection request in the wallet app or device.</li>
+              <li>
+                If prompted, add or switch to <strong className="text-foreground">Arbitrum One</strong> (chain{" "}
+                <code className="text-xs bg-muted px-1 rounded">42161</code>).
+              </li>
+            </ol>
             <Separator />
-            <div>
-              <p className="font-medium text-foreground mb-2">MetaMask</p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>Install MetaMask and unlock your wallet.</li>
-                <li>On Equilibrium, click <strong className="text-foreground">Connect</strong> → <strong className="text-foreground">MetaMask</strong>.</li>
-                <li>Approve the connection and <strong className="text-foreground">Arbitrum One</strong> if the site asks.</li>
-              </ul>
-            </div>
+            <p className="text-xs">
+              <strong className="text-foreground">On mobile:</strong> use the <strong className="text-foreground">Connect</strong>{" "}
+              sheet shortcuts to open this site in <strong className="text-foreground">Rabby, MetaMask, Trust, or OKX</strong>, then
+              connect — or browse here from any EVM wallet app that supports custom URLs.
+            </p>
           </div>
         </CardContent>
       </Card>
