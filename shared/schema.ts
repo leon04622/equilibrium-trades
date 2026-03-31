@@ -366,6 +366,8 @@ export const walletUsers = pgTable("wallet_users", {
   hlTotalUsd: real("hl_total_usd"),
   hlBalanceObservedAt: timestamp("hl_balance_observed_at"),
   cctpBridgeProgress: jsonb("cctp_bridge_progress"),
+  scannerAllMarkets: boolean("scanner_all_markets").default(true),
+  scannerWatchlistCoins: text("scanner_watchlist_coins").array(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

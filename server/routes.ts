@@ -668,6 +668,67 @@ async function persistCctpBridgeProgress(
     .where(eq(walletUsers.walletAddress, normalized));
 }
 
+async function fetchPersistedScannerWatchlistPrefs(walletAddress: string): Promise<{
+  allMarkets: boolean;
+  coins: string[];
+  storageBackend: "mongodb" | "postgres" | "default";
+}> {
+  const mongo = await fetchMongoScannerWatchlistPrefs(walletAddress);
+  if (mongo) {
+    return {
+      allMarkets: mongo.allMarkets,
+      coins: mongo.coins,
+      storageBackend: "mongodb",
+    };
+  }
+  if (db) {
+    const normalized = walletAddress.trim().toLowerCase();
+    const [row] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalized));
+    if (row) {
+      return {
+        allMarkets: row.scannerAllMarkets !== false,
+        coins: Array.isArray(row.scannerWatchlistCoins) ? row.scannerWatchlistCoins.map((c) => String(c)) : [],
+        storageBackend: "postgres",
+      };
+    }
+  }
+  return {
+    allMarkets: true,
+    coins: [],
+    storageBackend: "default",
+  };
+}
+
+async function persistScannerWatchlistPrefs(walletAddress: string, prefs: {
+  allMarkets: boolean;
+  coins: string[];
+}): Promise<{ ok: boolean; storageBackend: "mongodb" | "postgres" | "both" | "none" }> {
+  const normalized = walletAddress.trim().toLowerCase();
+  let mongoOk = false;
+  let postgresOk = false;
+
+  const mongoResult = await upsertMongoScannerWatchlistPrefs(normalized, prefs);
+  mongoOk = mongoResult.ok;
+
+  if (db) {
+    await ensureWalletUserRowForPersistence(normalized);
+    await db
+      .update(walletUsers)
+      .set({
+        scannerAllMarkets: prefs.allMarkets,
+        scannerWatchlistCoins: prefs.coins,
+        updatedAt: new Date(),
+      })
+      .where(eq(walletUsers.walletAddress, normalized));
+    postgresOk = true;
+  }
+
+  return {
+    ok: mongoOk || postgresOk,
+    storageBackend: mongoOk && postgresOk ? "both" : mongoOk ? "mongodb" : postgresOk ? "postgres" : "none",
+  };
+}
+
 // ── Simple in-memory cache ──
 interface CacheEntry { data: any; expires: number; }
 const cache = new Map<string, CacheEntry>();
@@ -1238,25 +1299,13 @@ export async function registerRoutes(
       res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
       return;
     }
-    if (!getVaultDb()) {
-      res.json({
-        allMarkets: true,
-        coins: [],
-        mongoConfigured: true,
-        watchlistVaultConnected: false,
-      });
-      return;
-    }
-    const prefs = await fetchMongoScannerWatchlistPrefs(wallet);
-    if (!prefs) {
-      res.json({ allMarkets: true, coins: [], mongoConfigured: true, watchlistVaultConnected: true });
-      return;
-    }
+    const prefs = await fetchPersistedScannerWatchlistPrefs(wallet);
     res.json({
       allMarkets: prefs.allMarkets,
       coins: prefs.coins,
-      mongoConfigured: true,
-      watchlistVaultConnected: true,
+      mongoConfigured: !!getVaultDb(),
+      watchlistVaultConnected: prefs.storageBackend !== "default",
+      storageBackend: prefs.storageBackend,
     });
   });
 
@@ -1264,10 +1313,6 @@ export async function registerRoutes(
     const wallet = resolveWalletAddressFromRequest(req)?.trim();
     if (!wallet) {
       res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
-      return;
-    }
-    if (!getVaultDb()) {
-      res.status(503).json({ error: "MongoDB vault not connected; cannot persist watchlist" });
       return;
     }
     const body = req.body as { allMarkets?: unknown; coins?: unknown };
@@ -1279,12 +1324,12 @@ export async function registerRoutes(
       res.status(400).json({ error: "Select at least one ticker when All Markets is off" });
       return;
     }
-    const saved = await upsertMongoScannerWatchlistPrefs(wallet, { allMarkets, coins });
+    const saved = await persistScannerWatchlistPrefs(wallet, { allMarkets, coins });
     if (!saved.ok) {
       res.status(503).json({ error: "Failed to save watchlist" });
       return;
     }
-    res.json({ ok: true, allMarkets, coins });
+    res.json({ ok: true, allMarkets, coins, storageBackend: saved.storageBackend });
   });
 
   app.get("/api/admin/scanner-health", async (req: Request, res: Response) => {

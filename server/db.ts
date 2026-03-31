@@ -139,6 +139,8 @@ export async function ensurePostgresCoreTables(): Promise<void> {
         hl_total_usd real,
         hl_balance_observed_at timestamp,
         cctp_bridge_progress jsonb,
+        scanner_all_markets boolean DEFAULT true,
+        scanner_watchlist_coins text[],
         created_at timestamp DEFAULT CURRENT_TIMESTAMP,
         updated_at timestamp DEFAULT CURRENT_TIMESTAMP
       );
@@ -148,6 +150,8 @@ export async function ensurePostgresCoreTables(): Promise<void> {
     await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_total_usd real;`);
     await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_balance_observed_at timestamp;`);
     await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS cctp_bridge_progress jsonb;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS scanner_all_markets boolean DEFAULT true;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS scanner_watchlist_coins text[];`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS leads (
         id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
