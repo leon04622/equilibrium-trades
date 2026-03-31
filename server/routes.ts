@@ -86,7 +86,10 @@ import {
   tradeJournalCreateBodySchema,
   tradeJournalNotesBodySchema,
   tradeJournalCloseOpenBodySchema,
+  walletUsers,
 } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 import {
   insertTradeJournalEntry,
   listTradeJournalEntries,
@@ -542,6 +545,127 @@ async function persistUserAccessTier(
   }
   await flushWalletSubscriptionToMongoCrm(normalized);
   return user;
+}
+
+async function ensureWalletUserRowForPersistence(walletAddress: string): Promise<void> {
+  const normalized = walletAddress.trim().toLowerCase();
+  if (!db) return;
+  const [existing] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalized));
+  if (existing) return;
+  await storage.createWalletUser({
+    walletAddress: normalized,
+    subscriptionTier: "free",
+    subscriptionActive: false,
+  });
+}
+
+async function fetchPersistedHlBalanceSnapshot(walletAddress: string): Promise<{
+  perpAccountValue: number;
+  spotUsdc: number;
+  totalUsd: number;
+  updatedAt: string | null;
+} | null> {
+  const mongo = await fetchMongoCrmHlBalanceSnapshot(walletAddress);
+  if (mongo) return mongo;
+  if (!db) return null;
+  const normalized = walletAddress.trim().toLowerCase();
+  const [row] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalized));
+  if (!row) return null;
+  if (row.hlPerpAccountValue == null && row.hlSpotUsdc == null && row.hlTotalUsd == null) return null;
+  const perpAccountValue = row.hlPerpAccountValue ?? 0;
+  const spotUsdc = row.hlSpotUsdc ?? 0;
+  const totalUsd = row.hlTotalUsd ?? perpAccountValue + spotUsdc;
+  return {
+    perpAccountValue,
+    spotUsdc,
+    totalUsd,
+    updatedAt: row.hlBalanceObservedAt ? row.hlBalanceObservedAt.toISOString() : null,
+  };
+}
+
+async function persistHlBalanceSnapshot(walletAddress: string, data: {
+  perpAccountValue: number;
+  spotUsdc: number;
+  totalUsd: number;
+}): Promise<void> {
+  await persistMongoCrmHlBalanceSnapshot(walletAddress, data);
+  if (!db) return;
+  const normalized = walletAddress.trim().toLowerCase();
+  await ensureWalletUserRowForPersistence(normalized);
+  const now = new Date();
+  await db
+    .update(walletUsers)
+    .set({
+      hlPerpAccountValue: data.perpAccountValue,
+      hlSpotUsdc: data.spotUsdc,
+      hlTotalUsd: data.totalUsd,
+      hlBalanceObservedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(walletUsers.walletAddress, normalized));
+}
+
+async function fetchPersistedCctpBridgeProgress(walletAddress: string) {
+  const mongo = await fetchMongoCrmCctpBridgeProgress(walletAddress);
+  if (mongo) return mongo;
+  if (!db) return null;
+  const normalized = walletAddress.trim().toLowerCase();
+  const [row] = await db.select().from(walletUsers).where(eq(walletUsers.walletAddress, normalized));
+  const raw = row?.cctpBridgeProgress;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const p = raw as Record<string, unknown>;
+  return {
+    stage: typeof p.stage === "string" ? p.stage : "unknown",
+    updatedAt: p.updatedAt != null ? String(p.updatedAt) : null,
+    txHash: p.txHash != null ? String(p.txHash) : null,
+    burnTxHash: p.burnTxHash != null ? String(p.burnTxHash) : null,
+    messageHash: p.messageHash != null ? String(p.messageHash) : null,
+    cctpMessageHex: p.cctpMessageHex != null ? String(p.cctpMessageHex) : null,
+    attestationHex: p.attestationHex != null ? String(p.attestationHex) : null,
+    amountUsdc: typeof p.amountUsdc === "number" ? p.amountUsdc : null,
+    forwardFeeMax: typeof p.forwardFeeMax === "number" ? p.forwardFeeMax : null,
+    error: p.error != null ? String(p.error) : null,
+  };
+}
+
+async function persistCctpBridgeProgress(
+  walletAddress: string,
+  progress: {
+    stage: string;
+    txHash?: string | null;
+    burnTxHash?: string | null;
+    messageHash?: string | null;
+    cctpMessageHex?: string | null;
+    attestationHex?: string | null;
+    amountUsdc?: number | null;
+    forwardFeeMax?: number | null;
+    error?: string | null;
+  },
+): Promise<void> {
+  await persistMongoCrmCctpBridgeProgress(walletAddress, progress);
+  if (!db) return;
+  const normalized = walletAddress.trim().toLowerCase();
+  await ensureWalletUserRowForPersistence(normalized);
+  const now = new Date().toISOString();
+  const burnTxHash = progress.burnTxHash ?? progress.txHash ?? null;
+  await db
+    .update(walletUsers)
+    .set({
+      cctpBridgeProgress: {
+        stage: progress.stage,
+        updatedAt: now,
+        txHash: burnTxHash,
+        burnTxHash,
+        messageHash: progress.messageHash ?? null,
+        cctpMessageHex: progress.cctpMessageHex ?? null,
+        attestationHex: progress.attestationHex ?? null,
+        amountUsdc: progress.amountUsdc ?? null,
+        forwardFeeMax: progress.forwardFeeMax ?? null,
+        error: progress.error ?? null,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(walletUsers.walletAddress, normalized));
 }
 
 // ── Simple in-memory cache ──
@@ -1791,8 +1915,8 @@ export async function registerRoutes(
       const [entries, stats, hlBalanceMongo, cctpBridgeProgress] = await Promise.all([
         listTradeJournalEntries(wallet, 500),
         getTradeJournalStats(wallet),
-        fetchMongoCrmHlBalanceSnapshot(wallet),
-        fetchMongoCrmCctpBridgeProgress(wallet),
+        fetchPersistedHlBalanceSnapshot(wallet),
+        fetchPersistedCctpBridgeProgress(wallet),
       ]);
       res.json({
         wallet,
@@ -1841,7 +1965,7 @@ export async function registerRoutes(
       const spotUsdc = Number.isFinite(spot) ? spot : 0;
       const totalUsd =
         Number.isFinite(totalIn) && totalIn > 0 ? totalIn : perpAccountValue + spotUsdc;
-      await persistMongoCrmHlBalanceSnapshot(wallet, { perpAccountValue, spotUsdc, totalUsd });
+      await persistHlBalanceSnapshot(wallet, { perpAccountValue, spotUsdc, totalUsd });
       res.json({ success: true });
     } catch (error) {
       console.error("POST /api/user/hl-balance-snapshot:", error);
@@ -1882,7 +2006,7 @@ export async function registerRoutes(
         (body as any).error != null && String((body as any).error).trim() !== ""
           ? String((body as any).error).trim().slice(0, 2000)
           : null;
-      await persistMongoCrmCctpBridgeProgress(wallet, {
+      await persistCctpBridgeProgress(wallet, {
         stage,
         txHash,
         burnTxHash,

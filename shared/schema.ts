@@ -361,6 +361,11 @@ export const walletUsers = pgTable("wallet_users", {
   subscriptionActive: boolean("subscription_active").default(false),
   subscriptionExpiresAt: timestamp("subscription_expires_at"),
   subscribedAt: timestamp("subscribed_at"),
+  hlPerpAccountValue: real("hl_perp_account_value"),
+  hlSpotUsdc: real("hl_spot_usdc"),
+  hlTotalUsd: real("hl_total_usd"),
+  hlBalanceObservedAt: timestamp("hl_balance_observed_at"),
+  cctpBridgeProgress: jsonb("cctp_bridge_progress"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

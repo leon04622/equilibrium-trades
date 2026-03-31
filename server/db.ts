@@ -134,10 +134,20 @@ export async function ensurePostgresCoreTables(): Promise<void> {
         subscription_active boolean DEFAULT false,
         subscription_expires_at timestamp,
         subscribed_at timestamp,
+        hl_perp_account_value real,
+        hl_spot_usdc real,
+        hl_total_usd real,
+        hl_balance_observed_at timestamp,
+        cctp_bridge_progress jsonb,
         created_at timestamp DEFAULT CURRENT_TIMESTAMP,
         updated_at timestamp DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_perp_account_value real;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_spot_usdc real;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_total_usd real;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS hl_balance_observed_at timestamp;`);
+    await client.query(`ALTER TABLE wallet_users ADD COLUMN IF NOT EXISTS cctp_bridge_progress jsonb;`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS leads (
         id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
