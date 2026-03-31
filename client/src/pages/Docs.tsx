@@ -11,17 +11,21 @@ import { Separator } from "@/components/ui/separator";
 export default function Docs() {
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10 pb-24">
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-primary">
-          <BookMarked className="h-7 w-7" />
-          <Badge variant="secondary">Docs</Badge>
-        </div>
-        <h1 className="text-3xl font-bold font-display tracking-tight">Equilibrium Trading</h1>
-        <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
-          Hyperliquid L1 execution, SMMA trend context, and a geometry-first pattern scanner. Static reference
-          for onboarding and exchange review.
-        </p>
-      </div>
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-primary">
+              <BookMarked className="h-7 w-7" />
+              <Badge variant="secondary">Docs</Badge>
+            </div>
+            <h1 className="text-3xl font-bold font-display tracking-tight">Equilibrium Trading</h1>
+            <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
+              Hyperliquid L1 execution, SMMA trend context, and a geometry-first pattern scanner. Static reference for
+              onboarding, exchange review, and platform trust.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

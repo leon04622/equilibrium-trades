@@ -112,14 +112,36 @@ export default function Settings() {
 
   return (
     <div className="p-6 space-y-6 max-w-3xl">
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="grid gap-6 md:grid-cols-[1.15fr_0.85fr]">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <SettingsIcon className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-display font-bold">Settings</h1>
+              </div>
+              <p className="max-w-2xl text-muted-foreground">
+                Shape the workspace around how you trade. Adjust appearance, alerts, and account preferences without
+                losing the calm feel of the platform.
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-background/80 p-4">
+              <p className="text-sm font-semibold">Personal workspace</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Most of these preferences are saved for your current device so your environment feels consistent every
+                time you come back.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <SettingsIcon className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-display font-bold">Settings</h1>
+          <h2 className="text-2xl font-display font-bold">Workspace Preferences</h2>
         </div>
-        <p className="text-muted-foreground">
-          Customize your Equilibrium experience
-        </p>
+        <p className="text-muted-foreground">Customize how the platform looks, notifies, and protects your account.</p>
       </div>
 
       <Card>
