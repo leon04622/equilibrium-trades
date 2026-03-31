@@ -20,4 +20,18 @@ test.describe("public pages", () => {
     await page.goto("/docs");
     await expect(page.getByRole("heading", { level: 1 }).filter({ hasText: /Equilibrium/i })).toBeVisible();
   });
+
+  test("learn page loads (public funnel)", async ({ page }) => {
+    await page.goto("/learn");
+    await expect(page.getByRole("heading", { name: /Learn Trading/i, level: 1 })).toBeVisible();
+  });
+});
+
+test.describe("api", () => {
+  test("GET /health returns ok", async ({ request }) => {
+    const res = await request.get("/health");
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body).toMatchObject({ status: "ok" });
+  });
 });
