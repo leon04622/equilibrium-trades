@@ -41,6 +41,7 @@ const Signals = lazy(() => import("@/pages/signals"));
 const Heatmap = lazy(() => import("@/pages/heatmap"));
 const EducationalVault = lazy(() => import("@/pages/EducationalVault"));
 const Docs = lazy(() => import("@/pages/Docs"));
+const DepositGuide = lazy(() => import("@/pages/DepositGuide"));
 const Portfolio = lazy(() => import("@/pages/portfolio"));
 const Pricing = lazy(() => import("@/pages/pricing"));
 const Settings = lazy(() => import("@/pages/settings"));
@@ -68,6 +69,11 @@ const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; su
     match: (pathname) => pathname.startsWith("/trading-account") || pathname.startsWith("/hyperliquid"),
     title: "Trading Account",
     subtitle: "Connect your wallet and manage how the platform reaches your exchange account.",
+  },
+  {
+    match: (pathname) => pathname.startsWith("/guide/deposit"),
+    title: "Deposit guide",
+    subtitle: "Fund your account from Rabby or MetaMask with USDC on Arbitrum.",
   },
   { match: (pathname) => pathname.startsWith("/docs"), title: "Docs", subtitle: "Reference workflows, implementation notes, and platform details." },
   { match: (pathname) => pathname.startsWith("/admin"), title: "Command Center", subtitle: "Manage members, vault content, and support operations." },
@@ -217,6 +223,7 @@ function TradingLayout() {
                 <Route path="/heatmap" element={<Heatmap />} />
                 <Route path="/videos" element={<EducationalVault />} />
                 <Route path="/docs" element={<Docs />} />
+                <Route path="/guide/deposit" element={<DepositGuide />} />
                 <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/journal" element={<LazyJournalView />} />
                 <Route path="/pricing" element={<Pricing />} />

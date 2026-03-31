@@ -97,8 +97,12 @@ export default function Docs() {
                 <p className="text-muted-foreground mt-1">
                   Connect on the site header. On <Link className="text-primary underline" to="/portfolio">Portfolio</Link>
                   , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into your trading account using{" "}
-                  <strong>Circle CCTP</strong>. The deposit flow is built to be a direct USDC messaging route rather than
-                  a swap-style bridge, and your progress is remembered if you need to come back later.
+                  <strong>Circle CCTP</strong>. Step-by-step pictures:{" "}
+                  <Link className="text-primary underline" to="/guide/deposit">
+                    Deposit guide
+                  </Link>
+                  . The deposit flow is a direct USDC messaging route rather than a swap-style bridge, and your progress
+                  is remembered if you need to come back later.
                 </p>
               </div>
             </li>
