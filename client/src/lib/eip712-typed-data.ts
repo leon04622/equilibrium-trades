@@ -70,7 +70,7 @@ async function signViaEthSignTypedDataV4(
 }
 
 /**
- * Hyperliquid EIP-712 (ethers first, then `eth_signTypedData_v4` for wallet / mobile quirks).
+ * Venue EIP-712 signing (ethers first, then `eth_signTypedData_v4` for wallet / mobile quirks).
  */
 export async function signTypedDataHyperliquid(
   signer: JsonRpcSigner,

@@ -26,7 +26,7 @@ export interface AuthGateProps {
 }
 
 /**
- * Gates the Apex terminal until the secure API agent is approved on Hyperliquid L1.
+ * Gates the Apex terminal until the secure API agent is approved on the execution L1.
  * Referral / platform fees are applied in the background (agent-signed setReferrer) — not shown here.
  */
 export function AuthGate({ children }: AuthGateProps) {
@@ -90,7 +90,7 @@ export function AuthGate({ children }: AuthGateProps) {
           <div className="max-w-sm rounded-xl border border-border bg-card p-6 text-center shadow-lg">
             <p className="text-sm font-medium text-foreground">Wrong network</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Hyperliquid signing requires <strong>Arbitrum One</strong> (chain 42161).
+              Trading signatures require <strong>Arbitrum One</strong> (chain 42161).
             </p>
             <Button className="mt-4 w-full" onClick={() => void switchToArbitrum()}>
               Switch to Arbitrum
@@ -129,7 +129,7 @@ export function AuthGate({ children }: AuthGateProps) {
                 Secure account setup
               </DialogTitle>
               <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
-                One-time setup: approve your secure trading agent for instant moves on Hyperliquid.
+                One-time setup: approve your secure trading agent for instant moves on the exchange.
                 This key <strong className="text-foreground">cannot withdraw</strong> your funds — it
                 only signs trades you initiate here.
               </DialogDescription>
@@ -140,7 +140,7 @@ export function AuthGate({ children }: AuthGateProps) {
             {isHlError ? (
               <div className="space-y-3 py-2">
                 <p className="text-sm text-destructive">
-                  {hlError?.message ?? "Could not load Hyperliquid account state."}
+                  {hlError?.message ?? "Could not load exchange account state."}
                 </p>
                 <Button variant="outline" className="w-full" onClick={() => void refetchHlAuth()}>
                   Retry
@@ -149,7 +149,7 @@ export function AuthGate({ children }: AuthGateProps) {
             ) : isHlVerifying && !hlSnapshot ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Checking your Hyperliquid account…
+                Checking your exchange account…
               </div>
             ) : (
               <>

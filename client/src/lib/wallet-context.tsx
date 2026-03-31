@@ -26,7 +26,7 @@ interface WalletContextType {
   provider: BrowserProvider | null;
   builderCodeApproved: boolean;
   isCheckingApproval: boolean;
-  /** Hyperliquid delegated agent + builder fee approved locally; orders use agent signing only. */
+  /** Delegated trading agent + builder fee approved locally; orders use agent signing only. */
   hyperliquidSessionReady: boolean;
   isPreparingHyperliquidSession: boolean;
   prepareHyperliquidSession: () => Promise<{ success: boolean; error?: string }>;
@@ -345,7 +345,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [signer, address]);
 
-  // Do NOT auto-open Hyperliquid wallet prompts here — that caused blank screens / frozen tabs for some
+  // Do NOT auto-open trading-setup wallet prompts here — that caused blank screens / frozen tabs for some
   // users right after login. HL session (agent + optional builder fee) runs from the trading banner or first order.
   useEffect(() => {
     if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;

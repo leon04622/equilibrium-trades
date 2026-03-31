@@ -44,7 +44,7 @@ const Docs = lazy(() => import("@/pages/Docs"));
 const Portfolio = lazy(() => import("@/pages/portfolio"));
 const Pricing = lazy(() => import("@/pages/pricing"));
 const Settings = lazy(() => import("@/pages/settings"));
-const Hyperliquid = lazy(() => import("@/pages/hyperliquid"));
+const TradingAccountPage = lazy(() => import("@/pages/hyperliquid"));
 const AdminCommandCenter = lazy(() => import("@/pages/AdminPanel"));
 
 const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; subtitle: string }> = [
@@ -64,6 +64,11 @@ const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; su
   { match: (pathname) => pathname.startsWith("/portfolio"), title: "Portfolio", subtitle: "Keep balances, exposure, and performance in view." },
   { match: (pathname) => pathname.startsWith("/pricing"), title: "Membership", subtitle: "Choose the level of access and guidance that fits you." },
   { match: (pathname) => pathname.startsWith("/settings"), title: "Settings", subtitle: "Fine-tune the workspace around your routine." },
+  {
+    match: (pathname) => pathname.startsWith("/trading-account") || pathname.startsWith("/hyperliquid"),
+    title: "Trading Account",
+    subtitle: "Connect your wallet and manage how the platform reaches your exchange account.",
+  },
   { match: (pathname) => pathname.startsWith("/docs"), title: "Docs", subtitle: "Reference workflows, implementation notes, and platform details." },
   { match: (pathname) => pathname.startsWith("/admin"), title: "Command Center", subtitle: "Manage members, vault content, and support operations." },
 ];
@@ -217,7 +222,8 @@ function TradingLayout() {
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/subscribe" element={<Pricing />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/hyperliquid" element={<Hyperliquid />} />
+                <Route path="/trading-account" element={<TradingAccountPage />} />
+                <Route path="/hyperliquid" element={<Navigate to="/trading-account" replace />} />
                 <Route
                   path="/admin"
                   element={

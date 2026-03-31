@@ -1,6 +1,6 @@
 /**
  * User cancelled a wallet signing prompt (EIP-191 / typed data / tx).
- * Do NOT use broad `message.includes("rejected")` — Hyperliquid and API copy can contain "rejected"
+ * Do NOT use broad `message.includes("rejected")` — exchange and API copy can contain "rejected"
  * without meaning the user cancelled the Equilibrium personal_sign step.
  */
 export function isUserRejectedWalletError(e: unknown): boolean {

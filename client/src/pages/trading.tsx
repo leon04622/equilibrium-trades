@@ -181,7 +181,7 @@ export default function Trading({ visible = true }: TradingProps) {
   });
 
   // Resolve coin name → @N spot identifier if needed.
-  // Spot balances from Hyperliquid return token names (e.g. "PURR"), but tickers
+  // Spot balances from the venue return token names (e.g. "PURR"), but tickers
   // use the @N format (e.g. "@0"). When tickers load, normalise the coin.
   useEffect(() => {
     if (tickers.length === 0) return;
@@ -389,7 +389,7 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
       </div>
 
-      {/* Mobile Tab Bar (Chart / Order Book / Trades) - Hyperliquid style - hidden in fullscreen */}
+      {/* Mobile Tab Bar (Chart / Order Book / Trades) — exchange-style tabs — hidden in fullscreen */}
       <div className={cn(
         "md:hidden flex items-center border-b bg-card/30",
         isFullscreen && "hidden"
@@ -456,7 +456,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {chartEngine === "tradingview" && (
               <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[160px] leading-tight shrink-0">
-                TV: use <strong className="text-foreground">AI</strong> for chart TP/SL (Hyperliquid-style drag)
+                TV: use <strong className="text-foreground">AI</strong> for chart TP/SL (native drag)
               </span>
             )}
 
@@ -478,7 +478,7 @@ export default function Trading({ visible = true }: TradingProps) {
             <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
               <div
                 className="flex items-center gap-2 md:gap-3 shrink-0"
-                title="AI = native Hyperliquid candles; TP/SL lines mirror exchange open orders (read-only). TV = embedded TradingView."
+                title="AI = native venue candles; TP/SL lines mirror exchange open orders (read-only). TV = embedded TradingView."
               >
                 <div className="flex items-center gap-1.5">
                   <Switch
@@ -673,7 +673,7 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
       </div>
 
-      {/* Bottom - Positions and Orders Panel (Hyperliquid style) - hidden in fullscreen on mobile */}
+      {/* Bottom — positions and orders panel — hidden in fullscreen on mobile */}
       <div className={cn(isFullscreen && "hidden md:block")}>
         <BottomTradingPanel coin={coin} onCoinChange={setCoin} />
       </div>

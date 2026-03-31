@@ -18,22 +18,22 @@ import { useToast } from "@/hooks/use-toast";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 
-const HYPERLIQUID_STORAGE_KEY = "equilibrium_hyperliquid_connection";
+const TRADING_ACCOUNT_STORAGE_KEY = "equilibrium_hyperliquid_connection";
 
-interface HyperliquidConnection {
+interface TradingAccountConnection {
   method: "wallet" | "api";
   address: string;
   apiKey?: string;
   connectedAt: string;
 }
 
-export default function Hyperliquid() {
+export default function TradingAccountPage() {
   const navigate = useNavigate();
   const [connectionMethod, setConnectionMethod] = useState<"wallet" | "api">("wallet");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
-  const [savedConnection, setSavedConnection] = useState<HyperliquidConnection | null>(null);
+  const [savedConnection, setSavedConnection] = useState<TradingAccountConnection | null>(null);
   const [initialized, setInitialized] = useState(false);
   const { toast } = useToast();
   const { connect: connectTrading, disconnect: disconnectTrading, connected: tradingConnected } = useTrading();
@@ -43,9 +43,9 @@ export default function Hyperliquid() {
   useEffect(() => {
     if (initialized) return;
     try {
-      const stored = localStorage.getItem(HYPERLIQUID_STORAGE_KEY);
+      const stored = localStorage.getItem(TRADING_ACCOUNT_STORAGE_KEY);
       if (stored) {
-        const connection = JSON.parse(stored) as HyperliquidConnection;
+        const connection = JSON.parse(stored) as TradingAccountConnection;
         setSavedConnection(connection);
         // Sync TradingContext with saved connection
         if (connection.address) {
@@ -71,12 +71,12 @@ export default function Hyperliquid() {
         });
         if (accounts && accounts[0]) {
           const address = accounts[0];
-          const connection: HyperliquidConnection = {
+          const connection: TradingAccountConnection = {
             method: "wallet",
             address,
             connectedAt: new Date().toISOString(),
           };
-          localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
+          localStorage.setItem(TRADING_ACCOUNT_STORAGE_KEY, JSON.stringify(connection));
           setSavedConnection(connection);
           connectTrading(address);
           toast({
@@ -116,13 +116,13 @@ export default function Hyperliquid() {
     setIsConnecting(true);
     
     // Store API credentials - actual trading uses wallet signing
-    const connection: HyperliquidConnection = {
+    const connection: TradingAccountConnection = {
       method: "api",
       address: `api-${apiKey.slice(0, 8)}...`,
       apiKey: apiKey.slice(0, 8) + "...",
       connectedAt: new Date().toISOString(),
     };
-    localStorage.setItem(HYPERLIQUID_STORAGE_KEY, JSON.stringify(connection));
+    localStorage.setItem(TRADING_ACCOUNT_STORAGE_KEY, JSON.stringify(connection));
     setSavedConnection(connection);
     connectTrading(connection.address);
     
@@ -134,7 +134,7 @@ export default function Hyperliquid() {
   };
 
   const handleDisconnect = () => {
-    localStorage.removeItem(HYPERLIQUID_STORAGE_KEY);
+    localStorage.removeItem(TRADING_ACCOUNT_STORAGE_KEY);
     setSavedConnection(null);
     setApiKey("");
     setApiSecret("");
@@ -360,7 +360,7 @@ export default function Hyperliquid() {
                       rel="noopener noreferrer"
                       className="text-primary hover:underline"
                     >
-                      app.hyperliquid.xyz
+                      the exchange website
                     </a>{" "}
                     and connect your wallet to create an account.
                   </p>

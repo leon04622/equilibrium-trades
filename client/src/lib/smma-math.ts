@@ -1,6 +1,6 @@
 import type { Time } from "lightweight-charts";
 
-/** SMMA (Smoothed Moving Average) — matches Hyperliquid; do not change formula. */
+/** SMMA (Smoothed Moving Average) — matches native venue chart math; do not change formula. */
 export function calcSMMA(
   vals: number[],
   times: Time[],

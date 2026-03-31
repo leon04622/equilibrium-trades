@@ -1,5 +1,5 @@
 /**
- * Shared mapping from Hyperliquid API / WebSocket payloads → app models.
+ * Shared mapping from venue API / WebSocket payloads → app models.
  * Keeps REST polling, SDK info calls, and WS subscriptions aligned (1:1 with L1 truth).
  */
 import type { HLOpenOrder } from "@/lib/trading-context";

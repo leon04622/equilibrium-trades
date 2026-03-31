@@ -4,7 +4,7 @@ export type TpslOrderKind = "tp" | "sl" | "other";
 
 /**
  * Classify HL trigger order as TP or SL.
- * Uses **mark vs trigger** (Hyperliquid-style), not entry — so a profit-lock SL above entry (long)
+ * Uses **mark vs trigger** (venue-native), not entry — so a profit-lock SL above entry (long)
  * is still a stop, not a take-profit.
  */
 export function orderKindForTpsl(
@@ -49,7 +49,7 @@ export function ghostTpslPrices(
   return { ghostTp, ghostSl };
 }
 
-function isHyperliquidTpslCandidate(o: HLOpenOrder): boolean {
+function isVenueTpslCandidate(o: HLOpenOrder): boolean {
   if (o.isTrigger === true && o.reduceOnly === true) return true;
   const ot = (o.orderType || "").toLowerCase();
   if (ot.includes("take profit") || ot === "take_profit") return true;
@@ -67,7 +67,7 @@ export function selectTpSlOrders(
     return { tpPrice: null, slPrice: null };
   }
   const markPx = position.markPrice || position.entryPrice;
-  const coinOrders = openOrders.filter((o) => o.coin === coin && isHyperliquidTpslCandidate(o));
+  const coinOrders = openOrders.filter((o) => o.coin === coin && isVenueTpslCandidate(o));
   let tpOrder: HLOpenOrder | undefined;
   let slOrder: HLOpenOrder | undefined;
   for (const o of coinOrders) {

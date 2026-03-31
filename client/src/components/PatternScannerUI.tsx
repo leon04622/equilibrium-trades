@@ -140,7 +140,7 @@ function buildScannerMarketLabel(coin: string, displayByCoin?: Record<string, st
   return displayByCoin?.[coin]?.trim() || coin;
 }
 
-/** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
+/** Scans all listed perp and spot markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
   const initialSession = useMemo(() => readScannerSession(), []);
   const { address } = useWallet();
@@ -536,7 +536,7 @@ export function PatternScannerUI() {
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs md:text-sm text-muted-foreground">
-            Scans all perps and spot markets from Hyperliquid
+            Scans all listed perps and spot markets
             {universeCount != null ? (
               <>
                 {" "}
@@ -730,7 +730,7 @@ export function PatternScannerUI() {
         <Alert className="border-amber-500/40 bg-amber-500/[0.06]">
           <AlertTitle className="text-sm">Limited market universe ({universeCount} symbols)</AlertTitle>
           <AlertDescription className="text-xs text-muted-foreground">
-            This deployment is using a reduced fallback universe instead of Hyperliquid&apos;s full live market list.
+            This deployment is using a reduced fallback universe instead of the full live market list.
             Fewer markets means fewer setups. Once the host can load the live HL universe reliably, this count should
             jump much higher automatically.
           </AlertDescription>

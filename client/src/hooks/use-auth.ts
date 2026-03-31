@@ -11,7 +11,7 @@ export interface UseAuthResult {
   address: string | null;
   isConnected: boolean;
   chainId: number | null;
-  /** Hyperliquid API agent is active on L1 for this wallet (instant trading path). */
+  /** Venue API agent is active on L1 for this wallet (instant trading path). */
   terminalReady: boolean;
   /** Loading builder / agent L1 snapshot. */
   isHlVerifying: boolean;
@@ -22,8 +22,8 @@ export interface UseAuthResult {
 }
 
 /**
- * Terminal access once the delegated agent is valid on L1. Builder fee is handled inside
- * ensureHyperliquidTradingSession but does not block chart access.
+ * Terminal access once the delegated agent is valid on L1. Builder fee is handled during
+ * trading session setup and does not block chart access.
  */
 export function useAuth(): UseAuthResult {
   const { address, isConnected, chainId } = useWallet();

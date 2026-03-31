@@ -76,7 +76,7 @@ export function BuilderCodeModal() {
     setStep("complete");
     toast({
       title: "You're signed in",
-      description: "Hyperliquid secure trading setup runs when you trade — use the trade panel if prompted.",
+      description: "Secure trading setup runs when you trade — use the trade panel if prompted.",
     });
   };
 
@@ -106,7 +106,7 @@ export function BuilderCodeModal() {
             Sign in to Equilibrium
           </h2>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-xs mx-auto">
-            One wallet signature — no gas. This verifies your wallet and saves your account. Hyperliquid trading setup is a separate step when you place orders.
+            One wallet signature — no gas. This verifies your wallet and saves your account. Exchange trading setup is a separate step when you place orders.
           </p>
         </div>
 
@@ -174,7 +174,7 @@ export function BuilderCodeModal() {
           <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/40 border border-border/40">
             <Wallet className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Your private keys never leave your wallet. Hyperliquid trading permissions are confirmed when you trade.
+              Your private keys never leave your wallet. Trading permissions are confirmed when you trade.
             </p>
           </div>
         </div>

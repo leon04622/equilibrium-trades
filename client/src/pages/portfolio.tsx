@@ -430,7 +430,7 @@ export default function Portfolio() {
       setDepositStep("");
       setDepositResult({
         success: false,
-        error: `Hyperliquid requires at least ${cfg.minDepositUsdc} USDC per deposit (smaller amounts are not credited).`,
+        error: `The venue requires at least ${cfg.minDepositUsdc} USDC per deposit (smaller amounts are not credited).`,
       });
       return;
     }
@@ -482,7 +482,7 @@ export default function Portfolio() {
               /* optional dependency / dynamic import */
             }
             toast({
-              title: "Success: Funds are now live on Hyperliquid",
+              title: "Success: Funds are now live in your trading account",
               description:
                 "Circle attestation is ready. If your wallet asks, confirm the mint on HyperEVM to finalize delivery to HyperCore.",
             });
@@ -562,7 +562,7 @@ export default function Portfolio() {
                 <h1 className="text-3xl font-display font-bold tracking-tight">Portfolio</h1>
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-                A cleaner operations view for balances, margin, transfers, and capital movement across Hyperliquid.
+                A cleaner operations view for balances, margin, transfers, and capital movement on the connected exchange.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 md:w-[360px]">
@@ -1083,7 +1083,7 @@ export default function Portfolio() {
             <DialogDescription>
               <strong>Circle CCTP (professional):</strong> you approve USDC, then{" "}
               <code className="text-xs bg-muted px-1 rounded">depositForBurnWithHook</code> on Arbitrum burns USDC and attaches{" "}
-              <strong>forward hook data</strong> for Hyperliquid’s <strong>CctpForwarder</strong> on HyperEVM, so minted USDC is
+              <strong>forward hook data</strong> for the <strong>CctpForwarder</strong> on HyperEVM, so minted USDC is
               credited to your <strong>HyperCore</strong> trading account (not stranded on HyperEVM). After Circle Iris attests,
               you confirm <code className="text-xs bg-muted px-1 rounded">receiveMessage</code> on HyperEVM. Minimum{" "}
               {depositCfg ? `${depositCfg.minDepositUsdc}` : "—"} USDC. Forward fee is quoted live from Circle.
@@ -1198,7 +1198,7 @@ export default function Portfolio() {
               <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="h-3 w-3 shrink-0 mt-0.5" />
                 <span>
-                  Native USDC on Arbitrum One. Verified Hyperliquid Bridge2 reference (read-only) on{" "}
+                  Native USDC on Arbitrum One. Verified Bridge2 deposit contract reference (read-only) on{" "}
                   <a
                     href={`https://arbiscan.io/address/${depositCfg.verifiedHyperliquidBridge2Arbitrum}`}
                     target="_blank"

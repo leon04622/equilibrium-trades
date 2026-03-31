@@ -1,5 +1,5 @@
 /**
- * Hyperliquid L1 checks for Apex Terminal readiness (builder fee + API agent on L1).
+ * Execution L1 checks for Apex Terminal readiness (builder fee + API agent on L1).
  * Platform referral / builder attribution runs in the background via {@link trySetReferrer} in hyperliquid-client.
  */
 import { HttpTransport, InfoClient } from "@nktkas/hyperliquid";

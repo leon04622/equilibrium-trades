@@ -55,7 +55,7 @@ export interface Indicator {
 
 export interface PlaceTpslOptions {
   /**
-   * When set with `slPrice`, attempts Hyperliquid `trailingStopMarket` first (callback vs mark),
+   * When set with `slPrice`, attempts venue `trailingStopMarket` first (callback vs mark),
    * then falls back to a fixed reduce-only stop trigger at `slPrice`.
    */
   slTrailingCallbackRate?: number;
@@ -82,14 +82,14 @@ interface TradingContextType {
   balance: number;
   withdrawable: number;
   accountValue: number;
-  /** Native USDC total on Hyperliquid spot (from `spotClearinghouseState`). */
+  /** Native USDC total on spot (from `spotClearinghouseState`). */
   spotUsdcTotal: number;
   /** Perp account value + spot USDC total (unified HL equity). */
   unifiedAccountUsd: number;
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
-  /** Last `frontendOpenOrders` JSON from Hyperliquid info API. */
+  /** Last `frontendOpenOrders` JSON from the venue info API. */
   hlFrontendOpenOrdersRaw: unknown;
   /** Unix ms when open orders + positions were last refreshed from HL (null = never / disconnected). */
   hlAccountSyncAt: number | null;
@@ -190,7 +190,7 @@ const STORAGE_KEYS = {
   indicators: "equilibrium_indicators",
 };
 
-/** Coalesce Hyperliquid WS account + order snapshots for UI (perps overview / equity strip). */
+/** Coalesce venue WS account + order snapshots for UI (perps overview / equity strip). */
 const HL_ACCOUNT_UI_THROTTLE_MS = 3000;
 
 // Load from localStorage with default fallback
@@ -263,7 +263,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     currentPricesRef.current = currentPrices;
   }, [currentPrices]);
 
-  // Fetch account data from Hyperliquid when wallet connects
+  // Fetch account data from the venue when wallet connects
   const refreshAccount = useCallback(async () => {
     if (!walletAddress) return;
     
@@ -356,7 +356,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setHlAccountFetchError(null);
 
     } catch (error) {
-      console.error("Error fetching Hyperliquid account:", error);
+      console.error("Error fetching exchange account:", error);
       setHlAccountFetchError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsLoadingAccount(false);
@@ -572,7 +572,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     
     setIsClosingPosition(true);
     try {
-      // Close position on Hyperliquid by placing opposite market order with reduceOnly
+      // Close position on the exchange by placing opposite market order with reduceOnly
       const result = await hlClosePosition(
         signer,
         position.coin,
@@ -672,7 +672,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         console.warn("[trade-journal] close-open:", journalCloseErr);
       }
       
-      // Refresh positions from Hyperliquid to get updated state
+      // Refresh positions from the exchange to get updated state
       await refreshAccount();
       
       return { success: true };

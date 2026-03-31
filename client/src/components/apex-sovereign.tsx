@@ -441,7 +441,7 @@ export function ApexSovereign({
         }
         toast({
           title: "System Error",
-          description: "Wallet or Hyperliquid trading session not ready.",
+          description: "Wallet or trading session not ready.",
           variant: "destructive",
         });
         return;
@@ -488,7 +488,7 @@ export function ApexSovereign({
       }
       toast({
         title: "System Error",
-        description: errMsg || "Order modify rejected by Hyperliquid.",
+        description: errMsg || "Order modify rejected by the exchange.",
         variant: "destructive",
       });
     },
@@ -1000,7 +1000,7 @@ export function ApexSovereign({
     ],
   );
 
-  /** Routes × on labels to Hyperliquid exchange cancel for the bound oid. */
+  /** Routes × on labels to venue exchange cancel for the bound oid. */
   const onCancel = useCallback(
     async (side: TpslSide) => {
       const order = side === "tp" ? tpOrder : slOrder;

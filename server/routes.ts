@@ -1925,7 +1925,7 @@ export async function registerRoutes(
       const requiredBuilder = "0xad9be64fd7a35d99a138b87cb212baefbcdcf045";
       if (!text.toLowerCase().includes(requiredBuilder)) {
         return res.status(400).json({
-          error: "Sign-in message must include the Equilibrium Hyperliquid builder address",
+          error: "Sign-in message must include the Equilibrium builder address",
         });
       }
 
@@ -3018,7 +3018,7 @@ export async function registerRoutes(
           builderCodeApproved: builderApproved,
         },
         note:
-          "Exchange totals are Hyperliquid-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+          "Exchange totals are venue-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
       });
     } catch (e) {
       console.error("command-center analytics:", e);
@@ -3178,7 +3178,7 @@ export async function registerRoutes(
           builderCodeApproved: builderApproved,
         },
         note:
-          "Exchange totals are Hyperliquid-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+          "Exchange totals are venue-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
       });
     } catch (e) {
       console.error("admin-equilibrium analytics:", e);

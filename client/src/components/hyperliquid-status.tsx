@@ -36,7 +36,7 @@ export function HyperliquidStatus({
   };
 
   return (
-    <Card data-testid="hyperliquid-status">
+    <Card data-testid="trading-account-status">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-display flex items-center gap-2">
@@ -131,7 +131,7 @@ export function HyperliquidStatus({
             <Button 
               className="w-full gap-2" 
               onClick={onConnect}
-              data-testid="button-connect-hyperliquid"
+              data-testid="button-connect-trading-account"
             >
               <Link2 className="h-4 w-4" />
               Connect Account

@@ -24,7 +24,7 @@ const BUILDER_FEE_STORAGE_KEY = "hyperliquid_builder_fee_approved";
 const referralSetForSession = new Set<string>();
 
 // Get server-synced timestamp to avoid browser clock issues
-// The Replit preview can have significant clock drift compared to Hyperliquid servers
+// The Replit preview can have significant clock drift compared to exchange servers
 let serverTimeOffset = 0;
 let timeSynced = false;
 
@@ -91,7 +91,7 @@ function getSyncedTimestamp(): number {
 syncServerTime();
 
 // Agent key management for browser wallet trading
-// This uses Hyperliquid's agent authorization flow:
+// This uses the venue agent authorization flow:
 // 1. Generate a local keypair (agent)
 // 2. User signs an "approveAgent" action with their browser wallet
 // 3. Agent key can then sign L1 actions with chainId 1337
@@ -134,7 +134,7 @@ function builderFeeApprovedKey(userAddress: string): string {
   return `${BUILDER_FEE_STORAGE_KEY}_${userAddress.toLowerCase()}`;
 }
 
-/** True after the user completed Hyperliquid's EIP-712 approveBuilderFee for this wallet (stored locally). */
+/** True after the user completed EIP-712 approveBuilderFee for this wallet (stored locally). */
 export function hasHyperliquidBuilderFeeApproved(userAddress: string): boolean {
   if (!isBuilderFeeConfigured()) return false;
   try {
@@ -158,7 +158,7 @@ export function clearHyperliquidAgentOnly(walletAddress: string): void {
   }
 }
 
-/** Clear delegated Hyperliquid agent + local builder-fee flag (call on wallet disconnect). */
+/** Clear delegated trading agent + local builder-fee flag (call on wallet disconnect). */
 export function clearHyperliquidTradingSession(walletAddress: string): void {
   try {
     const addr = walletAddress.toLowerCase();
@@ -187,8 +187,8 @@ export type EnsureHyperliquidSessionOptions = {
 };
 
 /**
- * One-time Hyperliquid setup: authorize the local agent key (EIP-712) and approve builder fee (EIP-712).
- * Hyperliquid’s one-time ~1 USDC account activation is charged on the first successful CoreWriter action (e.g. approveAgent).
+ * One-time trading setup: authorize the local agent key (EIP-712) and approve builder fee (EIP-712).
+ * A one-time ~1 USDC account activation is charged on the first successful CoreWriter action (e.g. approveAgent).
  * All later orders / TP-SL / cancel / leverage use {@link signL1ActionWithAgent} only — no wallet popups.
  */
 export async function ensureHyperliquidTradingSession(
@@ -205,7 +205,7 @@ export async function ensureHyperliquidTradingSession(
         return {
           success: false,
           error:
-            "Switch to Arbitrum One (chain 42161) in your wallet — Hyperliquid signatures require the correct network.",
+            "Switch to Arbitrum One (chain 42161) in your wallet — trading signatures require the correct network.",
         };
       }
     } catch {
@@ -220,14 +220,14 @@ export async function ensureHyperliquidTradingSession(
         return {
           success: false,
           error:
-            "You cancelled the Hyperliquid trading key step in your wallet. Your Equilibrium sign-in is already saved — tap Approve & Continue to finish setup.",
+            "You cancelled the trading key step in your wallet. Your Equilibrium sign-in is already saved — tap Approve & Continue to finish setup.",
         };
       }
       if (authorized !== "ok") {
         return {
           success: false,
           error:
-            "Hyperliquid could not register your trading key. Check your connection and try again.",
+            "The exchange could not register your trading key. Check your connection and try again.",
         };
       }
       storeAgent(userAddress, {
@@ -250,7 +250,7 @@ export async function ensureHyperliquidTradingSession(
           }
         } catch (e) {
           console.warn(
-            "[Hyperliquid] Could not read maxBuilderFee from Info API; may prompt approveBuilderFee",
+            "[Exchange] Could not read maxBuilderFee from Info API; may prompt approveBuilderFee",
             e,
           );
         }
@@ -264,22 +264,22 @@ export async function ensureHyperliquidTradingSession(
             return {
               success: false,
               error:
-                "Hyperliquid builder fee approval was cancelled. It is required once to link platform fees — please sign to continue.",
+                "Builder fee approval was cancelled. It is required once to link platform fees — please sign to continue.",
             };
           }
           console.warn(
-            "[Hyperliquid] User skipped builder fee approval — trading still works; platform fee on orders is omitted until approved.",
+            "[Exchange] User skipped builder fee approval — trading still works; platform fee on orders is omitted until approved.",
           );
         } else {
           if (opts?.requireBuilderFee) {
             return {
               success: false,
               error:
-                "Could not complete Hyperliquid builder fee approval (approveBuilderFee). Check your connection and try again.",
+                "Could not complete builder fee approval (approveBuilderFee). Check your connection and try again.",
             };
           }
           console.warn(
-            "[Hyperliquid] Builder fee approval failed — trading still works; retry from the trading banner when convenient.",
+            "[Exchange] Builder fee approval failed — trading still works; retry from the trading banner when convenient.",
           );
         }
       }
@@ -293,7 +293,7 @@ export async function ensureHyperliquidTradingSession(
     return { success: true };
   } catch (e: any) {
     console.error("ensureHyperliquidTradingSession:", e);
-    return { success: false, error: e?.message || "Hyperliquid session setup failed." };
+    return { success: false, error: e?.message || "Trading session setup failed." };
   }
 }
 
@@ -318,7 +318,7 @@ async function authorizeAgent(
   const signatureChainId = "0xa4b1"; // Arbitrum One chainId in hex
   
   // ApproveAgent uses EIP-712 with the user's network chainId
-  // The signatureChainId in the action tells Hyperliquid which chainId was used for signing
+  // The signatureChainId in the action tells the venue which chainId was used for signing
   const domain = {
     name: "HyperliquidSignTransaction",
     version: "1",
@@ -365,7 +365,7 @@ async function authorizeAgent(
     const s = "0x" + signature.slice(66, 130);
     const v = parseInt(signature.slice(130, 132), 16);
     
-    // Submit to Hyperliquid - action includes ALL fields
+    // Submit to exchange API — action includes ALL fields
     const action = {
       type: "approveAgent",
       signatureChainId: signatureChainId,
@@ -400,10 +400,10 @@ async function authorizeAgent(
   }
 }
 
-// Submit approveBuilderFee action to Hyperliquid so the platform earns a fee on the user's trades
+// Submit approveBuilderFee so the platform earns a fee on the user's trades
 async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthStep> {
   if (!isBuilderFeeConfigured()) {
-    console.warn("[Hyperliquid] Builder address invalid — skipping builder fee approval");
+    console.warn("[Exchange] Builder address invalid — skipping builder fee approval");
     return "failed";
   }
 
@@ -565,7 +565,7 @@ export interface OpenOrder {
 let assetCache: Map<string, number> | null = null;
 let assetCacheTime = 0;
 let assetMetaCache: Map<string, { szDecimals: number; maxLeverage: number }> | null = null;
-const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes — picks up any new markets Hyperliquid lists
+const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes — picks up any new markets the venue lists
 
 // Monotonic nonce generator - ensures each nonce is unique and increasing
 let lastNonce = 0;
@@ -651,7 +651,7 @@ export async function getClearinghouseStateViaInfoClient(address: string): Promi
     const data = await info.clearinghouseState({ user: address as `0x${string}` });
     return data as unknown as AccountState;
   } catch (e) {
-    console.warn("[Hyperliquid] InfoClient.clearinghouseState failed:", e);
+    console.warn("[Exchange] InfoClient.clearinghouseState failed:", e);
     return null;
   }
 }
@@ -766,7 +766,7 @@ export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
   }
 }
 
-// Round to 5 significant figures, which is Hyperliquid's precision requirement
+// Round to 5 significant figures, which is the venue's precision requirement
 export function floatToWire(x: number): string {
   if (Math.abs(x) < 1e-8) return "0";
   
@@ -784,8 +784,8 @@ export function floatToWire(x: number): string {
 
 // Format price for a specific coin - each coin has a specific tick size
 function formatPrice(price: number, coin: string): string {
-  // Use live metadata from Hyperliquid to determine tick size per coin.
-  // szDecimals drives size precision; Hyperliquid prices use 5 significant figures.
+  // Use live metadata from the venue to determine tick size per coin.
+  // szDecimals drives size precision; prices use 5 significant figures.
   // High-price coins (BTC) round to whole numbers; mid-price coins use 1dp;
   // low-price coins use floatToWire (5 sig figs). This matches the exchange rules.
   if (price >= 10000) return Math.round(price).toString();
@@ -801,7 +801,7 @@ function orderTypeToWire(orderType: "market" | "limit"): { limit: { tif: string 
 }
 
 // Sign L1 action using agent key (not browser wallet)
-// The agent key can sign with chainId 1337 which Hyperliquid requires
+// The agent key can sign with chainId 1337 which the venue requires
 async function signL1ActionWithAgent(
   agentPrivateKey: string,
   action: any,
@@ -863,14 +863,14 @@ export async function placeOrder(
     const signerAddress = await signer.getAddress();
     console.log("Signer address:", signerAddress);
     
-    // Verify the user has an account on Hyperliquid
+    // Verify the user has an account on the exchange
     const accountState = await getAccountState(signerAddress);
     console.log("Account state:", accountState);
     
     if (!accountState || !accountState.marginSummary) {
       return { 
         success: false, 
-        error: `Wallet ${signerAddress} not found on Hyperliquid. Please deposit funds via the Portfolio page first.` 
+        error: `Wallet ${signerAddress} has no exchange account yet. Please deposit funds via the Portfolio page first.` 
       };
     }
     
@@ -939,7 +939,7 @@ export async function placeOrder(
       vaultAddress: null,
     };
 
-    console.log("Sending order to Hyperliquid:", JSON.stringify(payload));
+    console.log("Sending order to exchange:", JSON.stringify(payload));
     const response = await fetch(EXCHANGE_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -947,7 +947,7 @@ export async function placeOrder(
     });
 
     const result = await response.json();
-    console.log("Hyperliquid response:", result);
+    console.log("Exchange response:", result);
 
     if (result.status === "ok") {
       const statuses = result.response?.data?.statuses || [];
@@ -1034,7 +1034,7 @@ export async function cancelOrder(
       };
     }
 
-    // Hyperliquid returns status "ok" even when a cancel fails — real outcome is in data.statuses.
+    // API returns status "ok" even when a cancel fails — real outcome is in data.statuses.
     const statuses = result.response?.data?.statuses;
     if (Array.isArray(statuses) && statuses.length > 0) {
       for (let i = 0; i < statuses.length; i++) {
@@ -1414,8 +1414,8 @@ export async function transferUsdcBetweenAccounts(
   }
 }
 
-// Withdraw USDC from Hyperliquid perp account to an Arbitrum wallet address
-// Uses Hyperliquid's withdraw3 action, signed via EIP-712 with the user's primary wallet
+// Withdraw USDC from perp account to an Arbitrum wallet address
+// Uses withdraw3 action, signed via EIP-712 with the user's primary wallet
 export async function withdrawUsdcToWallet(
   signer: JsonRpcSigner,
   amount: number,
@@ -1631,7 +1631,7 @@ export async function syncOrderToExchange(
 ): Promise<{ ok: boolean; error?: string }> {
   const agent = getStoredAgent(userWalletAddress);
   if (!agent) {
-    return { ok: false, error: "Hyperliquid trading session not ready. Approve the trading key first." };
+    return { ok: false, error: "Trading session not ready. Approve the trading key first." };
   }
 
   const assetIndex = await getAssetIndex(spec.coin);
@@ -1670,7 +1670,7 @@ export async function batchSyncOrdersToExchange(
 
   const agent = getStoredAgent(userWalletAddress);
   if (!agent) {
-    return { ok: false, error: "Hyperliquid trading session not ready. Approve the trading key first." };
+    return { ok: false, error: "Trading session not ready. Approve the trading key first." };
   }
 
   const coin0 = specs[0].coin;

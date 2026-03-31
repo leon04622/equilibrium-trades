@@ -387,7 +387,7 @@ function PatternChartComponent({
     document.addEventListener("pointercancel", onUp);
   }, [weights]);
 
-  // ── SMA status for signal card (SMMA via worker; same Hyperliquid formula) ──
+    // ── SMA status for signal card (SMMA via worker; same venue-native formula) ──
   useEffect(() => {
     if (!candles || candles.length < 21) {
       setSmaStatus(null);

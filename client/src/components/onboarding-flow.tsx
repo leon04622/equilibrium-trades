@@ -168,7 +168,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
 
       toast({
         title: "Account ready",
-        description: "Complete Hyperliquid setup from the trading page when you place your first order.",
+        description: "Complete trading setup from the trading page when you place your first order.",
       });
 
       if (onComplete) {
@@ -341,7 +341,7 @@ export function OnboardingFlow({ onComplete, compact = false }: OnboardingFlowPr
               <h4 className="font-medium">Verify wallet</h4>
               <p className="text-sm text-muted-foreground">
                 {step === "complete"
-                  ? "Signed in — Hyperliquid setup happens when you trade"
+                  ? "Signed in — exchange setup completes when you trade"
                   : "Sign once to create your Equilibrium account"}
               </p>
             </div>

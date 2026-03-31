@@ -1,7 +1,7 @@
 /**
  * STABLE TP/SL IMPLEMENTATION — DO NOT MODIFY WITHOUT FULL TESTING
  *
- * Hyperliquid-style overlay for TP/SL drag, tags, entry/PnL/liq. Canvas lines: `pattern-chart.tsx`.
+ * Native-style overlay for TP/SL drag, tags, entry/PnL/liq. Canvas lines: `pattern-chart.tsx`.
  * @see ../chart-tpsl/stable-contract.ts
  *
  * TP/SL interaction layer over lightweight-charts v5.

@@ -1,5 +1,5 @@
 /**
- * Map Hyperliquid perp/spot identifiers to TradingView advanced-chart symbols.
+ * Map venue perp/spot identifiers to TradingView advanced-chart symbols.
  * Spot markets use @N ids; pass baseName from tickers when available.
  */
 const TV_SPECIAL: Record<string, string> = {

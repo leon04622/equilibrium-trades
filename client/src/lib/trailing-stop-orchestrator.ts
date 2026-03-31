@@ -103,7 +103,7 @@ export function slLineColor(isLong: boolean, entry: number, sl: number): string 
 }
 
 /**
- * Hyperliquid-style callback: distance from mark to stop as fraction of mark.
+ * Venue-style callback: distance from mark to stop as fraction of mark.
  * Long: (mark - sl) / mark ; Short: (sl - mark) / mark
  */
 export function computeTrailingCallbackRateDecimal(

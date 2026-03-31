@@ -174,7 +174,7 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
                 {wrongChain ? (
                   <>
                     <p className="text-xs text-muted-foreground">
-                      Hyperliquid signing requires Arbitrum One (chain 42161).
+                      Trading setup requires Arbitrum One (chain 42161).
                     </p>
                     <Button
                       className="h-12 w-full text-base font-semibold"
@@ -199,9 +199,9 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
                 <p className="text-sm font-medium">3. One-time trading handshake</p>
                 <Alert className="border-muted py-2">
                   <AlertDescription className="text-[11px] leading-relaxed text-muted-foreground">
-                    Your wallet will prompt for Equilibrium sign-in (if not done yet), then Hyperliquid{" "}
+                    Your wallet will prompt for Equilibrium sign-in (if not done yet), then{" "}
                     <strong>approveAgent</strong> and <strong>approveBuilderFee</strong> for the platform builder.
-                    The first Hyperliquid action may include a one-time ~1 USDC activation debit per Hyperliquid rules.
+                    The first on-chain action may include a one-time ~1 USDC activation debit per exchange rules.
                   </AlertDescription>
                 </Alert>
                 {mobile && handshakeBusy && (

@@ -1,6 +1,6 @@
 /**
  * Read-only position / TP / SL labels aligned to the candlestick series.
- * Data comes only from TradingContext (Hyperliquid refreshAccount). No drag, edit, or local TP/SL state.
+ * Data comes only from TradingContext (refreshAccount). No drag, edit, or local TP/SL state.
  */
 import { useMemo, useState, useEffect, useRef, type CSSProperties } from "react";
 import { useTrading } from "@/lib/trading-context";

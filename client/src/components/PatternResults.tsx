@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 export interface PatternSignal {
   id: string;
   coin: string;
-  /** Human-readable market name when `coin` is a Hyperliquid spot `@index` id. */
+  /** Human-readable market name when `coin` is a spot `@index` id from the venue API. */
   coinDisplay?: string;
   timeframe: string;
   bias: "bullish" | "bearish" | "neutral";
@@ -236,7 +236,7 @@ export function PatternResults({
           <AlertTitle>Scan request failed</AlertTitle>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Scanning every Hyperliquid market ({timeframeScopeLabel}) can take a while; the request may time out on
+              Scanning every listed market ({timeframeScopeLabel}) can take a while; the request may time out on
               some hosts. Try again or ask ops to raise the HTTP timeout.{" "}
               {error instanceof Error ? error.message : ""}
             </span>

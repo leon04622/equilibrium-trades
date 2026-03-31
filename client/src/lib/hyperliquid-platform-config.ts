@@ -1,5 +1,5 @@
 /**
- * Single source of truth for platform revenue on Hyperliquid.
+ * Single source of truth for platform revenue on the connected execution venue.
  * Builder address is fixed for Equilibrium Trading (HL `approveBuilderFee` / order `builder` field).
  * Referral code may still be overridden with VITE_HL_REFERRAL_CODE.
  */

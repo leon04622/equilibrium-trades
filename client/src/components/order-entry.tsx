@@ -100,7 +100,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
     if (isPreparingHyperliquidSession) {
       toast({
         title: "Finishing setup",
-        description: "Complete any Hyperliquid prompts in your wallet, then try again.",
+        description: "Complete any wallet prompts for trading setup, then try again.",
       });
       return;
     }

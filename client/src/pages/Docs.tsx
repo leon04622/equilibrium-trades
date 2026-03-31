@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 
 /**
- * In-app documentation for users and external reviewers (e.g. Hyperliquid).
+ * In-app documentation for users and external reviewers.
  * Canonical Markdown twin: `docs/EQUILIBRIUM_PLATFORM.md` at repo root.
  */
 export default function Docs() {
@@ -19,7 +19,7 @@ export default function Docs() {
             </div>
             <h1 className="text-3xl font-bold font-display tracking-tight">Equilibrium Trading</h1>
             <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
-              Hyperliquid execution, AI pattern scanning, cleaner chart context, and a calmer workflow for learning,
+              Live execution, AI pattern scanning, cleaner chart context, and a calmer workflow for learning,
               scanning, and trading in one place.
             </p>
           </div>
@@ -34,7 +34,7 @@ export default function Docs() {
         <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
           <p>
             <strong className="text-foreground">Trading</strong> gives you live charts, order entry, position management,
-            and Hyperliquid execution in one workspace.
+            and order execution in one workspace.
           </p>
           <p>
             <strong className="text-foreground">AI Signals</strong> scans markets across multiple timeframes to surface
@@ -96,7 +96,7 @@ export default function Docs() {
                 <p className="font-medium text-foreground">Connect your wallet</p>
                 <p className="text-muted-foreground mt-1">
                   Connect on the site header. On <Link className="text-primary underline" to="/portfolio">Portfolio</Link>
-                  , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into Hyperliquid using{" "}
+                  , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into your trading account using{" "}
                   <strong>Circle CCTP</strong>. The deposit flow is built to be a direct USDC messaging route rather than
                   a swap-style bridge, and your progress is remembered if you need to come back later.
                 </p>
@@ -109,7 +109,7 @@ export default function Docs() {
               <div>
                 <p className="font-medium text-foreground">Approve builder fee &amp; trading session</p>
                 <p className="text-muted-foreground mt-1">
-                  Complete the one-time Hyperliquid trading setup when prompted so the platform can route orders cleanly
+                  Complete the one-time trading setup when prompted so the platform can route orders cleanly
                   and keep the trading workflow fast afterward.
                 </p>
               </div>

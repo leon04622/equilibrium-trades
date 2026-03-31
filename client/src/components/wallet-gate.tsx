@@ -93,9 +93,9 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
         <div className="w-full space-y-3">
           <p className="text-sm font-medium text-foreground">Connect your wallet to get started</p>
           <p className="text-xs text-muted-foreground text-left leading-relaxed">
-            Use a standard <strong>Ethereum (EVM)</strong> wallet (e.g. Rabby, MetaMask, Coinbase Wallet) — the same kind Hyperliquid supports.
-            You&apos;ll stay on Equilibrium; we don&apos;t send you to Hyperliquid&apos;s site. After connecting, you&apos;ll{" "}
-            <strong>sign in once</strong> (no gas), then complete Hyperliquid setup when you trade.
+            Use a standard <strong>Ethereum (EVM)</strong> wallet (e.g. Rabby, MetaMask, Coinbase Wallet).
+            You&apos;ll stay on Equilibrium. After connecting, you&apos;ll{" "}
+            <strong>sign in once</strong> (no gas), then complete one-time trading setup when you place orders.
           </p>
 
           {connectError && (
@@ -179,7 +179,7 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
                     On mobile, open this page inside your wallet app&apos;s browser, or use the &quot;Open in Rabby / MetaMask&quot; options when shown.
                   </li>
                   <li>
-                    Everything after that happens here — connect, approve builder access, then trade. No Hyperliquid website redirect.
+                    Everything after that happens here — connect, approve builder access, then trade. No third-party exchange website redirect.
                   </li>
                 </ul>
               </div>
