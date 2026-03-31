@@ -20,6 +20,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -34,7 +35,9 @@ import { useWallet } from "@/lib/wallet-context";
 import { useIsMasterAdmin } from "@/hooks/use-is-master-admin";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useChat } from "@/lib/chat-context";
+import { useSubscription } from "@/hooks/use-subscription";
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
 
 const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -97,6 +100,7 @@ function pathMatches(pathname: string, url: string): boolean {
 export function AppSidebar() {
   const { pathname } = useLocation();
   const { address } = useWallet();
+  const { tier, isSubscribed } = useSubscription();
   const { isMasterAdmin } = useIsMasterAdmin();
   const { isAdmin: isAppAdmin } = useIsAdmin();
   const showAdminNav = isMasterAdmin || isAppAdmin;
@@ -139,15 +143,39 @@ export function AppSidebar() {
     ? supportConversations.reduce((sum, c) => sum + c.unreadCount, 0)
     : 0;
 
+  const tierLabel =
+    tier === "mentoring"
+      ? "Mentoring"
+      : tier === "pro"
+        ? "Pro"
+        : "Standard";
+
   return (
-    <Sidebar>
-      <SidebarHeader className="p-4">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20">
-            <TrendingUp className="h-4 w-4 text-primary" />
+    <Sidebar className="bg-sidebar/95 backdrop-blur">
+      <SidebarHeader className="p-4 pb-3">
+        <div className="rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/30 p-3 shadow-sm">
+          <Link to="/" className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 ring-1 ring-primary/20">
+              <TrendingUp className="h-5 w-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">Equilibrium</p>
+              <p className="truncate text-[11px] text-muted-foreground">Trading workspace</p>
+            </div>
+          </Link>
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-sidebar-border/60 bg-background/70 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Membership</p>
+              <p className="truncate text-xs font-medium text-foreground">{tierLabel}</p>
+            </div>
+            <Badge
+              variant={isSubscribed ? "default" : "outline"}
+              className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px]"
+            >
+              {isSubscribed ? "Active" : "Explore"}
+            </Badge>
           </div>
-          <span className="font-semibold text-sm text-foreground">Trading Platform</span>
-        </Link>
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
@@ -304,6 +332,35 @@ export function AppSidebar() {
           </>
         )}
       </SidebarContent>
+
+      <SidebarFooter className="p-4 pt-2">
+        <div className="rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/25 p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">Need help fast?</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Open support without leaving your workflow.
+              </p>
+            </div>
+            <div className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(34,197,94,0.45)]" />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3 w-full justify-between bg-background/80"
+            onClick={() => (isMasterAdmin ? openSupportInbox() : openChat())}
+          >
+            <span>{isMasterAdmin ? "Open support inbox" : "Message support"}</span>
+            <MessageCircle className="h-4 w-4" />
+          </Button>
+          {address && (
+            <p className="mt-3 truncate text-[11px] text-muted-foreground">
+              Signed in: {address}
+            </p>
+          )}
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

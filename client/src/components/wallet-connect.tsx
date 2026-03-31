@@ -48,11 +48,16 @@ export function WalletConnect() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="gap-2" data-testid="button-wallet-menu">
+        <Button
+          variant="outline"
+          className="gap-2 rounded-xl border-primary/20 bg-background/80 shadow-sm backdrop-blur"
+          data-testid="button-wallet-menu"
+        >
+          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(34,197,94,0.45)]" />
           <Wallet className="h-4 w-4" />
           <span className="hidden sm:inline">{shortenAddress(address!)}</span>
           <span className="sm:hidden">{address!.slice(0, 4)}...</span>
-          <ChevronDown className="h-3 w-3" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

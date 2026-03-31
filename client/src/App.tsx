@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Sparkles } from "lucide-react";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -44,6 +45,30 @@ import NotFound from "@/pages/not-found";
 import { JournalView } from "@/components/JournalView";
 import { UserTierSync } from "@/components/user-tier-sync";
 
+const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; subtitle: string }> = [
+  { match: (pathname) => pathname === "/", title: "Dashboard", subtitle: "Signals, learning, and execution in one calm workspace." },
+  { match: (pathname) => pathname.startsWith("/trading"), title: "Trading Workspace", subtitle: "Move from structure to execution without context switching." },
+  { match: (pathname) => pathname.startsWith("/patterns"), title: "Pattern Library", subtitle: "Study the setup language behind cleaner decisions." },
+  { match: (pathname) => pathname.startsWith("/candles"), title: "Candlesticks", subtitle: "Learn the candle behaviour behind market intent." },
+  { match: (pathname) => pathname.startsWith("/learn"), title: "Courses", subtitle: "Structured lessons tied to the way the platform is actually used." },
+  { match: (pathname) => pathname.startsWith("/videos"), title: "Educational Vault", subtitle: "Premium lessons and walkthroughs for subscribed members." },
+  { match: (pathname) => pathname.startsWith("/signals"), title: "AI Signals", subtitle: "Review live pattern opportunities with more context." },
+  { match: (pathname) => pathname.startsWith("/heatmap"), title: "Heatmap", subtitle: "Track liquidity and hidden pressure across the book." },
+  { match: (pathname) => pathname.startsWith("/journal"), title: "Journal", subtitle: "Review decisions and reinforce disciplined execution." },
+  { match: (pathname) => pathname.startsWith("/portfolio"), title: "Portfolio", subtitle: "Keep balances, exposure, and performance in view." },
+  { match: (pathname) => pathname.startsWith("/pricing"), title: "Membership", subtitle: "Choose the level of access and guidance that fits you." },
+  { match: (pathname) => pathname.startsWith("/settings"), title: "Settings", subtitle: "Fine-tune the workspace around your routine." },
+  { match: (pathname) => pathname.startsWith("/docs"), title: "Docs", subtitle: "Reference workflows, implementation notes, and platform details." },
+  { match: (pathname) => pathname.startsWith("/admin"), title: "Command Center", subtitle: "Manage members, vault content, and support operations." },
+];
+
+function getPageMeta(pathname: string) {
+  return PAGE_META.find((item) => item.match(pathname)) ?? {
+    title: "Equilibrium",
+    subtitle: "Trading, education, and review in one connected workspace.",
+  };
+}
+
 function App() {
   const style = {
     "--sidebar-width": "16rem",
@@ -71,19 +96,7 @@ function App() {
                           <div className="flex w-full overflow-hidden" style={{ height: "100dvh" }}>
                             <AppSidebar />
                             <SidebarInset className="flex flex-col flex-1 min-w-0 overflow-hidden">
-                              <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-2 md:px-4 sticky top-0 z-50 bg-background">
-                                <div className="flex items-center gap-2">
-                                  <SidebarTrigger
-                                    className="border border-primary/30 bg-primary/10 text-primary"
-                                    data-testid="button-sidebar-toggle"
-                                  />
-                                  <span className="text-xs font-medium text-muted-foreground hidden sm:block">Menu</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <WalletConnect />
-                                  <ThemeToggle />
-                                </div>
-                              </header>
+                              <ShellHeader />
                               <TradingLayout />
                             </SidebarInset>
                           </div>
@@ -103,6 +116,42 @@ function App() {
         </AppErrorBoundary>
       </ThemeProvider>
     </QueryClientProvider>
+  );
+}
+
+function ShellHeader() {
+  const { pathname } = useLocation();
+  const meta = getPageMeta(pathname);
+
+  return (
+    <header className="sticky top-0 z-50 border-b bg-background/92 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:px-4">
+      <div className="flex h-16 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <SidebarTrigger
+            className="rounded-xl border border-primary/30 bg-primary/10 text-primary shadow-sm"
+            data-testid="button-sidebar-toggle"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="hidden text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground sm:inline">
+                Equilibrium
+              </span>
+              <span className="hidden h-1 w-1 rounded-full bg-primary/60 sm:inline-block" />
+              <span className="truncate text-base font-semibold text-foreground md:text-lg">{meta.title}</span>
+            </div>
+            <p className="hidden truncate text-sm text-muted-foreground md:block">{meta.subtitle}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground lg:flex">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            Professional workflow
+          </div>
+          <WalletConnect />
+          <ThemeToggle />
+        </div>
+      </div>
+    </header>
   );
 }
 

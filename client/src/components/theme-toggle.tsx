@@ -7,9 +7,10 @@ export function ThemeToggle() {
 
   return (
     <Button
-      variant="ghost"
+      variant="outline"
       size="icon"
       onClick={toggleTheme}
+      className="rounded-xl border-primary/20 bg-background/80 shadow-sm backdrop-blur"
       data-testid="button-theme-toggle"
     >
       {theme === "dark" ? (
