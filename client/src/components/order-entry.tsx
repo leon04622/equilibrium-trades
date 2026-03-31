@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck, Zap } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { computeTrailingCallbackRateDecimal } from "@/lib/trailing-stop-orchestrator";
 import { useWallet } from "@/lib/wallet-context";
@@ -235,14 +235,28 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
 
   return (
     <div className="flex flex-col gap-3 p-3">
+      <div className="rounded-2xl border border-primary/15 bg-primary/5 p-3 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Order Entry</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Build the trade with size, leverage, and protective levels before sending it live.
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/80 px-2 py-1 text-[10px] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            {isSpot ? "Spot" : "Perps"}
+          </div>
+        </div>
+      </div>
 
       {/* Market / Limit toggle */}
-      <div className="flex gap-1 p-0.5 bg-muted rounded-lg">
+      <div className="flex gap-1 rounded-xl bg-muted p-0.5">
         {(["market", "limit"] as const).map(t => (
           <button
             key={t}
             className={cn(
-              "flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-colors",
+              "flex-1 rounded-lg py-2 text-xs font-medium capitalize transition-colors",
               orderType === t
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -256,9 +270,11 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       </div>
 
       {/* Balance summary */}
-      <div className="flex justify-between text-[11px] text-muted-foreground">
-        <span>Available</span>
-        <span className="font-mono text-foreground">${fmt(balance)}</span>
+      <div className="rounded-xl border bg-card/60 px-3 py-2 text-[11px]">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Available</span>
+          <span className="font-mono text-foreground">${fmt(balance)}</span>
+        </div>
       </div>
 
       {/* Size */}
@@ -281,7 +297,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
             <button
               key={pct}
               onClick={() => setPercent(pct)}
-              className="h-6 text-[10px] font-mono rounded border border-border hover:bg-muted transition-colors"
+              className="h-7 rounded-lg border border-border bg-card text-[10px] font-mono transition-colors hover:bg-muted"
               data-testid={`size-pct-${pct}`}
             >
               {pct}%
@@ -345,8 +361,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
 
       {/* Spot info banner */}
       {isSpot && (
-        <div className="rounded-md bg-blue-500/10 border border-blue-500/20 px-3 py-2 text-[11px] text-blue-400">
-          Spot market — buying/selling the actual token, no leverage.
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-[11px] text-blue-400">
+          Spot market — buying and selling the actual token, with no leverage applied.
         </div>
       )}
 
@@ -380,7 +396,11 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
 
       {/* Order summary */}
       {getSizeNum() > 0 && (
-        <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] space-y-0.5">
+        <div className="rounded-xl border bg-muted/30 px-3 py-2 text-[11px] space-y-1.5">
+          <div className="flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            <Zap className="h-3 w-3" />
+            Order summary
+          </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Order Value</span>
             <span className="font-mono">${fmt(notionalValue)}</span>
@@ -395,7 +415,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       {/* Buy / Sell buttons */}
       <div className="grid grid-cols-2 gap-2 pt-1">
         <Button
-          className="h-11 font-semibold bg-bullish hover:bg-bullish/90 text-white"
+          className="h-11 rounded-xl font-semibold bg-bullish hover:bg-bullish/90 text-white shadow-lg shadow-emerald-500/10"
           onClick={() => handleSubmit(true)}
           disabled={isSubmitting}
           data-testid="button-buy-long"
@@ -403,7 +423,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
           {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : isSpot ? "Buy" : "Buy / Long"}
         </Button>
         <Button
-          className="h-11 font-semibold bg-bearish hover:bg-bearish/90 text-white"
+          className="h-11 rounded-xl font-semibold bg-bearish hover:bg-bearish/90 text-white shadow-lg shadow-rose-500/10"
           onClick={() => handleSubmit(false)}
           disabled={isSubmitting}
           data-testid="button-sell-short"

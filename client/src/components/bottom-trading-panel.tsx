@@ -281,10 +281,10 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
     <>
       <div className="border-t bg-card/50" data-testid="bottom-trading-panel">
         {/* Mobile: Collapsed header with expand button */}
-        <div className="flex items-center justify-between px-1 md:px-2 border-b">
+        <div className="flex items-center justify-between border-b bg-muted/20 px-1 md:px-2">
           {/* Mobile expand/collapse toggle */}
           <button 
-            className="md:hidden flex items-center gap-1 px-2 py-1.5 text-[10px] text-muted-foreground"
+            className="md:hidden flex items-center gap-1 px-2 py-2 text-[10px] text-muted-foreground"
             onClick={() => setMobileExpanded(!mobileExpanded)}
             data-testid="button-expand-panel"
           >
@@ -303,7 +303,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "px-2 md:px-3 py-1.5 md:py-2 text-[10px] md:text-xs font-medium transition-colors relative whitespace-nowrap",
+                  "px-2 md:px-3 py-2 md:py-2.5 text-[10px] md:text-xs font-medium transition-colors relative whitespace-nowrap",
                   activeTab === tab.id 
                     ? "text-foreground" 
                     : "text-muted-foreground hover:text-foreground"
