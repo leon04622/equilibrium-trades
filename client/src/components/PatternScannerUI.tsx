@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { RefreshCw, Activity, X } from "lucide-react";
+import { RefreshCw, Activity, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { SCAN_ALL_TIMEFRAMES, type ScanTimeframe } from "@shared/scan-timeframes";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useWallet } from "@/lib/wallet-context";
+import { Input } from "@/components/ui/input";
 import {
   PatternResults,
   type PatternSignal,
@@ -48,32 +49,16 @@ function isFastTf(tf: string): boolean {
 
 type ScannerMarketsPayload = { tickers: string[]; displayByCoin?: Record<string, string> };
 
-function playSetupChime(): void {
-  try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = "sine";
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.frequency.value = 880;
-    g.gain.setValueAtTime(0.07, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-    o.start(ctx.currentTime);
-    o.stop(ctx.currentTime + 0.22);
-  } catch {
-    /* ignore */
-  }
-}
-
 async function fetchPatternScanPayload(
   timeframes: string,
   wallet: string | null | undefined,
   nocache: boolean,
+  coinsParam?: string,
 ): Promise<PatternScanPayload> {
-  const qs = `timeframes=${encodeURIComponent(timeframes)}` + (nocache ? "&nocache=1" : "");
+  const qs =
+    `timeframes=${encodeURIComponent(timeframes)}` +
+    (nocache ? "&nocache=1" : "") +
+    (coinsParam?.trim() ? `&coins=${encodeURIComponent(coinsParam)}` : "");
   const response = await fetch(`/api/signals/patterns?${qs}`, {
     headers: scannerAuthHeaders(wallet),
   });
@@ -98,17 +83,17 @@ async function fetchPatternScanPayload(
   return { patterns, meta };
 }
 
-type ScanAlert = { key: string; coin: string; coinDisplay?: string; timeframe: string; patternName: string };
+function normalizeScanText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
 
 /** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
   const { address } = useWallet();
   const forceNocacheRef = useRef(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const scanHydratedRef = useRef(false);
-  const prevIdsRef = useRef<Set<string>>(new Set());
-  const [alerts, setAlerts] = useState<ScanAlert[]>([]);
   const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>("all");
+  const [scanQuery, setScanQuery] = useState("");
 
   const marketsQuery = useQuery<ScannerMarketsPayload>({
     queryKey: ["/api/scanner/markets"],
@@ -123,6 +108,40 @@ export function PatternScannerUI() {
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
   const displayByCoin = marketsQuery.data?.displayByCoin;
+  const searchTerms = useMemo(
+    () =>
+      scanQuery
+        .split(",")
+        .map((term) => term.trim())
+        .filter(Boolean),
+    [scanQuery],
+  );
+  const matchedScanCoins = useMemo(() => {
+    if (searchTerms.length === 0) return [];
+    const tickers = marketsQuery.data?.tickers ?? [];
+    const out = new Set<string>();
+    for (const term of searchTerms) {
+      const norm = normalizeScanText(term);
+      for (const coin of tickers) {
+        const label = displayByCoin?.[coin] || coin;
+        const rawNorm = normalizeScanText(coin);
+        const labelNorm = normalizeScanText(label);
+        if (
+          rawNorm === norm ||
+          labelNorm === norm ||
+          rawNorm.includes(norm) ||
+          labelNorm.includes(norm)
+        ) {
+          out.add(coin);
+        }
+      }
+    }
+    return [...out];
+  }, [searchTerms, marketsQuery.data?.tickers, displayByCoin]);
+  const scopedCoinsParam = matchedScanCoins.join(",");
+  const usingSearchScope = searchTerms.length > 0;
+  const noSearchMatches = usingSearchScope && matchedScanCoins.length === 0;
+  const effectiveUniverseCount = usingSearchScope ? matchedScanCoins.length : universeCount;
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -142,10 +161,10 @@ export function PatternScannerUI() {
     selectedTimeframe === "all" ? "all timeframes" : `${selectedTimeframe} only`;
 
   const fastQuery = useQuery<PatternScanPayload>({
-    queryKey: ["/api/signals/patterns", "fast", fastTfParam, address ?? ""],
-    enabled: fastTfParam.length > 0,
+    queryKey: ["/api/signals/patterns", "fast", fastTfParam, scopedCoinsParam, address ?? ""],
+    enabled: fastTfParam.length > 0 && !noSearchMatches,
     queryFn: () =>
-      fetchPatternScanPayload(fastTfParam, address, forceNocacheRef.current),
+      fetchPatternScanPayload(fastTfParam, address, forceNocacheRef.current, scopedCoinsParam),
     refetchInterval: (q) =>
       q.state.status === "error" || !fastTfParam ? false : 10_000,
     staleTime: 5_000,
@@ -153,10 +172,10 @@ export function PatternScannerUI() {
   });
 
   const slowQuery = useQuery<PatternScanPayload>({
-    queryKey: ["/api/signals/patterns", "slow", slowTfParam, address ?? ""],
-    enabled: slowTfParam.length > 0,
+    queryKey: ["/api/signals/patterns", "slow", slowTfParam, scopedCoinsParam, address ?? ""],
+    enabled: slowTfParam.length > 0 && !noSearchMatches,
     queryFn: () =>
-      fetchPatternScanPayload(slowTfParam, address, forceNocacheRef.current),
+      fetchPatternScanPayload(slowTfParam, address, forceNocacheRef.current, scopedCoinsParam),
     refetchInterval: (q) =>
       q.state.status === "error" || !slowTfParam ? false : 180_000,
     staleTime: 120_000,
@@ -236,38 +255,6 @@ export function PatternScannerUI() {
     }
   }, [isFetching]);
 
-  useEffect(() => {
-    scanHydratedRef.current = false;
-    prevIdsRef.current = new Set();
-  }, [selectedTimeframe]);
-
-  useEffect(() => {
-    if (isError || isLoading) return;
-    const nowIds = new Set(signals.map((s) => s.id));
-    if (!scanHydratedRef.current) {
-      scanHydratedRef.current = true;
-      prevIdsRef.current = nowIds;
-      return;
-    }
-    const incoming: ScanAlert[] = [];
-    for (const s of signals) {
-      if (!prevIdsRef.current.has(s.id)) {
-        incoming.push({
-          key: `${s.id}-${Date.now()}`,
-          coin: s.coin,
-          coinDisplay: s.coinDisplay,
-          timeframe: s.timeframe,
-          patternName: s.patternName,
-        });
-      }
-    }
-    prevIdsRef.current = nowIds;
-    if (incoming.length > 0) {
-      playSetupChime();
-      setAlerts((prev) => [...incoming, ...prev].slice(0, 12));
-    }
-  }, [signals, isError, isLoading]);
-
   const tabRows = useMemo(() => {
     const formingSignals = signals.filter((s) => s.patternStatus === "forming");
     const developedSignals = signals.filter(
@@ -279,10 +266,6 @@ export function PatternScannerUI() {
       developedSignals,
     };
   }, [signals]);
-
-  const dismissAlert = (key: string) => {
-    setAlerts((prev) => prev.filter((a) => a.key !== key));
-  };
 
   return (
     <div className="p-3 md:p-6 space-y-4 md:space-y-6 overflow-y-auto">
@@ -326,11 +309,35 @@ export function PatternScannerUI() {
 
       <div className="flex flex-wrap items-center gap-2 text-[10px] md:text-xs">
         <div className="rounded-full border bg-card/40 px-3 py-1.5 text-muted-foreground">
-          Universe: <strong className="text-foreground">{universeCount ?? "..."}</strong> markets
+          Universe: <strong className="text-foreground">{effectiveUniverseCount ?? "..."}</strong> markets
         </div>
         <div className="rounded-full border bg-card/40 px-3 py-1.5 text-muted-foreground">
           Mode: <strong className="text-foreground">{selectedTimeframe === "all" ? "All timeframes" : selectedTimeframe}</strong>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <p className="text-[10px] md:text-xs text-muted-foreground font-medium uppercase tracking-wide">Scan markets</p>
+        <div className="relative max-w-xl">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={scanQuery}
+            onChange={(e) => setScanQuery(e.target.value)}
+            placeholder="Type BTC, ETH, SOL, BTC-USDC, or comma-separated markets"
+            className="pl-9"
+            data-testid="input-scan-markets"
+          />
+        </div>
+        <p className="text-[10px] md:text-xs text-muted-foreground">
+          Leave blank to scan the whole universe. Type one or more markets to scan only matching tickers.
+        </p>
+        {usingSearchScope ? (
+          <p className="text-[10px] md:text-xs text-muted-foreground">
+            {matchedScanCoins.length > 0
+              ? `Scanning ${matchedScanCoins.length} matching market${matchedScanCoins.length === 1 ? "" : "s"}.`
+              : "No markets matched that search yet."}
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">
@@ -356,38 +363,7 @@ export function PatternScannerUI() {
         </ToggleGroup>
       </div>
 
-      {alerts.length > 0 ? (
-        <Alert className="border-emerald-500/40 bg-emerald-500/[0.07]">
-          <AlertTitle className="text-sm">New patterns</AlertTitle>
-          <AlertDescription className="space-y-2">
-            {alerts.map((a) => (
-              <div
-                key={a.key}
-                className="flex items-start justify-between gap-2 text-xs sm:text-sm text-muted-foreground"
-              >
-                <span>
-                  <strong className="text-foreground" title={a.coin}>
-                    {a.coinDisplay ?? a.coin}
-                  </strong>{" "}
-                  {a.timeframe} — {a.patternName}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0"
-                  onClick={() => dismissAlert(a.key)}
-                  aria-label="Dismiss"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {universeCount != null && universeCount < 25 ? (
+      {!usingSearchScope && universeCount != null && universeCount < 25 ? (
         <Alert className="border-amber-500/40 bg-amber-500/[0.06]">
           <AlertTitle className="text-sm">Limited market universe ({universeCount} symbols)</AlertTitle>
           <AlertDescription className="text-xs text-muted-foreground">
@@ -398,19 +374,30 @@ export function PatternScannerUI() {
         </Alert>
       ) : null}
 
-      <PatternResults
-        signals={signals}
-        tabRows={tabRows}
-        isLoading={isLoading}
-        isFetching={isFetching}
-        isError={isError}
-        error={error}
-        scanMeta={scanMeta}
-        scanHasCompleted={scanHasCompleted}
-        refetchAll={refetchAll}
-        timeframeScopeLabel={timeframeScopeLabel}
-        singleFastTimeframeOnly={selectedTimeframe !== "all" && isFastTf(selectedTimeframe)}
-      />
+      {noSearchMatches ? (
+        <Alert>
+          <AlertTitle className="text-sm">No matching markets</AlertTitle>
+          <AlertDescription className="text-xs text-muted-foreground">
+            Try a broader search like <code>BTC</code> or <code>ETH</code>, or clear the input to scan the full universe.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!noSearchMatches ? (
+        <PatternResults
+          signals={signals}
+          tabRows={tabRows}
+          isLoading={isLoading}
+          isFetching={isFetching}
+          isError={isError}
+          error={error}
+          scanMeta={scanMeta}
+          scanHasCompleted={scanHasCompleted}
+          refetchAll={refetchAll}
+          timeframeScopeLabel={timeframeScopeLabel}
+          singleFastTimeframeOnly={selectedTimeframe !== "all" && isFastTf(selectedTimeframe)}
+        />
+      ) : null}
     </div>
   );
 }
