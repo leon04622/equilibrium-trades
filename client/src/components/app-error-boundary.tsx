@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle } from "lucide-react";
+import { StatePanel } from "@/components/state-panel";
 
 interface Props {
   children: ReactNode;
@@ -35,26 +36,29 @@ export class AppErrorBoundary extends Component<Props, State> {
           .join("") || null;
 
       return (
-        <div className="min-h-dvh flex flex-col items-center justify-center gap-4 p-6 bg-background text-foreground">
-          <p className="text-lg font-semibold">Something went wrong</p>
-          <p className="text-sm text-muted-foreground text-center max-w-md">
-            This app hit an unexpected error. Try reloading. If this persists after connecting your wallet,
-            disconnect in your wallet extension and refresh.
-          </p>
-          <pre className="text-xs text-destructive/90 max-w-lg max-h-32 overflow-auto rounded border border-border p-2 bg-muted/30">
-            {err.message}
-          </pre>
+        <div className="min-h-dvh bg-background p-6 text-foreground">
+          <div className="mx-auto flex min-h-dvh max-w-3xl items-center justify-center">
+            <div className="w-full space-y-4">
+              <StatePanel
+                icon={<AlertTriangle className="h-6 w-6" />}
+                title="Something interrupted the workspace"
+                description="The app hit an unexpected error. Reload the page first. If it happens again after connecting your wallet, disconnect in your wallet extension and try once more."
+                actionLabel="Reload page"
+                onAction={() => window.location.reload()}
+              />
+              <pre className="max-h-32 overflow-auto rounded-xl border border-border bg-muted/30 p-3 text-xs text-destructive/90 shadow-sm">
+                {err.message}
+              </pre>
+            </div>
+          </div>
           {details ? (
-            <details className="w-full max-w-lg text-left text-xs text-muted-foreground">
+            <details className="mx-auto w-full max-w-lg text-left text-xs text-muted-foreground">
               <summary className="cursor-pointer select-none text-foreground/80">Technical details</summary>
               <pre className="mt-2 max-h-48 overflow-auto rounded border border-border bg-muted/30 p-2 whitespace-pre-wrap break-words">
                 {details}
               </pre>
             </details>
           ) : null}
-          <Button type="button" onClick={() => window.location.reload()}>
-            Reload page
-          </Button>
         </div>
       );
     }

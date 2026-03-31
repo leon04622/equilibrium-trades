@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GraduationCap, Loader2, Lock, Play, Sparkles, X, Clock3, ShieldCheck, Film } from "lucide-react";
+import { GraduationCap, Loader2, Lock, Play, Sparkles, X, Clock3, ShieldCheck, Film, SearchX } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ import {
 } from "@/lib/video-vault";
 import type { AcademySection, TutorialVideo } from "@shared/schema";
 import ReactPlayer from "react-player";
+import { StatePanel } from "@/components/state-panel";
 
 export type VaultItem = {
   id: string;
@@ -297,9 +298,14 @@ export default function VideoVault() {
 
   if (listLoading) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-6 bg-background">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
-        <p className="text-sm text-muted-foreground">Loading Educational Vault…</p>
+      <div className="max-w-6xl mx-auto min-h-[60vh] bg-background p-4 md:p-6">
+        <StatePanel
+          loading
+          icon={<Loader2 className="h-6 w-6" />}
+          title="Loading Educational Vault"
+          description="Pulling down the latest premium lessons and playback data from the live vault."
+          className="min-h-[60vh]"
+        />
       </div>
     );
   }
@@ -410,18 +416,23 @@ export default function VideoVault() {
           )}
 
           {listError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-center space-y-3">
-              <p className="text-sm text-muted-foreground">
-                {listErrorObj instanceof Error ? listErrorObj.message : "Could not load the video library."}
-              </p>
-              <Button variant="outline" size="sm" onClick={() => void refetchVideos()}>
-                Try again
-              </Button>
-            </div>
+            <StatePanel
+              icon={<SearchX className="h-6 w-6" />}
+              title="The vault couldn't be loaded"
+              description={
+                listErrorObj instanceof Error ? listErrorObj.message : "Could not load the video library."
+              }
+              actionLabel="Try again"
+              onAction={() => void refetchVideos()}
+              contentClassName="min-h-[260px]"
+            />
           ) : items.length === 0 ? (
-            <p className="text-center text-muted-foreground py-12 text-sm">
-              No videos in the library yet. An admin can add lessons from the Command Center → Videos tab.
-            </p>
+            <StatePanel
+              icon={<Film className="h-6 w-6" />}
+              title="The vault is ready for its first lesson"
+              description="No videos are published yet. As soon as an admin adds lessons, they will appear here for members."
+              contentClassName="min-h-[260px]"
+            />
           ) : (
             vaultGroups.map((group) => (
               <section key={group.title} className="space-y-4">

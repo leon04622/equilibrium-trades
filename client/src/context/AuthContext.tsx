@@ -1,9 +1,9 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
-import { Button } from "@/components/ui/button";
 import { isMasterBypassWallet } from "@/lib/master-bypass-wallets";
+import { StatePanel } from "@/components/state-panel";
 
 export type SubscriptionSyncSlice = {
   tier: "free" | "pro" | "mentoring" | "elite";
@@ -127,21 +127,30 @@ export function SubscriptionPersistenceGate({ children }: { children: ReactNode 
   if (needsWalletHydration && !masterBypass) {
     if (isSyncError) {
       return (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-background p-6">
-          <p className="text-center text-sm text-muted-foreground max-w-md">
-            Could not verify subscription. Your tier is loaded from the server — try again.
-          </p>
-          <Button type="button" onClick={() => void refetch()}>
-            Retry sync
-          </Button>
+        <div className="fixed inset-0 z-[100] bg-background p-6">
+          <div className="mx-auto flex h-full max-w-2xl items-center justify-center">
+            <StatePanel
+              icon={<AlertTriangle className="h-6 w-6" />}
+              title="We couldn't verify this account yet"
+              description="Your access tier is loaded from the live server. Retry once now and the workspace should continue as normal."
+              actionLabel="Retry sync"
+              onAction={() => void refetch()}
+            />
+          </div>
         </div>
       );
     }
     if (!subscriptionHydrated) {
       return (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-background">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden />
-          <p className="text-sm text-muted-foreground">Loading your account…</p>
+        <div className="fixed inset-0 z-[100] bg-background p-6">
+          <div className="mx-auto flex h-full max-w-2xl items-center justify-center">
+            <StatePanel
+              loading
+              icon={<Loader2 className="h-6 w-6" />}
+              title="Loading your account"
+              description="Bringing in your access tier, journal state, and workspace details from the live platform."
+            />
+          </div>
         </div>
       );
     }

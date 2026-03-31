@@ -21,6 +21,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { StatePanel } from "@/components/state-panel";
 
 const NEGATIVE_RR_TOOLTIP =
   "Institutional Tip: Always aim for at least 2:1 Reward-to-Risk to stay profitable long-term.";
@@ -272,14 +273,22 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
           </CardHeader>
           <CardContent>
             {entriesQuery.isLoading ? (
-              <div className="flex justify-center py-12 text-muted-foreground text-sm">
-                <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                Loading journal…
-              </div>
+              <StatePanel
+                loading
+                icon={<Loader2 className="h-6 w-6" />}
+                title="Loading journal"
+                description="Pulling your latest execution notes, trade history, and statistics into the workspace."
+                className="border-none bg-transparent shadow-none"
+                contentClassName="min-h-[240px] px-0"
+              />
             ) : entries.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-10">
-                No journal rows yet. Execute a trade on the Trading tab to create your first entry.
-              </p>
+              <StatePanel
+                icon={<NotebookPen className="h-6 w-6" />}
+                title="Your journal is ready"
+                description="No journal rows yet. Execute a trade on the Trading tab and your first entry will appear here."
+                className="border-none bg-transparent shadow-none"
+                contentClassName="min-h-[220px] px-0"
+              />
             ) : (
               <ScrollArea className={cn(variant === "embedded" ? "h-[min(380px,45vh)]" : "h-[min(560px,60vh)]")}>
                 <Table>
