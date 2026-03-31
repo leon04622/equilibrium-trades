@@ -51,9 +51,9 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
   const [connectingWallet, setConnectingWallet] = useState<WalletType | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const handleConnect = async (walletType: WalletType) => {
+  const handleConnect = async (walletType?: WalletType) => {
     setLocalError(null);
-    setConnectingWallet(walletType);
+    setConnectingWallet(walletType ?? null);
     try {
       await connect(walletType);
       onConnect?.();
@@ -94,7 +94,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
           <SheetTitle>Connect your wallet to start</SheetTitle>
           <SheetDescription>
             {isMobile
-              ? "Open Equilibrium inside your wallet app’s browser (MetaMask, Coinbase, Rabby, etc.) or use WalletConnect from a desktop browser to deep-link into your phone wallet."
+              ? "From Safari or Chrome, open the app in Rabby or MetaMask — the site will prompt to connect automatically when it loads. If you already opened this page inside Rabby or MetaMask, tap Connect in this browser below."
               : "Select your wallet below. Any EVM-compatible wallet works; on mobile, prefer your wallet’s in-app browser or WalletConnect for a smooth handoff."}
           </SheetDescription>
         </SheetHeader>
@@ -117,8 +117,28 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
           {isMobile ? (
             /* ── Mobile ── */
             <>
+              {(detectedWallets.length > 0 || (typeof window !== "undefined" && !!(window as unknown as { ethereum?: unknown }).ethereum)) && (
+                <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 space-y-2 mb-2">
+                  <p className="text-xs font-medium text-foreground">Already in Rabby, MetaMask, or another wallet browser?</p>
+                  <Button
+                    className="w-full h-12"
+                    onClick={() => handleConnect()}
+                    disabled={isConnecting}
+                    data-testid="button-connect-in-wallet-browser"
+                  >
+                    {isConnecting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Connecting…
+                      </>
+                    ) : (
+                      "Connect wallet in this browser"
+                    )}
+                  </Button>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground pb-1">
-                Tap a wallet to open this site inside its built-in browser.
+                Or open this site inside a wallet app from Safari / Chrome:
               </p>
               <Button
                 variant="outline"

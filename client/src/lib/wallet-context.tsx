@@ -214,6 +214,9 @@ function resolveInjectedProvider(
 }
 
 const WALLET_DISCONNECTED_KEY = 'wallet_user_disconnected';
+/** Query + sessionStorage: survives Safari/Chrome → Rabby WebView where storage from the system browser does not. */
+const WALLET_HANDOFF_QS = "eq_wallet_handoff";
+const WALLET_HANDOFF_SESSION_KEY = "eq_wallet_handoff_pending";
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
@@ -261,6 +264,105 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("eip6963:announceProvider", on6963);
     };
   }, [rebuildDetectedWallets]);
+
+  /**
+   * Mobile: opening Rabby/MetaMask from system browser loads this URL in the wallet WebView.
+   * `sessionStorage` set *before* the handoff does not carry over, so we add `?eq_wallet_handoff=rabby`
+   * (mirrored into sessionStorage here) and retry `eth_requestAccounts` until EIP-6963 exposes the provider.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(WALLET_DISCONNECTED_KEY) === "true") return;
+    if (address) {
+      try {
+        sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    try {
+      const url = new URL(window.location.href);
+      let fromUrl = url.searchParams.get(WALLET_HANDOFF_QS);
+      if (!fromUrl && url.hash.length > 1) {
+        const hp = new URLSearchParams(url.hash.slice(1));
+        fromUrl = hp.get(WALLET_HANDOFF_QS);
+      }
+      if (fromUrl === "rabby" || fromUrl === "metamask") {
+        url.searchParams.delete(WALLET_HANDOFF_QS);
+        if (url.hash.length > 1) {
+          const hp = new URLSearchParams(url.hash.slice(1));
+          hp.delete(WALLET_HANDOFF_QS);
+          const rest = hp.toString();
+          url.hash = rest ? `#${rest}` : "";
+        }
+        const next = `${url.pathname}${url.search}${url.hash}`;
+        window.history.replaceState({}, document.title, next);
+        sessionStorage.setItem(WALLET_HANDOFF_SESSION_KEY, fromUrl);
+      }
+    } catch {
+      /* ignore invalid URL */
+    }
+
+    let pending: string | null = null;
+    try {
+      pending = sessionStorage.getItem(WALLET_HANDOFF_SESSION_KEY);
+    } catch {
+      pending = null;
+    }
+    if (pending !== "rabby" && pending !== "metamask") return;
+
+    const walletType = pending as "rabby" | "metamask";
+    let cancelled = false;
+
+    void (async () => {
+      for (let attempt = 0; attempt < 12; attempt++) {
+        if (cancelled || localStorage.getItem(WALLET_DISCONNECTED_KEY) === "true") return;
+
+        const rawProvider = resolveInjectedProvider(walletType, eip6963MapRef.current);
+        if (rawProvider?.request) {
+          try {
+            setIsConnecting(true);
+            const accounts = await rawProvider.request({ method: "eth_requestAccounts" });
+            if (accounts?.length) {
+              activeInjectedRef.current = rawProvider;
+              const browserProvider = new BrowserProvider(rawProvider);
+              const browserSigner = await browserProvider.getSigner();
+              const network = await browserProvider.getNetwork();
+              setProvider(browserProvider);
+              setSigner(browserSigner);
+              setAddress(accounts[0]);
+              setChainId(Number(network.chainId));
+              try {
+                sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
+                sessionStorage.removeItem("metamask_deep_link_pending");
+                sessionStorage.removeItem("rabby_deep_link_pending");
+              } catch {
+                /* ignore */
+              }
+              return;
+            }
+          } catch (err) {
+            console.warn("[Wallet] Mobile handoff connect attempt:", err);
+          } finally {
+            setIsConnecting(false);
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, 320));
+      }
+      try {
+        sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
 
   const confirmBuilderCodeApproved = useCallback(() => {
     setBuilderCodeApproved(true);
@@ -471,8 +573,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (wasDisconnected) return;
       
       if (document.visibilityState === "visible" && isMobile && !address) {
+        let handoffStored: string | null = null;
+        try {
+          handoffStored = sessionStorage.getItem(WALLET_HANDOFF_SESSION_KEY);
+        } catch {
+          handoffStored = null;
+        }
+        const pendingHandoff =
+          handoffStored === "rabby" || handoffStored === "metamask" ? handoffStored : null;
+
         const raw =
-          resolveInjectedProvider(undefined, eip6963MapRef.current) ?? window.ethereum;
+          (pendingHandoff
+            ? resolveInjectedProvider(pendingHandoff, eip6963MapRef.current)
+            : null) ??
+          resolveInjectedProvider(undefined, eip6963MapRef.current) ??
+          window.ethereum;
         if (!raw?.request) return;
         try {
           const accounts = await raw.request({ method: "eth_accounts" });
@@ -486,6 +601,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             setSigner(browserSigner);
             setAddress(accounts[0]);
             setChainId(Number(network.chainId));
+            try {
+              sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
+            } catch {
+              /* ignore */
+            }
           }
         } catch (error) {
           console.error("Error reconnecting on visibility change:", error);
@@ -498,19 +618,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [isMobile, address]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
-    const path = `${window.location.pathname}${window.location.search}`;
-    const hostPath = `${window.location.host}${path}`;
+    const u = new URL(window.location.href);
 
     if (walletType === "metamask") {
-      sessionStorage.setItem("metamask_deep_link_pending", "true");
-      sessionStorage.removeItem("rabby_deep_link_pending");
+      u.searchParams.set(WALLET_HANDOFF_QS, "metamask");
+      const hp = new URLSearchParams(u.hash.startsWith("#") ? u.hash.slice(1) : "");
+      hp.set(WALLET_HANDOFF_QS, "metamask");
+      u.hash = hp.toString() ? `#${hp.toString()}` : `#${WALLET_HANDOFF_QS}=metamask`;
+      try {
+        sessionStorage.setItem("metamask_deep_link_pending", "true");
+        sessionStorage.removeItem("rabby_deep_link_pending");
+      } catch {
+        /* ignore */
+      }
+      const hostPath = `${u.host}${u.pathname}${u.search}${u.hash}`;
       window.location.href = `https://metamask.app.link/dapp/${hostPath}`;
       return;
     }
     if (walletType === "rabby") {
-      sessionStorage.setItem("rabby_deep_link_pending", "true");
-      sessionStorage.removeItem("metamask_deep_link_pending");
-      const fullUrl = `${window.location.origin}${path}`;
+      u.searchParams.set(WALLET_HANDOFF_QS, "rabby");
+      const hp = new URLSearchParams(u.hash.startsWith("#") ? u.hash.slice(1) : "");
+      hp.set(WALLET_HANDOFF_QS, "rabby");
+      u.hash = hp.toString() ? `#${hp.toString()}` : `#${WALLET_HANDOFF_QS}=rabby`;
+      try {
+        sessionStorage.setItem("rabby_deep_link_pending", "true");
+        sessionStorage.removeItem("metamask_deep_link_pending");
+      } catch {
+        /* ignore */
+      }
+      const fullUrl = u.toString();
       window.location.href = `rabby://dapp?url=${encodeURIComponent(fullUrl)}`;
       return;
     }
@@ -577,6 +713,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     const prev = address;
     localStorage.setItem(WALLET_DISCONNECTED_KEY, 'true');
+    try {
+      sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
+      sessionStorage.removeItem("metamask_deep_link_pending");
+      sessionStorage.removeItem("rabby_deep_link_pending");
+    } catch {
+      /* ignore */
+    }
     activeInjectedRef.current = null;
     if (prev) {
       clearHyperliquidTradingSession(prev);

@@ -127,7 +127,7 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
                 <ArrowRight className="h-4 w-4 ml-auto" />
               </Button>
               <p className="text-xs text-muted-foreground">
-                After the app opens, unlock your wallet and use Connect when this page loads.
+                After the app opens, unlock Rabby — the site usually connects automatically. If you still see this screen, tap Connect below (visible once you are inside the wallet browser).
               </p>
             </>
           ) : hasWallet ? (
