@@ -500,7 +500,30 @@ export const tradeGradeInputSchema = z.object({
 
 export type TradeGradeInput = z.infer<typeof tradeGradeInputSchema>;
 
-// ── Professional Trade Journal (Mongo `trade_journal` + in-memory fallback) ──
+// ── Professional Trade Journal (Mongo or Postgres, with in-memory dev fallback) ──
+
+export const tradeJournalEntriesTable = pgTable("trade_journal_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletAddress: text("wallet_address").notNull(),
+  pair: text("pair").notNull(),
+  coin: text("coin").notNull(),
+  side: text("side").notNull(),
+  entryPrice: real("entry_price").notNull(),
+  size: real("size").notNull(),
+  openedAt: timestamp("opened_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  stopLoss: real("stop_loss"),
+  takeProfit: real("take_profit"),
+  leverage: real("leverage").notNull().default(1),
+  notes: text("notes").notNull().default(""),
+  patternStatusAtEntry: text("pattern_status_at_entry"),
+  entryGrade: text("entry_grade").notNull(),
+  negativeRR: boolean("negative_rr").notNull().default(false),
+  rewardRiskRatio: real("reward_risk_ratio"),
+  status: text("status").notNull().default("open"),
+  exitPrice: real("exit_price"),
+  realizedPnl: real("realized_pnl"),
+  closedAt: timestamp("closed_at"),
+});
 
 export type TradeJournalPatternStatus = "forming" | "developed" | "breakout_watch";
 
@@ -536,8 +559,8 @@ export interface TradeJournalStats {
   totalProfitLoss: number | null;
   closedTradesCount: number;
   openTradesCount: number;
-  /** `mongodb` = history survives deploy/restart; `memory` = server process only (set MONGO_VAULT_URI). */
-  storageBackend: "mongodb" | "memory";
+  /** `mongodb` / `postgres` survive deploys; `memory` is process-only. */
+  storageBackend: "mongodb" | "postgres" | "memory";
 }
 
 export const tradeJournalCreateBodySchema = z.object({

@@ -78,7 +78,7 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
     staleTime: 60_000,
   });
 
-  /** When false, journal rows live only in this server process (no Mongo vault). */
+  /** When false, journal rows live only in this server process (no Postgres / Mongo persistence). */
   const journalPersisted = journalConfigQuery.data?.persistedToVault !== false;
 
   const statsQuery = useQuery({
@@ -201,9 +201,8 @@ export function JournalView({ variant = "page" }: JournalViewProps) {
           <Alert className="border-amber-500/50 bg-amber-950/25 text-amber-100 [&>svg]:text-amber-300">
             <AlertTitle className="text-amber-200">Journal not persisted to disk</AlertTitle>
             <AlertDescription className="text-amber-100/90 text-sm">
-              The server is running without MongoDB (<code className="text-xs">MONGO_VAULT_URI</code>). Trades are
-              kept only in this server process — log out, restart, or scale instances can clear them. Configure Mongo
-              for full history across sessions.
+              The server is running without persistent journal storage. Trades are kept only in this server process,
+              so restarts or scaling can clear them. Configure PostgreSQL or MongoDB for full history across sessions.
             </AlertDescription>
           </Alert>
         )}

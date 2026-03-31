@@ -93,7 +93,9 @@ import {
   updateTradeJournalNotes,
   closeLatestOpenJournalEntry,
   getTradeJournalStats,
+  getTradeJournalStorageBackend,
   isTradeJournalBackedByMongo,
+  isTradeJournalPersisted,
 } from "./trade-journal-store";
 import { getDatabaseStatus } from "./db";
 
@@ -120,12 +122,12 @@ function requirePersistentSubscriptionAccessBackend(res: Response): boolean {
 }
 
 function requirePersistentTradeJournalBackend(res: Response): boolean {
-  if (!shouldRejectEphemeralWrites() || isTradeJournalBackedByMongo()) {
+  if (!shouldRejectEphemeralWrites() || isTradeJournalPersisted()) {
     return true;
   }
   res.status(503).json({
     error:
-      "Trade journal persistence is unavailable. Connect MongoDB with MONGO_VAULT_URI before saving journal entries in production.",
+      "Trade journal persistence is unavailable. Configure PostgreSQL DATABASE_URL or MongoDB MONGO_VAULT_URI before saving journal entries in production.",
   });
   return false;
 }
@@ -1291,7 +1293,8 @@ export async function registerRoutes(
 
   app.get("/api/trade-journal/config", (_req: Request, res: Response) => {
     try {
-      res.json({ persistedToVault: isTradeJournalBackedByMongo() });
+      const storageBackend = getTradeJournalStorageBackend();
+      res.json({ persistedToVault: storageBackend !== "memory", storageBackend });
     } catch (error) {
       console.error("GET /api/trade-journal/config:", error);
       res.status(500).json({ error: "Failed to read journal config" });
@@ -1814,7 +1817,7 @@ export async function registerRoutes(
         journal: {
           entries,
           stats,
-          persistedToVault: isTradeJournalBackedByMongo(),
+          persistedToVault: isTradeJournalPersisted(),
         },
       });
     } catch (error) {

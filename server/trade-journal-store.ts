@@ -1,8 +1,10 @@
 import { randomUUID } from "crypto";
 import type { Collection, Document } from "mongodb";
 import { getVaultDb } from "./mongo-vault";
-import type { TradeJournalEntry, TradeJournalStats } from "@shared/schema";
+import { tradeJournalEntriesTable, type TradeJournalEntry, type TradeJournalStats } from "@shared/schema";
 import { computePlannedRewardRisk, journalEntryGrade } from "./trade-journal-logic";
+import { db } from "./db";
+import { desc, eq } from "drizzle-orm";
 
 const COLL_NAME = process.env.MONGO_TRADE_JOURNAL_COLLECTION?.trim() || "trade_journal";
 
@@ -38,9 +40,24 @@ function coll(): Collection<Document> | null {
   return db ? db.collection(COLL_NAME) : null;
 }
 
-/** True when the journal uses MongoDB (`trade_journal`); false means in-memory only for this server process. */
+function hasPostgresJournal(): boolean {
+  return db != null;
+}
+
+export function getTradeJournalStorageBackend(): TradeJournalStats["storageBackend"] {
+  if (coll()) return "mongodb";
+  if (hasPostgresJournal()) return "postgres";
+  return "memory";
+}
+
+/** True when the journal uses persistent storage (Mongo or Postgres). */
+export function isTradeJournalPersisted(): boolean {
+  return getTradeJournalStorageBackend() !== "memory";
+}
+
+/** @deprecated Prefer `getTradeJournalStorageBackend` / `isTradeJournalPersisted`. */
 export function isTradeJournalBackedByMongo(): boolean {
-  return coll() != null;
+  return getTradeJournalStorageBackend() === "mongodb";
 }
 
 function docToApi(d: TradeJournalDoc): TradeJournalEntry {
@@ -101,6 +118,32 @@ function parseDoc(raw: Document): TradeJournalDoc {
   };
 }
 
+function parsePgRow(raw: any): TradeJournalDoc {
+  return {
+    id: String(raw.id),
+    walletAddress: String(raw.walletAddress || "").toLowerCase(),
+    pair: String(raw.pair ?? ""),
+    coin: String(raw.coin ?? ""),
+    side: raw.side === "short" ? "short" : "long",
+    entryPrice: Number(raw.entryPrice),
+    size: Number(raw.size),
+    openedAt: raw.openedAt instanceof Date ? raw.openedAt : new Date(String(raw.openedAt || Date.now())),
+    stopLoss: raw.stopLoss == null ? null : Number(raw.stopLoss),
+    takeProfit: raw.takeProfit == null ? null : Number(raw.takeProfit),
+    leverage: Number(raw.leverage ?? 1) || 1,
+    notes: String(raw.notes ?? ""),
+    patternStatusAtEntry: raw.patternStatusAtEntry != null ? String(raw.patternStatusAtEntry) : null,
+    entryGrade: raw.entryGrade === "A" ? "A" : "Speculative",
+    negativeRR: Boolean(raw.negativeRR),
+    rewardRiskRatio: raw.rewardRiskRatio == null || raw.rewardRiskRatio === "" ? null : Number(raw.rewardRiskRatio),
+    status: raw.status === "closed" ? "closed" : "open",
+    exitPrice: raw.exitPrice == null ? null : Number(raw.exitPrice),
+    realizedPnl: raw.realizedPnl == null ? null : Number(raw.realizedPnl),
+    closedAt:
+      raw.closedAt == null ? null : raw.closedAt instanceof Date ? raw.closedAt : new Date(String(raw.closedAt)),
+  };
+}
+
 export async function insertTradeJournalEntry(input: {
   walletAddress: string;
   pair: string;
@@ -152,6 +195,29 @@ export async function insertTradeJournalEntry(input: {
   const c = coll();
   if (c) {
     await c.insertOne({ ...doc } as Document);
+  } else if (db) {
+    await db.insert(tradeJournalEntriesTable).values({
+      id: doc.id,
+      walletAddress: doc.walletAddress,
+      pair: doc.pair,
+      coin: doc.coin,
+      side: doc.side,
+      entryPrice: doc.entryPrice,
+      size: doc.size,
+      openedAt: doc.openedAt,
+      stopLoss: doc.stopLoss,
+      takeProfit: doc.takeProfit,
+      leverage: doc.leverage,
+      notes: doc.notes,
+      patternStatusAtEntry: doc.patternStatusAtEntry,
+      entryGrade: doc.entryGrade,
+      negativeRR: doc.negativeRR,
+      rewardRiskRatio: doc.rewardRiskRatio,
+      status: doc.status,
+      exitPrice: doc.exitPrice,
+      realizedPnl: doc.realizedPnl,
+      closedAt: doc.closedAt,
+    });
   } else {
     memoryById.set(id, doc);
   }
@@ -168,6 +234,14 @@ export async function listTradeJournalEntries(walletAddress: string, limit = 10_
       .limit(Math.min(limit, 100_000))
       .toArray();
     return rows.map((r) => docToApi(parseDoc(r)));
+  } else if (db) {
+    const rows = await db
+      .select()
+      .from(tradeJournalEntriesTable)
+      .where(eq(tradeJournalEntriesTable.walletAddress, w))
+      .orderBy(desc(tradeJournalEntriesTable.openedAt))
+      .limit(Math.min(limit, 100_000));
+    return rows.map((r) => docToApi(parsePgRow(r)));
   }
   return Array.from(memoryById.values())
     .filter((d) => d.walletAddress === w)
@@ -192,6 +266,19 @@ export async function updateTradeJournalNotes(
     const v = await c.findOne({ id, walletAddress: w });
     if (!v) return null;
     return docToApi(parseDoc(v as Document));
+  } else if (db) {
+    const rows = await db
+      .select()
+      .from(tradeJournalEntriesTable)
+      .where(eq(tradeJournalEntriesTable.walletAddress, w));
+    const row = rows.find((r) => r.id === id);
+    if (!row) return null;
+    await db
+      .update(tradeJournalEntriesTable)
+      .set({ notes: String(notes).slice(0, 4000) })
+      .where(eq(tradeJournalEntriesTable.id, id));
+    const [updated] = await db.select().from(tradeJournalEntriesTable).where(eq(tradeJournalEntriesTable.id, id));
+    return updated ? docToApi(parsePgRow(updated)) : null;
   }
   const mem = memoryById.get(id);
   if (!mem || mem.walletAddress !== w) return null;
@@ -237,6 +324,27 @@ export async function closeLatestOpenJournalEntry(input: {
     const v = await c.findOne({ id, walletAddress: w });
     if (!v) return null;
     return docToApi(parseDoc(v as Document));
+  } else if (db) {
+    const rows = await db
+      .select()
+      .from(tradeJournalEntriesTable)
+      .where(eq(tradeJournalEntriesTable.walletAddress, w))
+      .orderBy(desc(tradeJournalEntriesTable.openedAt));
+    const found = rows.find(
+      (r) => r.coin === input.coin && r.side === input.side && r.status === "open",
+    );
+    if (!found) return null;
+    await db
+      .update(tradeJournalEntriesTable)
+      .set({
+        status: "closed",
+        exitPrice: input.exitPrice,
+        realizedPnl: input.realizedPnl,
+        closedAt: now,
+      })
+      .where(eq(tradeJournalEntriesTable.id, found.id));
+    const [updated] = await db.select().from(tradeJournalEntriesTable).where(eq(tradeJournalEntriesTable.id, found.id));
+    return updated ? docToApi(parsePgRow(updated)) : null;
   }
 
   const candidates = Array.from(memoryById.values()).filter(
@@ -259,7 +367,7 @@ export async function closeLatestOpenJournalEntry(input: {
 export async function getTradeJournalStats(walletAddress: string): Promise<TradeJournalStats> {
   const w = walletAddress.toLowerCase();
   const c = coll();
-  const storageBackend = c ? "mongodb" : "memory";
+  const storageBackend = getTradeJournalStorageBackend();
 
   if (c) {
     const openTradesCount = await c.countDocuments({ walletAddress: w, status: "open" });
@@ -328,6 +436,41 @@ export async function getTradeJournalStats(walletAddress: string): Promise<Trade
       avgRewardRisk,
       totalProfitLoss: row!.totalPnl,
       closedTradesCount,
+      openTradesCount,
+      storageBackend,
+    };
+  }
+
+  if (db) {
+    const entries = await listTradeJournalEntries(walletAddress, 100_000);
+    const closed = entries.filter((e) => e.status === "closed" && e.realizedPnl != null);
+    const openTradesCount = entries.filter((e) => e.status === "open").length;
+
+    if (closed.length === 0) {
+      return {
+        winRatePercent: null,
+        avgRewardRisk: null,
+        totalProfitLoss: null,
+        closedTradesCount: 0,
+        openTradesCount,
+        storageBackend,
+      };
+    }
+
+    const wins = closed.filter((e) => (e.realizedPnl ?? 0) > 0).length;
+    const winRatePercent = (wins / closed.length) * 100;
+    const rrVals = closed
+      .map((e) => e.rewardRiskRatio)
+      .filter((x): x is number => x != null && Number.isFinite(x));
+    const avgRewardRisk =
+      rrVals.length > 0 ? rrVals.reduce((a, b) => a + b, 0) / rrVals.length : null;
+    const totalProfitLoss = closed.reduce((s, e) => s + (e.realizedPnl ?? 0), 0);
+
+    return {
+      winRatePercent,
+      avgRewardRisk,
+      totalProfitLoss,
+      closedTradesCount: closed.length,
       openTradesCount,
       storageBackend,
     };

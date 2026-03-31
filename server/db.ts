@@ -177,7 +177,31 @@ export async function ensurePostgresCoreTables(): Promise<void> {
         graded_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log("[db] Ensured tables tutorial_videos, support_tickets, wallet_users, leads, trade_grades (CREATE IF NOT EXISTS).");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trade_journal_entries (
+        id varchar PRIMARY KEY DEFAULT (gen_random_uuid()::text) NOT NULL,
+        wallet_address text NOT NULL,
+        pair text NOT NULL,
+        coin text NOT NULL,
+        side text NOT NULL,
+        entry_price real NOT NULL,
+        size real NOT NULL,
+        opened_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        stop_loss real,
+        take_profit real,
+        leverage real NOT NULL DEFAULT 1,
+        notes text NOT NULL DEFAULT '',
+        pattern_status_at_entry text,
+        entry_grade text NOT NULL,
+        negative_rr boolean NOT NULL DEFAULT false,
+        reward_risk_ratio real,
+        status text NOT NULL DEFAULT 'open',
+        exit_price real,
+        realized_pnl real,
+        closed_at timestamp
+      );
+    `);
+    console.log("[db] Ensured tables tutorial_videos, support_tickets, wallet_users, leads, trade_grades, trade_journal_entries (CREATE IF NOT EXISTS).");
   } catch (err) {
     console.error("[db] ensurePostgresCoreTables failed:", err);
   } finally {
