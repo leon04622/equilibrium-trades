@@ -4,9 +4,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { useUserSync } from "@/context/AuthContext";
-import { Wallet } from "lucide-react";
+import { ShieldCheck, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
+import { StatePanel } from "@/components/state-panel";
 
 export function AccountEquity() {
   const {
@@ -39,32 +40,30 @@ export function AccountEquity() {
 
   if (!connected) {
     return (
-      <div className="border rounded-lg p-4 bg-card">
-        <div className="text-center space-y-3">
-          <p className="text-sm text-muted-foreground">Connect wallet to view account</p>
-          <Button
-            size="sm"
-            onClick={() => connect()}
-            className="gap-2"
-            data-testid="button-connect-equity"
-          >
-            <Wallet className="h-4 w-4" />
-            Connect Wallet
-          </Button>
-        </div>
-      </div>
+      <StatePanel
+        icon={<Wallet className="h-6 w-6" />}
+        title="Connect a wallet to unlock account controls"
+        description="View unified balance, collateral health, and funding controls the moment your wallet is connected."
+        actionLabel="Connect wallet"
+        onAction={() => connect()}
+        className="bg-card"
+        contentClassName="min-h-[260px]"
+      />
     );
   }
 
   return (
-    <div className="border rounded-lg bg-card">
-      <div className="flex items-center justify-between p-3 border-b">
-        <span className="text-sm font-semibold">Account Equity</span>
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+      <div className="flex items-center justify-between border-b bg-muted/20 p-3">
+        <div>
+          <span className="text-sm font-semibold">Account Equity</span>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Live collateral overview</p>
+        </div>
         <div className="flex items-center gap-1">
           <Button
             variant="default"
             size="sm"
-            className="h-7 text-xs bg-primary"
+            className="h-8 rounded-lg text-xs"
             onClick={() => navigate("/")}
             data-testid="button-deposit"
           >
@@ -73,7 +72,7 @@ export function AccountEquity() {
           <Button
             variant="outline"
             size="sm"
-            className="h-7 text-xs"
+            className="h-8 rounded-lg text-xs bg-background/80"
             onClick={() => navigate("/")}
             data-testid="button-withdraw"
           >
@@ -82,7 +81,7 @@ export function AccountEquity() {
         </div>
       </div>
 
-      <div className="p-3 space-y-2 text-xs">
+      <div className="space-y-3 p-3 text-xs">
         {isLoadingAccount ? (
           <div className="space-y-2">
             <Skeleton className="h-4 w-full" />
@@ -91,9 +90,17 @@ export function AccountEquity() {
           </div>
         ) : (
           <>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Unified total (perp + spot USDC)</span>
-              <span className="font-mono font-semibold">{formatValue(displayUnified)}</span>
+            <div className="rounded-xl border border-primary/15 bg-primary/5 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Unified total
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
+                  <ShieldCheck className="h-3 w-3 text-primary" />
+                  Perp + spot
+                </span>
+              </div>
+              <div className="mt-2 font-mono text-2xl font-semibold">{formatValue(displayUnified)}</div>
             </div>
 
             <div className="flex justify-between text-[11px]">
@@ -157,7 +164,7 @@ export function AccountEquity() {
             </div>
 
             {displayUnified === 0 && (
-              <div className="mt-3 p-2 bg-amber-500/10 rounded text-[10px] text-center">
+              <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[10px] text-center">
                 <p className="text-muted-foreground">
                   Deposit funds to start trading. Visit the{" "}
                   <button
