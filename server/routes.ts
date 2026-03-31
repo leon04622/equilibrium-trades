@@ -56,6 +56,7 @@ import {
   fetchCctpBurnForwardFeeMax,
   fetchCircleAttestation,
 } from "./deposit-service";
+import { listAllVaultVideos, upsertVaultVideo, deleteVaultVideoById } from "./video-service";
 import {
   getScannerHealthSnapshot,
   getScannerHealthMonitoringEnabled,
@@ -741,6 +742,71 @@ function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>
   });
 }
 
+function apiVideoFromStoredVideo(v: {
+  id: string;
+  title: string;
+  description: string;
+  duration: string | null;
+  category: string;
+  youtubeId: string | null;
+  videoPath: string | null;
+  thumbnailPath: string | null;
+  academySection: string | null;
+  createdAt: Date | string | null;
+}) {
+  return {
+    id: v.id,
+    title: v.title,
+    description: v.description,
+    duration: v.duration ?? "",
+    category: v.category,
+    youtubeId: v.youtubeId ?? null,
+    videoPath: v.videoPath ?? null,
+    thumbnailPath: v.thumbnailPath ?? null,
+    academySection: v.academySection ?? null,
+    createdAt:
+      v.createdAt instanceof Date
+        ? v.createdAt.toISOString()
+        : v.createdAt != null
+          ? String(v.createdAt)
+          : null,
+  };
+}
+
+function normalizeVaultLocator(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  try {
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      const u = new URL(s);
+      return `${u.pathname}${u.search}`.toLowerCase();
+    }
+  } catch {
+    // keep raw fallback below
+  }
+  return s.toLowerCase();
+}
+
+function dedupeVaultVideos(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    const youtubeId = String(row.youtubeId ?? "").trim().toLowerCase();
+    const videoPath = normalizeVaultLocator(row.videoPath);
+    const title = String(row.title ?? "").trim().toLowerCase();
+    const category = String(row.category ?? "").trim().toLowerCase();
+    const academySection = String(row.academySection ?? "").trim().toLowerCase();
+    const key =
+      youtubeId ||
+      videoPath ||
+      `${title}::${category}::${academySection}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
 function canViewTradeJournalTarget(req: Request, targetWallet: string): boolean {
   const t = targetWallet.trim().toLowerCase();
   const self = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
@@ -795,9 +861,6 @@ async function resolveScanCoins(coinsParam?: string): Promise<string[]> {
 
 /** POST /api/videos and POST /api/admin/videos — sovereign wallet only (`x-wallet-address` or Bearer wallet). */
 async function persistCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  if (mongoVaultHandle) {
-    return mongoVaultHandle.handlePostVideo(req, res);
-  }
   const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
@@ -831,6 +894,14 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
       thumbnailPath: row.thumbnailPath ?? null,
       academySection: row.academySection,
     });
+    const vaultDb = getVaultDb();
+    if (vaultDb) {
+      try {
+        await upsertVaultVideo(vaultDb, row);
+      } catch (mongoError) {
+        console.error("POST /api/videos Mongo mirror failed:", mongoError);
+      }
+    }
     res.json(video);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -840,9 +911,6 @@ async function persistCommandCenterVideo(req: Request, res: Response): Promise<v
 }
 
 async function deleteCommandCenterVideo(req: Request, res: Response): Promise<void> {
-  if (mongoVaultHandle) {
-    return mongoVaultHandle.handleDeleteVideo(req, res);
-  }
   const walletAddress = resolveWalletAddressFromRequest(req)?.trim();
   if (!walletAddress) {
     res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
@@ -853,8 +921,18 @@ async function deleteCommandCenterVideo(req: Request, res: Response): Promise<vo
     return;
   }
   try {
-    const deleted = await storage.deleteVideo(req.params.id);
-    if (deleted) res.json({ success: true });
+    const deletedPg = await storage.deleteVideo(req.params.id);
+    let deletedMongo = false;
+    const vaultDb = getVaultDb();
+    if (vaultDb) {
+      try {
+        const mongoResult = await deleteVaultVideoById(vaultDb, req.params.id);
+        deletedMongo = mongoResult.ok;
+      } catch (mongoError) {
+        console.error("DELETE /api/videos/:id Mongo mirror failed:", mongoError);
+      }
+    }
+    if (deletedPg || deletedMongo) res.json({ success: true });
     else res.status(404).json({ error: "Video not found" });
   } catch (error) {
     console.error("DELETE /api/videos/:id:", error);
@@ -1600,30 +1678,18 @@ export async function registerRoutes(
 
   // Tutorial Videos API — Mongo only when vault connected (`server/video-service.ts`); no session; public catalog.
   app.get("/api/videos", async (req: Request, res: Response) => {
-    if (mongoVaultHandle) {
-      return mongoVaultHandle.handleGetVideos(req, res);
-    }
     try {
-      const videos = await storage.getAllVideos();
-      res.json(
-        videos.map((v) => ({
-          id: v.id,
-          title: v.title,
-          description: v.description,
-          duration: v.duration ?? "",
-          category: v.category,
-          youtubeId: v.youtubeId ?? null,
-          videoPath: v.videoPath ?? null,
-          thumbnailPath: v.thumbnailPath ?? null,
-          academySection: v.academySection ?? null,
-          createdAt:
-            v.createdAt instanceof Date
-              ? v.createdAt.toISOString()
-              : v.createdAt != null
-                ? v.createdAt
-                : null,
-        })),
-      );
+      const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
+      const host = req.get("host");
+      const origin = host && proto ? `${proto}://${host}`.replace(/\/$/, "") : getPublicAppBaseUrl();
+      const pgVideos = (await storage.getAllVideos()).map((v) => apiVideoFromStoredVideo(v));
+      const vaultDb = getVaultDb();
+      const mongoVideos = vaultDb ? await listAllVaultVideos(vaultDb, origin) : [];
+      const merged = dedupeVaultVideos([
+        ...pgVideos,
+        ...mongoVideos.map((row) => row as Record<string, unknown>),
+      ]);
+      res.json(merged);
     } catch (error) {
       console.error("Error fetching videos:", error);
       res.status(500).json({ error: "Failed to fetch videos" });
