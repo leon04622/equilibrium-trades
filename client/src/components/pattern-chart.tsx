@@ -74,6 +74,17 @@ const GRID = "#1e2535";
 const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
 const HANDLE_PX = 6;
+const CHART_HISTORY_LIMITS: Record<string, number> = {
+  "1m": 2500,
+  "3m": 3000,
+  "5m": 3000,
+  "15m": 4000,
+  "30m": 5000,
+  "1h": 5000,
+  "2h": 5000,
+  "4h": 5000,
+  "1d": 5000,
+};
 
 function calcSMA(vals: number[], times: Time[], period: number): { time: Time; value: number }[] {
   const out: { time: Time; value: number }[] = [];
@@ -229,6 +240,7 @@ function PatternChartComponent({
   const [lastD, setLastD] = useState<number | null>(null);
   const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
   const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
+  const [lastRenderedDataKey, setLastRenderedDataKey] = useState<string>("");
 
   const { theme } = useTheme();
   const { positions, openOrders } = useTrading();
@@ -243,7 +255,8 @@ function PatternChartComponent({
     const ALL_INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
     ALL_INTERVALS.forEach((tf) => {
       if (tf === interval) return;
-      const key = `/api/hyperliquid/candles/${coin}?interval=${tf}&limit=500`;
+      const limit = CHART_HISTORY_LIMITS[tf] ?? 3000;
+      const key = `/api/hyperliquid/candles/${coin}?interval=${tf}&limit=${limit}`;
       queryClient.prefetchQuery({
         queryKey: [key],
         staleTime: 30000,
@@ -263,7 +276,8 @@ function PatternChartComponent({
     setActiveSignal(null);
   }, [coin, interval]);
 
-  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=500`;
+  const historyLimit = CHART_HISTORY_LIMITS[interval] ?? 3000;
+  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=${historyLimit}`;
   const cachedCandles = useMemo(() => loadCachedCandles(coin, interval), [coin, interval]);
 
   const {
@@ -275,7 +289,12 @@ function PatternChartComponent({
   } = useQuery<CandleData[]>({
     // candlesLoading kept for React Query semantics; UI uses cache-aware flags below
     queryKey: [candleQueryKey],
-    placeholderData: cachedCandles.length > 0 ? (cachedCandles as CandleData[]) : undefined,
+    placeholderData: (previousData) =>
+      previousData && previousData.length > 0
+        ? previousData
+        : cachedCandles.length > 0
+          ? (cachedCandles as CandleData[])
+          : undefined,
     refetchInterval: 10_000,
     staleTime: 8000,
     retry: false,
@@ -303,7 +322,12 @@ function PatternChartComponent({
   const hasRenderableCandles = (candles?.length ?? 0) > 0;
   const showChartLoadingOverlay = candlesFetching && !hasRenderableCandles;
   const showNoDataFallback =
-    candlesFetched && !hasRenderableCandles && !candlesFetching && (candlesError || !candlesLoading);
+    candlesFetched &&
+    !hasRenderableCandles &&
+    !candlesFetching &&
+    !chartDataReadyRef.current &&
+    lastRenderedDataKey !== `${coin}:${interval}` &&
+    (candlesError || !candlesLoading);
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
     queryKey: ["/api/signals/patterns", coin, interval],
@@ -688,6 +712,7 @@ function PatternChartComponent({
         prevCandlesLenRef.current = sorted.length;
         prevLastTimeRef.current = lastCandle.t;
         chartDataReadyRef.current = true;
+        setLastRenderedDataKey(dataKey);
         return;
       }
 
@@ -776,6 +801,8 @@ function PatternChartComponent({
 
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
+      chartDataReadyRef.current = true;
+      setLastRenderedDataKey(dataKey);
     })();
   }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]);
 

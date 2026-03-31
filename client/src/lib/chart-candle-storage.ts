@@ -1,5 +1,5 @@
 const PREFIX = "eq_chart_candles_v1";
-const MAX = 500;
+const MAX = 5000;
 
 export type StoredCandle = {
   t: number;
@@ -27,6 +27,7 @@ export function loadCachedCandles(coin: string, interval: string): StoredCandle[
 }
 
 export function saveCachedCandles(coin: string, interval: string, candles: StoredCandle[]): void {
+  if (!Array.isArray(candles) || candles.length === 0) return;
   try {
     const trimmed = candles.length > MAX ? candles.slice(-MAX) : candles;
     localStorage.setItem(candleStorageKey(coin, interval), JSON.stringify(trimmed));

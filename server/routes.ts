@@ -1298,8 +1298,19 @@ export async function registerRoutes(
   app.post("/api/hyperliquid/candles/:coin/prewarm", async (req: Request, res: Response) => {
     const coin = req.params.coin;
     const ALL_INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
+    const chartHistoryLimits: Record<string, number> = {
+      "1m": 2500,
+      "3m": 3000,
+      "5m": 3000,
+      "15m": 4000,
+      "30m": 5000,
+      "1h": 5000,
+      "2h": 5000,
+      "4h": 5000,
+      "1d": 5000,
+    };
     // Fire all in parallel, don't await — respond immediately
-    Promise.all(ALL_INTERVALS.map(tf => getCandles(coin, tf))).catch(() => {});
+    Promise.all(ALL_INTERVALS.map((tf) => getCandles(coin, tf, undefined, undefined, chartHistoryLimits[tf] ?? 3000))).catch(() => {});
     res.json({ ok: true });
   });
 
