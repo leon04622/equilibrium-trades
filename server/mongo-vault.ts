@@ -522,6 +522,55 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
  * Admin / billing: hard-write subscription fields to the CRM `users` collection (findOneAndUpdate + upsert).
  * Ensures Pro/Mentor survives refresh even if a later partial `$set` omitted tier fields.
  */
+/**
+ * Stripe Checkout completed with `metadata.referral_wallet` — attribute referrer on the buyer's CRM row.
+ * Idempotent: repeated webhooks refresh `referralAttributedAt` / session id.
+ */
+export async function persistMongoCrmReferralFromStripeCheckout(params: {
+  buyerWallet: string;
+  referralWallet: string;
+  stripeSessionId: string;
+}): Promise<void> {
+  if (!vaultDb) return;
+  const buyer = params.buyerWallet.trim().toLowerCase();
+  const ref = params.referralWallet.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(buyer) || !/^0x[a-f0-9]{40}$/.test(ref)) return;
+  if (buyer === ref) return;
+  const coll = vaultDb.collection(mongoCrmUsersCollectionName());
+  const now = new Date();
+  await coll.updateOne(
+    { $or: [{ wallet: buyer }, { walletAddress: buyer }] },
+    {
+      $set: {
+        referralWallet: ref,
+        referralStripeSessionId: params.stripeSessionId,
+        referralAttributedAt: now,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        wallet: buyer,
+        walletAddress: buyer,
+        source: "stripe_referral_webhook",
+        joinDate: now,
+        createdAt: now,
+        subTier: "Free",
+        subscriptionTier: "free",
+        subscriptionActive: false,
+        manualProOverride: false,
+        accessExpires: null,
+        subscriptionExpiresAt: null,
+        status: "Active",
+        isBuilderLinked: false,
+        email: null,
+      },
+    },
+    { upsert: true },
+  );
+  console.log(
+    `[mongo-vault] CRM referral attributed: buyer=${buyer.slice(0, 8)}… referrer=${ref.slice(0, 8)}… session=${params.stripeSessionId}`,
+  );
+}
+
 export async function upsertMongoCrmSubscriptionAuthority(params: {
   walletAddress: string;
   subscriptionTier: "free" | "pro" | "mentoring" | "elite";
@@ -588,9 +637,14 @@ function mongoDocToCrmRow(u: Document) {
       status = active && expOk ? "Active" : "Expired";
     }
   }
+  const referralWallet =
+    u.referralWallet != null && String(u.referralWallet).trim() !== ""
+      ? String(u.referralWallet).trim().toLowerCase()
+      : null;
   return {
     wallet,
     email: u.email != null && u.email !== "" ? String(u.email) : null,
+    referralWallet,
     joinDate:
       u.joinDate != null
         ? u.joinDate instanceof Date
@@ -736,6 +790,7 @@ function createHandle(db: Db): MongoVaultHandle {
           out.push({
             wallet: w,
             email: u.email != null && String(u.email).trim() ? String(u.email).trim() : null,
+            referralWallet: null,
             joinDate,
             subTier: crmDisplayTier(u.subscriptionTier),
             status: crmSubscriptionStatusFromWallet(u),

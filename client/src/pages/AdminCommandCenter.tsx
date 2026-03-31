@@ -50,6 +50,7 @@ const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Tr
 type CrmRow = {
   wallet: string;
   email: string | null;
+  referralWallet?: string | null;
   joinDate: string | null;
   subTier: string;
   status?: string;
@@ -57,7 +58,14 @@ type CrmRow = {
   builderStatus?: string;
 };
 
-type SortKey = "wallet" | "email" | "joinDate" | "subTier" | "status" | "builderStatus";
+type SortKey =
+  | "wallet"
+  | "email"
+  | "referralWallet"
+  | "joinDate"
+  | "subTier"
+  | "status"
+  | "builderStatus";
 
 type ScannerHealthSnapshot = {
   monitoringEnabled: boolean;
@@ -112,6 +120,11 @@ function sortCrmRows(rows: CrmRow[], key: SortKey, dir: "asc" | "desc"): CrmRow[
       vb = (b.builderStatus || "").toLowerCase();
       return va.localeCompare(vb) * mult;
     }
+    if (key === "referralWallet") {
+      va = (a.referralWallet || "").toLowerCase();
+      vb = (b.referralWallet || "").toLowerCase();
+      return va.localeCompare(vb) * mult;
+    }
     va = String(a[key as "wallet" | "email" | "subTier"] ?? "").toLowerCase();
     vb = String(b[key as "wallet" | "email" | "subTier"] ?? "").toLowerCase();
     return va.localeCompare(vb) * mult;
@@ -161,6 +174,7 @@ export default function AdminCommandCenter() {
       (r) =>
         r.wallet.toLowerCase().includes(q) ||
         (r.email && r.email.toLowerCase().includes(q)) ||
+        (r.referralWallet && r.referralWallet.toLowerCase().includes(q)) ||
         (r.subTier && r.subTier.toLowerCase().includes(q)) ||
         (r.builderStatus && r.builderStatus.toLowerCase().includes(q)),
     );
@@ -606,6 +620,16 @@ export default function AdminCommandCenter() {
                           <button
                             type="button"
                             className="inline-flex items-center gap-1 font-medium hover:text-primary"
+                            onClick={() => toggleSort("referralWallet")}
+                          >
+                            Referral
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
+                          </button>
+                        </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 font-medium hover:text-primary"
                             onClick={() => toggleSort("joinDate")}
                           >
                             Join date
@@ -662,6 +686,9 @@ export default function AdminCommandCenter() {
                               </button>
                             </TableCell>
                             <TableCell className="text-sm align-top">{row.email || "—"}</TableCell>
+                            <TableCell className="font-mono text-[10px] align-top break-all max-w-[140px] text-muted-foreground">
+                              {row.referralWallet || "—"}
+                            </TableCell>
                             <TableCell className="text-xs text-muted-foreground align-top whitespace-nowrap">
                               {row.joinDate ? new Date(row.joinDate).toLocaleDateString() : "—"}
                             </TableCell>

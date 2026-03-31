@@ -1739,6 +1739,7 @@ export async function registerRoutes(
         rows.map((u) => ({
           wallet: u.walletAddress,
           email: u.email ?? null,
+          referralWallet: null as string | null,
           joinDate:
             u.createdAt instanceof Date
               ? u.createdAt.toISOString()

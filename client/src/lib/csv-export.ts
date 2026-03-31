@@ -1,6 +1,7 @@
 export type CrmCsvExportRow = {
   wallet: string;
   email?: string | null;
+  referralWallet?: string | null;
   joinDate?: string | null;
   subTier: string;
   status?: string;
@@ -18,6 +19,7 @@ export function escapeCsvCell(value: string): string {
 const CRM_CSV_HEADERS = [
   "wallet",
   "email",
+  "referralWallet",
   "joinDate",
   "subTier",
   "status",

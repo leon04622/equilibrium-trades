@@ -22,6 +22,7 @@ describe("crmUsersToCsv", () => {
       {
         wallet: "0xabc",
         email: "u@x.com",
+        referralWallet: null,
         joinDate: "2024-01-01",
         subTier: "Pro",
         status: "active",
@@ -29,7 +30,9 @@ describe("crmUsersToCsv", () => {
         builderStatus: "ok",
       },
     ]);
-    expect(csv.startsWith("wallet,email,joinDate,subTier,status,manualProOverride,builderStatus")).toBe(true);
+    expect(
+      csv.startsWith("wallet,email,referralWallet,joinDate,subTier,status,manualProOverride,builderStatus"),
+    ).toBe(true);
     expect(csv).toContain("0xabc");
     expect(csv).toContain("u@x.com");
   });
