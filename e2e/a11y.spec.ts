@@ -5,13 +5,8 @@ import AxeBuilder from "@axe-core/playwright";
  * WCAG-oriented scans on public routes. Rules tuned to avoid flaky third-party
  * embed noise while catching real app regressions.
  */
-const axe = (page: Page) =>
-  new AxeBuilder({ page })
-    .disableRules([
-      // Color-contrast false positives on gradient / glass UI; fix in CSS separately if needed.
-      "color-contrast",
-    ])
-    .analyze();
+/** Includes color-contrast (WCAG 2 AA); theme tokens must stay within computed ratios. */
+const axe = (page: Page) => new AxeBuilder({ page }).analyze();
 
 test.describe("a11y (axe)", () => {
   test.describe.configure({ timeout: 60_000 });
