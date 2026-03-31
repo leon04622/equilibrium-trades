@@ -55,6 +55,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Progress } from "@/components/ui/progress";
 import { Link } from "react-router-dom";
 import { useUserSync } from "@/context/AuthContext";
+import { StatePanel } from "@/components/state-panel";
 
 export default function Portfolio() {
   const { 
@@ -523,39 +524,62 @@ export default function Portfolio() {
   if (!connected) {
     return (
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-            <p className="text-muted-foreground">Manage your holdings and positions</p>
-          </div>
-        </div>
-
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-            <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Wallet Not Connected</h3>
-            <p className="text-muted-foreground mb-4">
-              Connect your wallet to view your portfolio, positions, and balances.
-            </p>
-            <Link to="/">
-              <Button data-testid="button-connect-wallet">
-                <Wallet className="h-4 w-4 mr-2" />
-                Connect Wallet
-              </Button>
-            </Link>
+        <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+          <CardContent className="p-6 md:p-8">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-display font-bold tracking-tight">Portfolio</h1>
+              </div>
+              <p className="max-w-2xl text-muted-foreground">
+                Manage balances, funding movement, and account health from one calmer operations view.
+              </p>
+            </div>
           </CardContent>
         </Card>
+
+        <StatePanel
+          icon={<AlertCircle className="h-6 w-6" />}
+          title="Connect a wallet to unlock portfolio controls"
+          description="Once connected, you can review balances, transfer between spot and perp, and manage deposits or withdrawals without leaving the platform."
+          actionLabel="Open home and connect"
+          onAction={() => (window.location.href = "/")}
+          className="border-dashed"
+          contentClassName="min-h-[320px]"
+        />
       </div>
     );
   }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-display font-bold tracking-tight">Portfolio</h1>
+              </div>
+              <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
+                A cleaner operations view for balances, margin, transfers, and capital movement across Hyperliquid.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:w-[360px]">
+              <div className="rounded-2xl border bg-background/80 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Unified capital</p>
+                <p className="mt-2 text-2xl font-display font-bold">${formatPrice(totalEquity)}</p>
+              </div>
+              <div className="rounded-2xl border bg-background/80 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Open positions</p>
+                <p className="mt-2 text-2xl font-display font-bold">{positions.length}</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-          <p className="text-muted-foreground text-sm">Your holdings and positions</p>
-        </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio" className="h-8 px-2 text-xs">
             <RefreshCw className="h-3 w-3 mr-1" />
