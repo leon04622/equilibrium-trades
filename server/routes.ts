@@ -1160,17 +1160,21 @@ export async function registerRoutes(
   // ============ HYPERLIQUID API ROUTES ============
 
   /**
-   * Professional Circle CCTP config (TokenMessenger burn + Iris attestation + HyperEVM `receiveMessage`).
-   * `verifiedHyperliquidBridge2Arbitrum` is the **only** HL GitBook Bridge2 reference; burns use TokenMessenger, not Bridge2.
+   * Professional Circle CCTP config (ReceiveWithAuthorization + CctpExtension burn + Iris attestation + HyperEVM `receiveMessage`).
+   * `verifiedHyperliquidBridge2Arbitrum` is the **only** HL GitBook Bridge2 reference; HyperCore deposits should follow Circle's
+   * CctpExtension path rather than transfer-to-bridge flows.
    * @see https://developers.circle.com/cctp/howtos/transfer-usdc-from-arbitrum-to-hypercore
    */
   app.get("/api/cctp/deposit-config", async (_req: Request, res: Response) => {
     try {
       const cfg = loadProfessionalDepositConfig();
       res.json({
+        cctpExtension: cfg.cctpExtension,
         tokenMessenger: cfg.tokenMessenger,
         messageTransmitterArbitrum: cfg.messageTransmitterArbitrum,
         usdc: cfg.usdc,
+        usdcEip712Name: cfg.usdcEip712Name,
+        usdcEip712Version: cfg.usdcEip712Version,
         cctpForwarder: cfg.cctpForwarder,
         messageTransmitterHyperEvm: cfg.messageTransmitterHyperEvm,
         chainId: cfg.chainIdArbitrum,

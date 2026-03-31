@@ -2,7 +2,8 @@ import { getAddress } from "ethers";
 
 /**
  * Hyperliquid GitBook **Bridge2** (native USDC deposit contract). The only HL-documented Bridge2 on Arbitrum One.
- * Do **not** use look-alike addresses (e.g. legacy `…67093e`). CCTP **burns** use Circle `TokenMessenger`, not this contract;
+ * Do **not** use look-alike addresses (e.g. legacy `…67093e`). CCTP **deposits** should follow Circle's
+ * `CctpExtension.batchDepositForBurnWithAuth` flow, not ad-hoc transfer-to-bridge patterns;
  * we expose this constant for audits, Arbiscan links, and safety checks.
  * @see https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/bridge2
  */
@@ -23,9 +24,12 @@ export type ProfessionalDepositServerConfig = {
   sourceDomain: number;
   /** HyperEVM = 19 for HyperCore forwarding (not 5). */
   destinationDomain: number;
+  cctpExtension: string;
   tokenMessenger: string;
   messageTransmitterArbitrum: string;
   usdc: string;
+  usdcEip712Name: string;
+  usdcEip712Version: string;
   cctpForwarder: string;
   messageTransmitterHyperEvm: string;
   chainIdArbitrum: number;
@@ -48,11 +52,14 @@ function assertNotBlacklisted(label: string, addr: string): void {
 }
 
 /** Circle mainnet defaults — override per env for testnet / upgrades. */
+const DEFAULT_CCTP_EXTENSION_ARB = "0xA95d9c1F655341597C94393fDdc30cf3c08E4fcE";
 const DEFAULT_TOKEN_MESSENGER_ARB = "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d";
 const DEFAULT_MESSAGE_TRANSMITTER_ARB = "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64";
 const DEFAULT_USDC_ARB = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const DEFAULT_CCTP_FORWARDER_HYPEREVM = "0xb21D281DEdb17AE5B501F6AA8256fe38C4e45757";
 const DEFAULT_MESSAGE_TRANSMITTER_HYPEREVM = "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64";
+const DEFAULT_USDC_EIP712_NAME = "USD Coin";
+const DEFAULT_USDC_EIP712_VERSION = "2";
 
 export function loadProfessionalDepositConfig(): ProfessionalDepositServerConfig {
   const irisApiBase = (process.env.CCTP_IRIS_API_BASE?.trim() || "https://iris-api.circle.com").replace(
@@ -66,6 +73,9 @@ export function loadProfessionalDepositConfig(): ProfessionalDepositServerConfig
     "19",
   );
 
+  const cctpExtension = getAddress(
+    process.env.CCTP_EXTENSION_ADDRESS?.trim() || DEFAULT_CCTP_EXTENSION_ARB,
+  );
   const tokenMessenger = getAddress(
     process.env.CCTP_TOKEN_MESSENGER_ADDRESS?.trim() || DEFAULT_TOKEN_MESSENGER_ARB,
   );
@@ -73,6 +83,9 @@ export function loadProfessionalDepositConfig(): ProfessionalDepositServerConfig
     process.env.CCTP_MESSAGE_TRANSMITTER_ARBITRUM?.trim() || DEFAULT_MESSAGE_TRANSMITTER_ARB,
   );
   const usdc = getAddress(process.env.CCTP_USDC_ADDRESS?.trim() || DEFAULT_USDC_ARB);
+  const usdcEip712Name = process.env.CCTP_USDC_EIP712_NAME?.trim() || DEFAULT_USDC_EIP712_NAME;
+  const usdcEip712Version =
+    process.env.CCTP_USDC_EIP712_VERSION?.trim() || DEFAULT_USDC_EIP712_VERSION;
   const cctpForwarder = getAddress(
     process.env.CCTP_FORWARDER_ADDRESS?.trim() || DEFAULT_CCTP_FORWARDER_HYPEREVM,
   );
@@ -80,6 +93,7 @@ export function loadProfessionalDepositConfig(): ProfessionalDepositServerConfig
     process.env.CCTP_MESSAGE_TRANSMITTER_HYPEREVM?.trim() || DEFAULT_MESSAGE_TRANSMITTER_HYPEREVM,
   );
 
+  assertNotBlacklisted("CctpExtension", cctpExtension);
   assertNotBlacklisted("TokenMessenger", tokenMessenger);
   assertNotBlacklisted("USDC", usdc);
 
@@ -105,9 +119,12 @@ export function loadProfessionalDepositConfig(): ProfessionalDepositServerConfig
     irisApiBase,
     sourceDomain,
     destinationDomain,
+    cctpExtension,
     tokenMessenger,
     messageTransmitterArbitrum,
     usdc,
+    usdcEip712Name,
+    usdcEip712Version,
     cctpForwarder,
     messageTransmitterHyperEvm,
     chainIdArbitrum,

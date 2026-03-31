@@ -1,5 +1,5 @@
 import type { JsonRpcSigner } from "ethers";
-import { getAddress, getBytes, hexlify, keccak256, Interface } from "ethers";
+import { getAddress, getBytes, hexlify, keccak256, Interface, Signature, randomBytes } from "ethers";
 import type { CctpBridgeProgressSync } from "@/context/AuthContext";
 import { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
 
@@ -7,9 +7,8 @@ export { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
 
 const USDC_DECIMALS = 6;
 
-const ERC20_ABI = [
-  "function approve(address spender, uint256 amount) external returns (bool)",
-  "function allowance(address owner, address spender) view returns (uint256)",
+const CCTP_EXTENSION_ABI = [
+  "function batchDepositForBurnWithAuth((uint256 amount,uint256 authValidAfter,uint256 authValidBefore,bytes32 authNonce,uint8 v,bytes32 r,bytes32 s),(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,bytes32 destinationCaller,uint256 maxFee,uint32 minFinalityThreshold,bytes hookData)) external",
 ];
 
 const TOKEN_MESSENGER_ABI = [
@@ -22,9 +21,12 @@ const MESSAGE_TRANSMITTER_ABI = [
 ];
 
 export type CctpDepositConfig = {
+  cctpExtension: string;
   tokenMessenger: string;
   messageTransmitterArbitrum: string;
   usdc: string;
+  usdcEip712Name: string;
+  usdcEip712Version: string;
   cctpForwarder: string;
   messageTransmitterHyperEvm: string;
   chainId: number;
@@ -59,9 +61,12 @@ function parseCctpConfig(data: unknown): CctpDepositConfig {
   if (!data || typeof data !== "object") throw new Error("Invalid CCTP config");
   const o = data as Record<string, unknown>;
   const need = [
+    "cctpExtension",
     "tokenMessenger",
     "messageTransmitterArbitrum",
     "usdc",
+    "usdcEip712Name",
+    "usdcEip712Version",
     "cctpForwarder",
     "messageTransmitterHyperEvm",
   ] as const;
@@ -82,9 +87,12 @@ function parseCctpConfig(data: unknown): CctpDepositConfig {
     throw new Error("Invalid CCTP config: verified bridge");
   }
   return {
+    cctpExtension: getAddress(o.cctpExtension as string),
     tokenMessenger: getAddress(o.tokenMessenger as string),
     messageTransmitterArbitrum: getAddress(o.messageTransmitterArbitrum as string),
     usdc: getAddress(o.usdc as string),
+    usdcEip712Name: String(o.usdcEip712Name),
+    usdcEip712Version: String(o.usdcEip712Version),
     cctpForwarder: getAddress(o.cctpForwarder as string),
     messageTransmitterHyperEvm: getAddress(o.messageTransmitterHyperEvm as string),
     chainId: o.chainId,
@@ -127,6 +135,10 @@ export const fetchHyperliquidDepositConfig = fetchCctpDepositConfig;
 function addressToBytes32(addr: string): `0x${string}` {
   const a = getAddress(addr).slice(2).toLowerCase();
   return `0x${a.padStart(64, "0")}` as `0x${string}`;
+}
+
+function randomBytes32(): `0x${string}` {
+  return hexlify(randomBytes(32)) as `0x${string}`;
 }
 
 async function postBridgeProgress(
@@ -234,8 +246,9 @@ async function ensureHyperEvmInWallet(ethereum: { request: (a: unknown) => Promi
 }
 
 /**
- * Circle CCTP (professional): Approve → TokenMessenger `depositForBurnWithHook` → Iris attestation →
- * `receiveMessage` on HyperEVM MessageTransmitter. HyperCore credit follows the forwarder hook.
+ * Circle CCTP (professional): EIP-3009 `ReceiveWithAuthorization` → `CctpExtension.batchDepositForBurnWithAuth`
+ * on Arbitrum → Iris attestation → `receiveMessage` on HyperEVM MessageTransmitter.
+ * HyperCore credit follows the forwarder hook.
  */
 export async function depositUsdcToHyperliquid(
   signer: JsonRpcSigner,
@@ -391,12 +404,39 @@ export async function depositUsdcToHyperliquid(
       amountUsdc: amount,
       forwardFeeMax: Number(maxFee) / 1e6,
     });
-    const usdc = new Contract(cfg.usdc, ERC20_ABI, signer);
-    const allowance: bigint = await usdc.allowance(wallet, cfg.tokenMessenger);
-    if (allowance < amountBn) {
-      const approveTx = await usdc.approve(cfg.tokenMessenger, amountBn);
-      await approveTx.wait();
-    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const authValidAfter = BigInt(nowSec - 3600);
+    const authValidBefore = BigInt(nowSec + 3600);
+    const authNonce = randomBytes32();
+    const extensionAddress = getAddress(cfg.cctpExtension);
+    const receiveAuthSignature = await signer.signTypedData(
+      {
+        name: cfg.usdcEip712Name,
+        version: cfg.usdcEip712Version,
+        chainId: cfg.chainId,
+        verifyingContract: cfg.usdc,
+      },
+      {
+        ReceiveWithAuthorization: [
+          { name: "from", type: "address" },
+          { name: "to", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "validAfter", type: "uint256" },
+          { name: "validBefore", type: "uint256" },
+          { name: "nonce", type: "bytes32" },
+        ],
+      },
+      {
+        from: getAddress(wallet),
+        to: extensionAddress,
+        value: amountBn,
+        validAfter: authValidAfter,
+        validBefore: authValidBefore,
+        nonce: authNonce,
+      },
+    );
+    const parsedSig = Signature.from(receiveAuthSignature);
 
     onStep("burn");
     await postBridgeProgress(wallet, {
@@ -406,16 +446,26 @@ export async function depositUsdcToHyperliquid(
     });
     const hookData = encodeCctpForwardHookData(recipient, options?.hyperCoreDestinationDex ?? 0);
     const fwd32 = addressToBytes32(cfg.cctpForwarder);
-    const tm = new Contract(cfg.tokenMessenger, TOKEN_MESSENGER_ABI, signer);
-    const burnTx = await tm.depositForBurnWithHook(
-      amountBn,
-      cfg.destinationDomain,
-      fwd32,
-      cfg.usdc,
-      fwd32,
-      maxFee,
-      minFinality,
-      hookData,
+    const extension = new Contract(cfg.cctpExtension, CCTP_EXTENSION_ABI, signer);
+    const burnTx = await extension.batchDepositForBurnWithAuth(
+      {
+        amount: amountBn,
+        authValidAfter,
+        authValidBefore,
+        authNonce,
+        v: parsedSig.v,
+        r: parsedSig.r,
+        s: parsedSig.s,
+      },
+      {
+        amount: amountBn,
+        destinationDomain: cfg.destinationDomain,
+        mintRecipient: fwd32,
+        destinationCaller: fwd32,
+        maxFee,
+        minFinalityThreshold: minFinality,
+        hookData,
+      },
     );
     const receipt = await burnTx.wait();
     if (!receipt) throw new Error("Burn receipt missing");

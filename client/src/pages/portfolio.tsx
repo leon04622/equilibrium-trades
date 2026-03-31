@@ -450,10 +450,10 @@ export default function Portfolio() {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
         onStep: (step: CctpDepositStep, detail?: string) => {
-          if (step === "approve") setDepositStep("Approve USDC for Circle TokenMessenger…");
+          if (step === "approve") setDepositStep("Sign USDC authorization for Circle CCTP extension…");
           else if (step === "burn") {
             setDepositAwaitingChain(true);
-            setDepositStep("Burn USDC on Arbitrum (CCTP) with HyperCore forward hook…");
+            setDepositStep("Submit Circle CCTP burn on Arbitrum via CCTP extension…");
           } else if (step === "attestation") {
             setDepositAwaitingChain(true);
             setDepositStep(
