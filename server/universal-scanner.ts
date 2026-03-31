@@ -344,8 +344,9 @@ function buildEducationalSignalFromCandidate(
 }
 
 /**
- * Fresh last-`limit` candles per interval; explicit start/end bypasses HL candle cache.
- * `throttleSequential` uses the same `getCandles` calls as the parallel path (1m vs 1h identical), only serialized to respect rate limits during full-universe scans.
+ * Last-`limit` candles per interval.
+ * Uses the short in-memory candle cache in `getCandles()` so repeated 1m/3m/5m scans
+ * do not refetch every market on every poll.
  */
 export async function fetchMtfCandleBundle(
   coin: string,
@@ -353,7 +354,6 @@ export async function fetchMtfCandleBundle(
   intervals: readonly string[] = UNIVERSAL_SCAN_TIMEFRAMES,
   opts?: { throttleSequential?: boolean },
 ): Promise<Record<string, HyperliquidCandle[]>> {
-  const end = Date.now();
   const ivs = intervals.length > 0 ? intervals : [...UNIVERSAL_SCAN_TIMEFRAMES];
   const resolveLimit = (interval: string) =>
     typeof limit === "function" ? limit(interval) : limit;
@@ -362,9 +362,7 @@ export async function fetchMtfCandleBundle(
     const out: Record<string, HyperliquidCandle[]> = {};
     for (const interval of ivs) {
       const lim = resolveLimit(interval);
-      const ms = INTERVAL_MS[interval] ?? 60_000;
-      const start = end - ms * lim - ms * 2;
-      out[interval] = await getCandles(coin, interval, start, end, lim);
+      out[interval] = await getCandles(coin, interval, undefined, undefined, lim);
     }
     return out;
   }
@@ -373,9 +371,7 @@ export async function fetchMtfCandleBundle(
     ivs.map((interval) =>
       candleFetchLimit(async () => {
         const lim = resolveLimit(interval);
-        const ms = INTERVAL_MS[interval] ?? 60_000;
-        const start = end - ms * lim - ms * 2;
-        const candles = await getCandles(coin, interval, start, end, lim);
+        const candles = await getCandles(coin, interval, undefined, undefined, lim);
         return [interval, candles] as const;
       }),
     ),
@@ -520,6 +516,9 @@ export async function scanForEducationalPatterns(
   const uniqueTf = prioritizeScanTimeframes(
     timeframes.filter(Boolean).length > 0 ? timeframes : [...UNIVERSAL_SCAN_TIMEFRAMES],
   );
+  const fastOnly = uniqueTf.length > 0 && uniqueTf.every((tf) => isFastTrackTimeframe(tf));
+  const batchSize = fastOnly ? Math.min(GLOBAL_SCANNER_BATCH_SIZE + 6, 20) : GLOBAL_SCANNER_BATCH_SIZE;
+  const batchDelayMs = fastOnly ? 0 : GLOBAL_SCANNER_BATCH_DELAY_MS;
 
   const monitoring = getScannerHealthMonitoringEnabled();
   const startedAt = Date.now();
@@ -529,7 +528,7 @@ export async function scanForEducationalPatterns(
   const wants1m = uniqueTf.includes("1m");
 
   const flat: EducationalPatternSignal[] = [];
-  const batches = chunkArray(coins, GLOBAL_SCANNER_BATCH_SIZE);
+  const batches = chunkArray(coins, batchSize);
 
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi]!;
@@ -563,7 +562,7 @@ export async function scanForEducationalPatterns(
     );
     flat.push(...batchSignals.flat());
     if (bi < batches.length - 1) {
-      await sleep(GLOBAL_SCANNER_BATCH_DELAY_MS);
+      await sleep(batchDelayMs);
     }
   }
 
