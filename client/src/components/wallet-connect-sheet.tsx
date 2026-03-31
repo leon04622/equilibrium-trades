@@ -78,8 +78,8 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
   }
 
   const defaultTrigger = (
-    <Button className="gap-2" data-testid="button-connect-wallet">
-      <Wallet className="h-4 w-4" />
+    <Button className="gap-2" data-testid="button-connect-wallet" aria-label="Connect wallet">
+      <Wallet className="h-4 w-4" aria-hidden />
       Connect Wallet
     </Button>
   );

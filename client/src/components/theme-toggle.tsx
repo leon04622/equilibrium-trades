@@ -12,13 +12,13 @@ export function ThemeToggle() {
       onClick={toggleTheme}
       className="rounded-xl border-primary/20 bg-background/80 shadow-sm backdrop-blur"
       data-testid="button-theme-toggle"
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
     >
       {theme === "dark" ? (
-        <Sun className="h-5 w-5" />
+        <Sun className="h-5 w-5" aria-hidden />
       ) : (
-        <Moon className="h-5 w-5" />
+        <Moon className="h-5 w-5" aria-hidden />
       )}
-      <span className="sr-only">Toggle theme</span>
     </Button>
   );
 }

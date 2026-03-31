@@ -35,6 +35,15 @@ export default function Pricing() {
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
+    const refWallet = urlParams.get("ref")?.trim();
+    if (refWallet && /^0x[a-fA-F0-9]{40}$/i.test(refWallet)) {
+      try {
+        sessionStorage.setItem("equilibrium_pricing_ref_wallet", refWallet.toLowerCase());
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+
     const success = urlParams.get("success");
     const canceled = urlParams.get("canceled");
 

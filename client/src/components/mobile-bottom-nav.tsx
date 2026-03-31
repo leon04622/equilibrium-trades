@@ -23,8 +23,11 @@ export function MobileBottomNav() {
     : baseItems;
 
   return (
-    <nav className="md:hidden fixed inset-x-0 bottom-3 z-50 px-3">
-      <div className="mx-auto flex h-16 max-w-lg items-center justify-around rounded-2xl border border-border/70 bg-background/90 px-1.5 shadow-2xl shadow-black/10 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <nav
+      className="md:hidden fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] pt-1"
+      aria-label="Primary navigation"
+    >
+      <div className="mx-auto flex h-[3.75rem] min-h-[3rem] max-w-lg items-center justify-around rounded-2xl border border-border/70 bg-background/90 px-1.5 shadow-2xl shadow-black/10 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         {navItems.map((item) => {
           const isActive =
             item.to === "/"
@@ -35,8 +38,9 @@ export function MobileBottomNav() {
             <Link
               key={item.to}
               to={item.to}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-all",
+                "flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-all",
                 isActive
                   ? "bg-primary/10 text-primary shadow-sm"
                   : "text-muted-foreground hover:bg-muted/60",

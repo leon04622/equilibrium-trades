@@ -258,23 +258,27 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, open, openMobile, isMobile } = useSidebar()
+  const expanded = isMobile ? openMobile : open
 
   return (
     <Button
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
+      type="button"
       variant="ghost"
       size="icon"
       className={cn("h-7 w-7", className)}
+      aria-label={expanded ? "Close navigation menu" : "Open navigation menu"}
+      aria-expanded={expanded}
+      aria-controls="app-sidebar-nav"
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
     >
-      <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <PanelLeftIcon aria-hidden />
     </Button>
   )
 }

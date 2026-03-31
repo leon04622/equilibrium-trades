@@ -43,6 +43,7 @@ import { Switch } from "@/components/ui/switch";
 import { linkifyPlainText } from "@/lib/linkify-message";
 import { CrmJournalInsightsDialog } from "@/components/crm-journal-insights-dialog";
 import { StatePanel } from "@/components/state-panel";
+import { crmUsersToCsv } from "@/lib/csv-export";
 
 const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
 
@@ -117,41 +118,6 @@ function sortCrmRows(rows: CrmRow[], key: SortKey, dir: "asc" | "desc"): CrmRow[
   });
 }
 
-function escapeCsvCell(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
-function crmRowsToCsv(rows: CrmRow[]): string {
-  const headers = [
-    "wallet",
-    "email",
-    "joinDate",
-    "subTier",
-    "status",
-    "manualProOverride",
-    "builderStatus",
-  ] as const;
-  const lines = [headers.join(",")];
-  for (const row of rows) {
-    const cells = headers.map((h) => {
-      const raw =
-        h === "manualProOverride"
-          ? row.manualProOverride === true
-            ? "true"
-            : row.manualProOverride === false
-              ? "false"
-              : ""
-          : String(row[h] ?? "");
-      return escapeCsvCell(raw);
-    });
-    lines.push(cells.join(","));
-  }
-  return lines.join("\r\n");
-}
-
 export default function AdminCommandCenter() {
   const { address } = useWallet();
   const { toast } = useToast();
@@ -214,7 +180,7 @@ export default function AdminCommandCenter() {
       });
       return;
     }
-    const csv = crmRowsToCsv(sortedCrm);
+    const csv = crmUsersToCsv(sortedCrm);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

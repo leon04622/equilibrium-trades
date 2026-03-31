@@ -38,6 +38,7 @@ export function WalletConnect() {
         variant="destructive"
         className="gap-2"
         data-testid="button-switch-network"
+        aria-label="Switch wallet network to Arbitrum"
       >
         <AlertTriangle className="h-4 w-4" />
         Switch to Arbitrum
@@ -52,6 +53,7 @@ export function WalletConnect() {
           variant="outline"
           className="gap-2 rounded-xl border-primary/20 bg-background/80 shadow-sm backdrop-blur"
           data-testid="button-wallet-menu"
+          aria-label={`Wallet menu for ${shortenAddress(address!)}`}
         >
           <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(34,197,94,0.45)]" />
           <Wallet className="h-4 w-4" />

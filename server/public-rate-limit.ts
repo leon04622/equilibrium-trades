@@ -50,3 +50,20 @@ export const stripeCheckoutLimiter = rateLimit({
   legacyHeaders: false,
   message: json429,
 });
+
+/** AI / scan style endpoints — separate bucket from generic support. */
+export const patternDetectPostLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 35,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: json429,
+});
+
+export const journalGradePostLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: json429,
+});

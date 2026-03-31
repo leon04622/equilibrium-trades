@@ -178,7 +178,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent id="app-sidebar-nav">
         <SidebarGroup>
           <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>

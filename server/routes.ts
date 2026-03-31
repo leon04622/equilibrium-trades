@@ -96,6 +96,8 @@ import {
   walletEmailPatchLimiter,
   supportPublicPostLimiter,
   stripeCheckoutLimiter,
+  patternDetectPostLimiter,
+  journalGradePostLimiter,
 } from "./public-rate-limit";
 import { eq } from "drizzle-orm";
 import {
@@ -1057,7 +1059,7 @@ export async function registerRoutes(
   });
 
   // AI Pattern Detection endpoint - streaming
-  app.post("/api/detect-patterns", async (req: Request, res: Response) => {
+  app.post("/api/detect-patterns", patternDetectPostLimiter, async (req: Request, res: Response) => {
     try {
       const { symbol, timeframe, priceData } = req.body;
 
@@ -1521,7 +1523,7 @@ export async function registerRoutes(
   });
 
   // Grade and save a trade
-  app.post("/api/journal/grade", async (req: Request, res: Response) => {
+  app.post("/api/journal/grade", journalGradePostLimiter, async (req: Request, res: Response) => {
     try {
       if (!requirePersistentTradeGradesBackend(res)) {
         return;
