@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
 import { ApexSovereign } from "@/components/apex-sovereign";
@@ -241,6 +242,7 @@ function PatternChartComponent({
   const [smaStatus, setSmaStatus] = useState<{ sma21: number; sma200: number; isBullish: boolean } | null>(null);
   const [activeSignal, setActiveSignal] = useState<EducationalPatternSignal | null>(null);
   const [lastRenderedDataKey, setLastRenderedDataKey] = useState<string>("");
+  const [noDataRetryCounts, setNoDataRetryCounts] = useState<Record<string, number>>({});
 
   const { theme } = useTheme();
   const { positions, openOrders } = useTrading();
@@ -286,6 +288,7 @@ function PatternChartComponent({
     isFetching: candlesFetching,
     isError: candlesError,
     isFetched: candlesFetched,
+    refetch: refetchCandles,
   } = useQuery<CandleData[]>({
     // candlesLoading kept for React Query semantics; UI uses cache-aware flags below
     queryKey: [candleQueryKey],
@@ -319,15 +322,50 @@ function PatternChartComponent({
     },
   });
 
+  const noDataRetryKey = `${coin}:${interval}`;
+  const noDataRetryCount = noDataRetryCounts[noDataRetryKey] ?? 0;
   const hasRenderableCandles = (candles?.length ?? 0) > 0;
-  const showChartLoadingOverlay = candlesFetching && !hasRenderableCandles;
+  const isRetryingEmptyCandles =
+    candlesFetched &&
+    !hasRenderableCandles &&
+    !candlesFetching &&
+    noDataRetryCount < 2;
+  const showChartLoadingOverlay = (candlesFetching || isRetryingEmptyCandles) && !hasRenderableCandles;
   const showNoDataFallback =
     candlesFetched &&
     !hasRenderableCandles &&
     !candlesFetching &&
     !chartDataReadyRef.current &&
     lastRenderedDataKey !== `${coin}:${interval}` &&
+    noDataRetryCount >= 2 &&
     (candlesError || !candlesLoading);
+
+  useEffect(() => {
+    setNoDataRetryCounts((prev) => (prev[noDataRetryKey] ? { ...prev, [noDataRetryKey]: 0 } : prev));
+  }, [noDataRetryKey]);
+
+  useEffect(() => {
+    if (hasRenderableCandles || candlesFetching || !candlesFetched) return;
+    if (noDataRetryCount >= 2) return;
+
+    const delayMs = noDataRetryCount === 0 ? 1200 : 2500;
+    const timer = window.setTimeout(() => {
+      setNoDataRetryCounts((prev) => ({
+        ...prev,
+        [noDataRetryKey]: (prev[noDataRetryKey] ?? 0) + 1,
+      }));
+      void refetchCandles();
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    candlesFetched,
+    candlesFetching,
+    hasRenderableCandles,
+    noDataRetryCount,
+    noDataRetryKey,
+    refetchCandles,
+  ]);
 
   const { data: signals } = useQuery<EducationalPatternSignal[]>({
     queryKey: ["/api/signals/patterns", coin, interval],
@@ -877,7 +915,9 @@ function PatternChartComponent({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
-              <span className="text-[11px] text-[#b2b5be]">Loading chart…</span>
+              <span className="text-[11px] text-[#b2b5be]">
+                {isRetryingEmptyCandles ? "Retrying chart data…" : "Loading chart…"}
+              </span>
             </div>
           </div>
         )}
@@ -885,7 +925,18 @@ function PatternChartComponent({
         {/* No data fallback */}
         {showNoDataFallback && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
-            <p className="text-[#b2b5be] text-sm">No chart data available</p>
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-[#b2b5be] text-sm">No chart data available</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#2a3249] bg-[#1b2035] text-[#b2b5be] hover:bg-[#252a40] hover:text-white"
+                onClick={() => void refetchCandles()}
+                data-testid="button-retry-chart-data"
+              >
+                Retry chart
+              </Button>
+            </div>
           </div>
         )}
 

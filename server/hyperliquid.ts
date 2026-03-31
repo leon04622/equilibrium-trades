@@ -430,21 +430,41 @@ export async function getCandles(
       }
     }
     
-    const response = await fetch(HYPERLIQUID_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "candleSnapshot",
-        req: { coin, interval, startTime: start, endTime: end },
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
+    const fetchSnapshot = async (): Promise<HyperliquidCandle[]> => {
+      const response = await fetch(HYPERLIQUID_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "candleSnapshot",
+          req: { coin, interval, startTime: start, endTime: end },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+
+      const raw: HyperliquidCandle[] = await response.json();
+      return [...raw].sort((a, b) => a.t - b.t);
+    };
+
+    let data = await fetchSnapshot();
+
+    // Hyperliquid occasionally returns an empty snapshot on a cold edge request even though
+    // a near-immediate retry succeeds. Retry once here so charts do not show "No data"
+    // until the user manually refreshes the page.
+    if (data.length === 0 && !startTime && !endTime) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const retryData = await fetchSnapshot();
+      if (retryData.length > 0) data = retryData;
     }
-    
-    const raw: HyperliquidCandle[] = await response.json();
-    const data = [...raw].sort((a, b) => a.t - b.t);
+
+    if (data.length === 0 && !cacheDisabled && !startTime && !endTime) {
+      const stale = candleCache.get(cacheKey);
+      if (stale?.data?.length) {
+        return [...stale.data].sort((a, b) => a.t - b.t);
+      }
+    }
 
     if (!cacheDisabled && !startTime && !endTime && data.length > 0) {
       const baseTtl = CANDLE_CACHE_TTL[interval] || 4_000;
