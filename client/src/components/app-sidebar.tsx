@@ -39,6 +39,7 @@ import { useChat } from "@/lib/chat-context";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -361,6 +362,9 @@ export function AppSidebar() {
               Signed in: {address}
             </p>
           )}
+        </div>
+        <div className="mt-3 flex justify-center px-1">
+          <PoweredByHyperliquid compact className="w-full justify-center" />
         </div>
       </SidebarFooter>
     </Sidebar>

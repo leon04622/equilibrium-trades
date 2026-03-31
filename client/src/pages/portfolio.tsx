@@ -56,6 +56,7 @@ import { Progress } from "@/components/ui/progress";
 import { Link } from "react-router-dom";
 import { useUserSync } from "@/context/AuthContext";
 import { StatePanel } from "@/components/state-panel";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 export default function Portfolio() {
   const { 
@@ -527,9 +528,10 @@ export default function Portfolio() {
         <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
           <CardContent className="p-6 md:p-8">
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Wallet className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-display font-bold tracking-tight">Portfolio</h1>
+                <PoweredByHyperliquid compact />
               </div>
               <p className="max-w-2xl text-muted-foreground">
                 Manage balances, funding movement, and account health from one calmer operations view.
@@ -557,9 +559,10 @@ export default function Portfolio() {
         <CardContent className="p-6 md:p-8">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Wallet className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-display font-bold tracking-tight">Portfolio</h1>
+                <PoweredByHyperliquid compact />
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
                 A cleaner operations view for balances, margin, transfers, and capital movement on the connected exchange.

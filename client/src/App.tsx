@@ -26,6 +26,7 @@ import { PaywallModal } from "@/components/paywall-modal";
 import { PaywallProvider } from "@/lib/paywall-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 import { AdminGuard } from "@/components/admin-guard";
 import { LazyJournalView } from "@/components/journal-view.lazy";
@@ -182,10 +183,12 @@ function ShellHeader() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground lg:flex">
+          <div className="hidden lg:flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary" />
             Professional workflow
           </div>
+          <PoweredByHyperliquid compact className="inline-flex md:hidden" />
+          <PoweredByHyperliquid className="hidden md:inline-flex" />
           <WalletConnect />
           <ThemeToggle />
         </div>

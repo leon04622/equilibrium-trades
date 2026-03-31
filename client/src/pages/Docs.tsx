@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { BookMarked, LineChart, Rocket, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 /**
  * In-app documentation for users and external reviewers.
@@ -13,9 +14,10 @@ export default function Docs() {
       <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
         <CardContent className="p-6 md:p-8">
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-primary">
+            <div className="flex flex-wrap items-center gap-2 text-primary">
               <BookMarked className="h-7 w-7" />
               <Badge variant="secondary">Docs</Badge>
+              <PoweredByHyperliquid />
             </div>
             <h1 className="text-3xl font-bold font-display tracking-tight">Equilibrium Trading</h1>
             <p className="text-muted-foreground text-sm md:text-base max-w-2xl">

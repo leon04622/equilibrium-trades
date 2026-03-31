@@ -20,6 +20,7 @@ import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loa
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
 
 const LS_COIN = "eq_trading_coin";
@@ -382,7 +383,8 @@ export default function Trading({ visible = true }: TradingProps) {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <PoweredByHyperliquid compact className="hidden sm:inline-flex max-w-[140px] md:max-w-none" />
           <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-settings">
             <Settings className="h-4 w-4" />
           </Button>

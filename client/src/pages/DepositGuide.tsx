@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 function IllustrationPrepare({ className }: { className?: string }) {
   return (
@@ -115,6 +116,7 @@ export default function DepositGuide() {
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Guide</Badge>
+          <PoweredByHyperliquid />
           <span className="text-xs text-muted-foreground">Pictures + steps — no video required</span>
         </div>
         <h1 className="text-3xl font-bold font-display tracking-tight">Deposit funds to your account</h1>

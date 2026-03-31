@@ -25,6 +25,7 @@ import { PatternCard } from "@/components/pattern-card";
 import { PatternModal } from "@/components/pattern-modal";
 import { EducationalTip, tradingTips } from "@/components/educational-tip";
 import { LazyJournalView } from "@/components/journal-view.lazy";
+import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 import { tradingPatterns } from "@/lib/patterns";
 import type { PatternDefinition } from "@shared/schema";
 
@@ -109,7 +110,7 @@ export default function Dashboard() {
                   <p className="mt-1 text-xs text-muted-foreground">Review decisions and build repeatable habits</p>
                 </div>
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <Button asChild size="lg" className="gap-2">
                   <Link to="/trading">
                     Open Trading Workspace
@@ -122,6 +123,7 @@ export default function Dashboard() {
                     <PlayCircle className="h-4 w-4" />
                   </Link>
                 </Button>
+                <PoweredByHyperliquid className="sm:ml-1" />
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
