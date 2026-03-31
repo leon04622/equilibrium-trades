@@ -307,6 +307,17 @@ async function syncWalletUserToMongoCrm(walletAddress: string): Promise<void> {
   }
 }
 
+async function safeUpsertMongoCrmContactOnConnect(params: {
+  walletAddress: string;
+  email?: string | null;
+}): Promise<void> {
+  try {
+    await upsertMongoCrmContactOnConnect(params);
+  } catch (e) {
+    console.error("[routes] Mongo CRM contact upsert:", e);
+  }
+}
+
 type WalletSubscriptionPayload = {
   tier: "free" | "pro" | "mentoring" | "elite";
   active: boolean;
@@ -1774,7 +1785,7 @@ export async function registerRoutes(
       }
 
       const wa = validated.data.walletAddress.trim().toLowerCase();
-      await upsertMongoCrmContactOnConnect({
+      await safeUpsertMongoCrmContactOnConnect({
         walletAddress: wa,
         email: validated.data.email?.trim() || null,
       });
@@ -1966,7 +1977,7 @@ export async function registerRoutes(
       }
       const normalized = paramWallet.trim().toLowerCase();
 
-      await upsertMongoCrmContactOnConnect({ walletAddress: normalized, email: validated.data });
+      await safeUpsertMongoCrmContactOnConnect({ walletAddress: normalized, email: validated.data });
 
       let user = await storage.getWalletUser(normalized);
       if (!user) {
@@ -2006,7 +2017,7 @@ export async function registerRoutes(
         return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
       }
       await ensureWalletUserRowForPersistence(wallet);
-      await upsertMongoCrmContactOnConnect({ walletAddress: wallet });
+      await safeUpsertMongoCrmContactOnConnect({ walletAddress: wallet });
       const payload = await buildWalletSubscriptionPayload(wallet);
       const user = await storage.getWalletUser(wallet);
       let joinDate: string | null = null;
