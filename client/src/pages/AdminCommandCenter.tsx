@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { linkifyPlainText } from "@/lib/linkify-message";
 import { CrmJournalInsightsDialog } from "@/components/crm-journal-insights-dialog";
+import { StatePanel } from "@/components/state-panel";
 
 const VAULT_CATEGORY_PRESETS = ["Beginner Patterns", "SMA Masterclass", "Live Trading Sessions"] as const;
 
@@ -453,26 +454,27 @@ export default function AdminCommandCenter() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 pb-24 md:pb-8">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-primary mb-1">
-            <Shield className="h-6 w-6" />
-            <span className="text-xs font-semibold uppercase tracking-wider">Fortress</span>
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background shadow-lg shadow-primary/5">
+        <CardContent className="p-6 md:p-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="mb-1 flex items-center gap-2 text-primary">
+                <Shield className="h-6 w-6" />
+                <span className="text-xs font-semibold uppercase tracking-wider">Fortress</span>
+              </div>
+              <h1 className="text-2xl font-bold font-display tracking-tight md:text-3xl">Admin Command Center</h1>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Internal control surface for member access, premium vault publishing, support operations, and scanner
+                health across the live platform.
+              </p>
+              <p className="mt-2 break-all font-mono text-[10px] text-muted-foreground/80">{FORTRESS_SOVEREIGN_WALLET}</p>
+            </div>
+            <Button variant="outline" size="sm" asChild className="bg-background/80">
+              <Link to="/">← Home</Link>
+            </Button>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold font-display tracking-tight">Admin Command Center</h1>
-          <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-            Sovereign wallet only. Publish lessons to the Educational Vault (file upload) and browse CRM. Optional:{" "}
-            <code className="text-[10px]">MONGO_VAULT_URI</code> / Mongo for vault data; otherwise PostgreSQL.{" "}
-            <code className="text-[10px]">GET /health</code> → <code className="text-[10px]">mongoVault.connected</code>.
-          </p>
-          <p className="text-[10px] text-muted-foreground/80 font-mono mt-2 break-all">
-            {FORTRESS_SOVEREIGN_WALLET}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/">← Home</Link>
-        </Button>
-      </div>
+        </CardContent>
+      </Card>
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 max-w-4xl gap-1">
@@ -518,20 +520,24 @@ export default function AdminCommandCenter() {
                 />
               </div>
               {crmError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
-                  <p className="font-medium text-destructive">Could not load CRM</p>
-                  <p className="text-muted-foreground">
-                    {crmErrorObj instanceof Error ? crmErrorObj.message : String(crmErrorObj)}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => void refetchCrm()}>
-                    Retry
-                  </Button>
-                </div>
+                <StatePanel
+                  icon={<Users className="h-6 w-6" />}
+                  title="CRM could not be loaded"
+                  description={crmErrorObj instanceof Error ? crmErrorObj.message : String(crmErrorObj)}
+                  actionLabel="Retry"
+                  onAction={() => void refetchCrm()}
+                  className="shadow-none"
+                  contentClassName="min-h-[240px]"
+                />
               ) : crmLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading…
-                </div>
+                <StatePanel
+                  loading
+                  icon={<Loader2 className="h-6 w-6" />}
+                  title="Loading CRM"
+                  description="Fetching wallets, tiers, builder status, and member records from the live backend."
+                  className="shadow-none"
+                  contentClassName="min-h-[240px]"
+                />
               ) : (
                 <ScrollArea className="h-[min(520px,60vh)]">
                   <Table>
@@ -855,22 +861,32 @@ export default function AdminCommandCenter() {
             </CardHeader>
             <CardContent>
               {videosError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
-                  <p className="font-medium text-destructive">Could not load videos</p>
-                  <p className="text-muted-foreground">
-                    {videosErrorObj instanceof Error ? videosErrorObj.message : String(videosErrorObj)}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => void refetchVideos()}>
-                    Retry
-                  </Button>
-                </div>
+                <StatePanel
+                  icon={<Video className="h-6 w-6" />}
+                  title="Published lessons could not be loaded"
+                  description={videosErrorObj instanceof Error ? videosErrorObj.message : String(videosErrorObj)}
+                  actionLabel="Retry"
+                  onAction={() => void refetchVideos()}
+                  className="shadow-none"
+                  contentClassName="min-h-[220px]"
+                />
               ) : videosLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading…
-                </div>
+                <StatePanel
+                  loading
+                  icon={<Loader2 className="h-6 w-6" />}
+                  title="Loading vault catalogue"
+                  description="Syncing the current premium lesson library from the live content store."
+                  className="shadow-none"
+                  contentClassName="min-h-[220px]"
+                />
               ) : videos.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No videos yet.</p>
+                <StatePanel
+                  icon={<Video className="h-6 w-6" />}
+                  title="No lessons published yet"
+                  description="Upload your first vault lesson above and it will appear here immediately for review."
+                  className="shadow-none"
+                  contentClassName="min-h-[220px]"
+                />
               ) : (
                 <ScrollArea className="h-[min(420px,50vh)] pr-3">
                   <ul className="space-y-2">
@@ -917,22 +933,32 @@ export default function AdminCommandCenter() {
             </CardHeader>
             <CardContent>
               {supportError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm space-y-2">
-                  <p className="font-medium text-destructive">Could not load support</p>
-                  <p className="text-muted-foreground">
-                    {supportErrorObj instanceof Error ? supportErrorObj.message : String(supportErrorObj)}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => void refetchSupport()}>
-                    Retry
-                  </Button>
-                </div>
+                <StatePanel
+                  icon={<MessageSquare className="h-6 w-6" />}
+                  title="Support feed could not be loaded"
+                  description={supportErrorObj instanceof Error ? supportErrorObj.message : String(supportErrorObj)}
+                  actionLabel="Retry"
+                  onAction={() => void refetchSupport()}
+                  className="shadow-none"
+                  contentClassName="min-h-[240px]"
+                />
               ) : supportLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading…
-                </div>
+                <StatePanel
+                  loading
+                  icon={<Loader2 className="h-6 w-6" />}
+                  title="Loading support feed"
+                  description="Bringing in the latest member conversations and replies."
+                  className="shadow-none"
+                  contentClassName="min-h-[240px]"
+                />
               ) : supportFeed.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No support messages yet.</p>
+                <StatePanel
+                  icon={<MessageSquare className="h-6 w-6" />}
+                  title="Support inbox is quiet"
+                  description="New member questions from the chat bubble will appear here automatically."
+                  className="shadow-none"
+                  contentClassName="min-h-[240px]"
+                />
               ) : (
                 <ScrollArea className="h-[min(560px,65vh)] pr-3">
                   <ul className="space-y-3">

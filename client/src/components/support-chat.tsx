@@ -120,7 +120,7 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
     <>
       <Button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 h-14 w-14 rounded-full shadow-lg"
+        className="fixed bottom-20 right-4 z-50 h-14 w-14 rounded-full shadow-xl shadow-primary/20 md:bottom-6 md:right-6"
         size="icon"
         data-testid="button-open-chat"
       >
@@ -133,8 +133,8 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
       </Button>
 
       {isOpen && (
-        <Card className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 w-[calc(100vw-2rem)] max-w-sm md:w-96 shadow-2xl">
-          <CardHeader className="flex flex-row items-center justify-between p-3 border-b">
+        <Card className="fixed bottom-20 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm border-border/70 shadow-2xl md:bottom-6 md:right-6 md:w-96">
+          <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/20 p-3">
             <CardTitle className="text-base flex items-center gap-2">
               <MessageCircle className="h-4 w-4" />
               {isAdmin ? "Support Inbox" : "Live Support"}
@@ -155,7 +155,7 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
                       <button
                         key={conv.conversationId}
                         onClick={() => setSelectedConversation(conv.conversationId)}
-                        className="w-full p-3 rounded-lg text-left hover-elevate flex items-center justify-between"
+                        className="flex w-full items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:bg-muted/40"
                         data-testid={`conversation-${conv.conversationId}`}
                       >
                         <div className="flex-1 min-w-0">
@@ -213,9 +213,9 @@ export function SupportChat({ isAdmin = false }: SupportChatProps) {
                           )}
                           <div
                             className={cn(
-                              "max-w-[80%] rounded-lg px-3 py-2 text-sm break-words",
+                              "max-w-[80%] rounded-2xl px-3 py-2 text-sm break-words shadow-sm",
                               msg.senderType === "admin"
-                                ? "bg-muted"
+                                ? "border border-border/60 bg-muted/70"
                                 : "bg-primary text-primary-foreground"
                             )}
                           >
