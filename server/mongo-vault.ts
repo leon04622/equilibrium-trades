@@ -14,6 +14,7 @@ import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
 import { deleteVaultVideoById, listAllVaultVideos, upsertVaultVideo, vaultVideoDocToApi } from "./video-service";
 import { deleteLocalUploadedVideoByObjectPath } from "./local-upload-routes";
+import { storage } from "./storage";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
 /** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
@@ -701,8 +702,49 @@ function createHandle(db: Db): MongoVaultHandle {
       }
       try {
         const rows = await crm.find({}).toArray();
-        const out = rows.map((u) => mongoDocToCrmRow(u));
-        res.json(out.filter((r) => r.wallet));
+        const out = rows.map((u) => mongoDocToCrmRow(u)).filter((r) => r.wallet);
+
+        let pgUsers: WalletUser[] = [];
+        try {
+          pgUsers = await storage.getAllWalletUsers();
+        } catch (mergeErr) {
+          console.error("[mongo-vault] CRM merge: could not load Postgres wallet_users:", mergeErr);
+        }
+
+        const emailByWallet = new Map(
+          pgUsers.map((u) => [u.walletAddress.toLowerCase(), u.email != null ? String(u.email).trim() : ""]),
+        );
+
+        for (const r of out) {
+          const w = r.wallet.toLowerCase();
+          const pgEmail = emailByWallet.get(w);
+          if (pgEmail && (!r.email || !String(r.email).trim())) {
+            r.email = pgEmail;
+          }
+        }
+
+        const mongoWallets = new Set(out.map((r) => r.wallet.toLowerCase()));
+        for (const u of pgUsers) {
+          const w = u.walletAddress.toLowerCase();
+          if (!/^0x[a-f0-9]{40}$/.test(w)) continue;
+          if (mongoWallets.has(w)) continue;
+          mongoWallets.add(w);
+          const created =
+            u.createdAt instanceof Date ? u.createdAt : u.createdAt ? new Date(u.createdAt as unknown as string) : new Date();
+          const joinDate =
+            Number.isNaN(created.getTime()) ? new Date().toISOString() : created.toISOString();
+          out.push({
+            wallet: w,
+            email: u.email != null && String(u.email).trim() ? String(u.email).trim() : null,
+            joinDate,
+            subTier: crmDisplayTier(u.subscriptionTier),
+            status: crmSubscriptionStatusFromWallet(u),
+            manualProOverride: Boolean(u.manualProOverride),
+            builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
+          });
+        }
+
+        res.json(out);
       } catch (e) {
         console.error("[mongo-vault] GET /api/crm/users:", e);
         res.status(500).json({ error: "Failed to fetch CRM users" });

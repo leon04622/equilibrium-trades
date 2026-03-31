@@ -1977,8 +1977,7 @@ export async function registerRoutes(
       }
       const normalized = paramWallet.trim().toLowerCase();
 
-      await safeUpsertMongoCrmContactOnConnect({ walletAddress: normalized, email: validated.data });
-
+      /** Postgres first so CRM merge + Mongo sync always read the email the member just saved. */
       let user = await storage.getWalletUser(normalized);
       if (!user) {
         user = await storage.createWalletUser({
@@ -1998,6 +1997,7 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Could not persist user" });
       }
 
+      await safeUpsertMongoCrmContactOnConnect({ walletAddress: normalized, email: validated.data });
       await syncWalletUserToMongoCrm(normalized);
       res.json({ success: true, user });
     } catch (error) {
