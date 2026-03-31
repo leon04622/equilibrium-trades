@@ -1,4 +1,5 @@
 import "./env";
+import { initServerSentry, setupSentryExpressErrorHandler } from "./sentry-init";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -12,6 +13,8 @@ import { WebhookHandlers } from './webhookHandlers';
 import { getDatabaseStatus, ensurePostgresCoreTables } from './db';
 import { getMongoVaultHealth, pingMongoVault, resolveMongoVaultUri } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
+
+initServerSentry();
 
 const app = express();
 const httpServer = createServer(app);
@@ -254,6 +257,8 @@ async function initStripe() {
   attachCommandCenterDebugWs(httpServer);
   attachSupportChatWs(httpServer);
   heatmapWSManager.initialize(httpServer);
+
+  setupSentryExpressErrorHandler(app);
 
   // ── Global error handler ──
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

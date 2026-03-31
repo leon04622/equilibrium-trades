@@ -17,6 +17,23 @@ This checks:
 - `/api/videos`
 - the first lesson video URL, when present
 
+### Uptime-only ping
+
+Railway already health-checks `/health`. For an extra external probe (cron, UptimeRobot, etc.):
+
+```bash
+UPTIME_CHECK_URL=https://www.equilibrium-trading.xyz npm run verify:uptime
+```
+
+### Sentry (optional)
+
+1. Create a Sentry project (e.g. Node + React).
+2. **Railway (server):** add `SENTRY_DSN` from the server/Node DSN. Optional: `SENTRY_ENVIRONMENT=production`, `SENTRY_TRACES_SAMPLE_RATE=0.1` (omit or `0` to disable performance traces).
+3. **Client:** add `VITE_SENTRY_DSN` from the browser client DSN and **redeploy** so Vite bakes it in.
+4. Confirm a test event: trigger a render error in dev with DSN set, or use Sentry’s “send test event”.
+
+Unhandled server errors passed to Express with status ≥ 500 are reported automatically. The root `AppErrorBoundary` sends React render failures when the browser DSN is set.
+
 ## Manual acceptance checks
 
 Run these before calling a release done:

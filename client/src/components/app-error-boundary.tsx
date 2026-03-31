@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { StatePanel } from "@/components/state-panel";
+import { captureClientException } from "@/sentry-client";
 
 interface Props {
   children: ReactNode;
@@ -23,6 +24,7 @@ export class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[AppErrorBoundary]", error?.stack ?? error, info.componentStack);
+    captureClientException(error, { componentStack: info.componentStack ?? undefined });
     this.setState({ componentStack: info.componentStack ?? null });
   }
 
