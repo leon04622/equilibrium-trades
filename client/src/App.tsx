@@ -43,6 +43,7 @@ const Heatmap = lazy(() => import("@/pages/heatmap"));
 const EducationalVault = lazy(() => import("@/pages/EducationalVault"));
 const Docs = lazy(() => import("@/pages/Docs"));
 const DepositGuide = lazy(() => import("@/pages/DepositGuide"));
+const Funding = lazy(() => import("@/pages/Funding"));
 const Portfolio = lazy(() => import("@/pages/portfolio"));
 const Pricing = lazy(() => import("@/pages/pricing"));
 const Settings = lazy(() => import("@/pages/settings"));
@@ -64,6 +65,7 @@ const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; su
   { match: (pathname) => pathname.startsWith("/heatmap"), title: "Heatmap", subtitle: "Track liquidity and hidden pressure across the book." },
   { match: (pathname) => pathname.startsWith("/journal"), title: "Journal", subtitle: "Review decisions and reinforce disciplined execution." },
   { match: (pathname) => pathname.startsWith("/portfolio"), title: "Portfolio", subtitle: "Keep balances, exposure, and performance in view." },
+  { match: (pathname) => pathname.startsWith("/funding"), title: "Funding", subtitle: "Deposit and withdraw from one dedicated transaction screen." },
   { match: (pathname) => pathname.startsWith("/pricing"), title: "Membership", subtitle: "Choose the level of access and guidance that fits you." },
   { match: (pathname) => pathname.startsWith("/settings"), title: "Settings", subtitle: "Fine-tune the workspace around your routine." },
   {
@@ -227,6 +229,7 @@ function TradingLayout() {
                 <Route path="/videos" element={<EducationalVault />} />
                 <Route path="/docs" element={<Docs />} />
                 <Route path="/guide/deposit" element={<DepositGuide />} />
+                <Route path="/funding" element={<Funding />} />
                 <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/journal" element={<LazyJournalView />} />
                 <Route path="/pricing" element={<Pricing />} />

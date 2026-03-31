@@ -88,6 +88,7 @@ const toolsNavItems = [
 
 const accountNavItems = [
   { title: "Journal", url: "/journal", icon: NotebookPen },
+  { title: "Funding", url: "/funding", icon: Banknote },
   { title: "Portfolio", url: "/portfolio", icon: Wallet },
   { title: "Deposit guide", url: "/guide/deposit", icon: Banknote },
   { title: "Docs", url: "/docs", icon: BookMarked },

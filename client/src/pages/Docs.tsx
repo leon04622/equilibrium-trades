@@ -97,7 +97,7 @@ export default function Docs() {
               <div>
                 <p className="font-medium text-foreground">Connect your wallet</p>
                 <p className="text-muted-foreground mt-1">
-                  Connect on the site header. On <Link className="text-primary underline" to="/portfolio">Portfolio</Link>
+                  Connect on the site header. On <Link className="text-primary underline" to="/funding?tab=deposit">Funding</Link>
                   , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into your trading account using{" "}
                   <strong>Circle CCTP</strong>. Step-by-step pictures:{" "}
                   <Link className="text-primary underline" to="/guide/deposit">

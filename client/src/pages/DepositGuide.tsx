@@ -256,7 +256,7 @@ export default function DepositGuide() {
               </a>{" "}
               documents sending <strong className="text-foreground">native USDC on Arbitrum</strong> directly to their bridge
               contract (they state a <strong className="text-foreground">5 USDC</strong> minimum on mainnet). That is a
-              separate, manual transfer — Equilibrium’s <strong className="text-foreground">Portfolio → Deposit</strong>{" "}
+              separate, manual transfer — Equilibrium’s <strong className="text-foreground">Funding → Deposit</strong>{" "}
               uses the CCTP route above.
             </p>
             <p>
@@ -267,8 +267,8 @@ export default function DepositGuide() {
           <ol className="list-decimal pl-5 space-y-2 text-sm text-muted-foreground leading-relaxed">
             <li>
               Go to{" "}
-              <Link className="text-primary font-medium underline underline-offset-2" to="/portfolio">
-                Portfolio
+              <Link className="text-primary font-medium underline underline-offset-2" to="/funding?tab=deposit">
+                Funding
               </Link>
               .
             </li>

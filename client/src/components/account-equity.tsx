@@ -64,7 +64,7 @@ export function AccountEquity() {
             variant="default"
             size="sm"
             className="h-8 rounded-lg text-xs"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/funding?tab=deposit")}
             data-testid="button-deposit"
           >
             Deposit
@@ -73,7 +73,7 @@ export function AccountEquity() {
             variant="outline"
             size="sm"
             className="h-8 rounded-lg text-xs bg-background/80"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/funding?tab=withdraw")}
             data-testid="button-withdraw"
           >
             Withdraw
@@ -169,10 +169,10 @@ export function AccountEquity() {
                   Deposit funds to start trading. Visit the{" "}
                   <button
                     type="button"
-                    onClick={() => navigate("/")}
+                    onClick={() => navigate("/funding?tab=deposit")}
                     className="text-primary underline"
                   >
-                    Portfolio page
+                    Funding page
                   </button>{" "}
                   to manage funds.
                 </p>
