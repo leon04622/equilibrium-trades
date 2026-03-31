@@ -45,23 +45,47 @@ function upsertByScore(
 
 export type MultiPatternGatherRow = { p: DetectedPattern; volumeOk: boolean };
 
-function filterOpposingFlagDirections(
+/**
+ * Named pairs that imply opposite directional theses on the same bars.
+ * Applied inside `gatherMultiPatternCandidates` for **every** coin and **every** timeframe the scanner
+ * evaluates (`analyzeEducationalUniversal` calls this once per TF), so beginners never see both sides at once.
+ */
+const OPPOSING_PATTERN_PAIRS: readonly [string, string][] = [
+  ["bull_flag", "bear_flag"],
+  ["double_top", "double_bottom"],
+  ["head_and_shoulders", "inverse_head_and_shoulders"],
+  ["rising_wedge", "falling_wedge"],
+  ["ascending_triangle", "descending_triangle"],
+  ["bullish_pennant", "bearish_pennant"],
+];
+
+/** If both pattern names appear in the candidate set, keep only the higher-scoring side (all lifecycle rows). */
+function filterOpposingNamedPair(
   rows: MultiPatternGatherRow[],
+  nameA: string,
+  nameB: string,
 ): MultiPatternGatherRow[] {
-  const bullFlags = rows.filter((row) => row.p.name === "bull_flag");
-  const bearFlags = rows.filter((row) => row.p.name === "bear_flag");
+  const aRows = rows.filter((row) => row.p.name === nameA);
+  const bRows = rows.filter((row) => row.p.name === nameB);
+  if (aRows.length === 0 || bRows.length === 0) return rows;
 
-  if (bullFlags.length === 0 || bearFlags.length === 0) return rows;
-
-  const bestBull = Math.max(...bullFlags.map((row) => scoreCandidate(row.p, row.volumeOk)));
-  const bestBear = Math.max(...bearFlags.map((row) => scoreCandidate(row.p, row.volumeOk)));
-  const keepBull = bestBull >= bestBear;
+  const bestA = Math.max(...aRows.map((row) => scoreCandidate(row.p, row.volumeOk)));
+  const bestB = Math.max(...bRows.map((row) => scoreCandidate(row.p, row.volumeOk)));
+  const keepA = bestA >= bestB;
 
   return rows.filter((row) => {
-    if (keepBull && row.p.name === "bear_flag") return false;
-    if (!keepBull && row.p.name === "bull_flag") return false;
+    if (keepA && row.p.name === nameB) return false;
+    if (!keepA && row.p.name === nameA) return false;
     return true;
   });
+}
+
+function applyBeginnerOpposingFilters(rows: MultiPatternGatherRow[]): MultiPatternGatherRow[] {
+  let out = rows;
+  for (const [a, b] of OPPOSING_PATTERN_PAIRS) {
+    out = filterOpposingNamedPair(out, a, b);
+  }
+  return out;
 }
 
 export function gatherMultiPatternCandidates(
@@ -89,7 +113,7 @@ export function gatherMultiPatternCandidates(
   const strictBear = detectStrictFlagWithVolume(candles, false);
   if (strictBear) upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk });
 
-  const rows = filterOpposingFlagDirections(
+  const rows = applyBeginnerOpposingFilters(
     [...candMap.values()].sort(
       (a, b) => scoreCandidate(b.p, b.volumeOk) - scoreCandidate(a.p, a.volumeOk),
     ),

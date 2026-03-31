@@ -696,9 +696,20 @@ export function PatternScannerUI() {
         </p>
         {usingSearchScope ? (
           <p className="text-[10px] md:text-xs text-muted-foreground">
-            {matchedScanCoins.length > 0
-              ? `Scanning ${matchedScanCoins.length} matching market${matchedScanCoins.length === 1 ? "" : "s"}.`
-              : "No markets matched that search yet."}
+            {matchedScanCoins.length > 0 ? (
+              <>
+                Scope: {matchedScanCoins.length} market{matchedScanCoins.length === 1 ? "" : "s"} in this scan.
+                {isLoading && signals.length === 0
+                  ? " Running scan…"
+                  : signals.length > 0
+                    ? ` ${signals.length} setup${signals.length === 1 ? "" : "s"} below — one card per pattern (several on the same coin/timeframe is normal).`
+                    : scanHasCompleted
+                      ? " No setups matched the current timeframe/filters yet."
+                      : null}
+              </>
+            ) : (
+              "No markets matched that search yet."
+            )}
           </p>
         ) : null}
       </div>

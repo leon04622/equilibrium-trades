@@ -395,6 +395,7 @@ export async function analyzeEducationalUniversal(
   const prevSma = calculateSMAFromCandles(prev);
   const crossover = detectCrossover(currentSMA, prevSma);
 
+  // Opposing-direction pattern pairs are deduped inside (per coin × timeframe — every TF in MTF scans).
   const { rows, apexResult } = gatherMultiPatternCandidates(candles, timeframe);
 
   if (rows.length === 0) {

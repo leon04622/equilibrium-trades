@@ -48,7 +48,8 @@ const mainNavItems = [
     url: "/trading",
     icon: LineChart,
     badge: "Live",
-    badgeVariant: "default" as const,
+    /** Outline so it reads as a label, not a second "selected" row next to the real active item */
+    badgeVariant: "outline" as const,
   },
   { title: "Pattern Library", url: "/patterns", icon: BookOpen },
   { title: "Candlesticks", url: "/candles", icon: CandlestickChart },
