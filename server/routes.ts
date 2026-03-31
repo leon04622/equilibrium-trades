@@ -1785,6 +1785,20 @@ export async function registerRoutes(
       }
 
       const wa = validated.data.walletAddress.trim().toLowerCase();
+      if (!/^0x[a-f0-9]{40}$/.test(wa)) {
+        return res.status(400).json({ error: "Invalid wallet address" });
+      }
+
+      const caller = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!caller || !/^0x[a-f0-9]{40}$/.test(caller)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const registerAllowed =
+        caller === wa || isMasterAdminAddress(caller) || isFortressSovereignAddress(caller);
+      if (!registerAllowed) {
+        return res.status(403).json({ error: "Wallet address must match your connected wallet" });
+      }
+
       await safeUpsertMongoCrmContactOnConnect({
         walletAddress: wa,
         email: validated.data.email?.trim() || null,

@@ -283,7 +283,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         try {
           await fetch("/api/wallet-user/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "x-wallet-address": address,
+              Authorization: `Bearer ${address}`,
+            },
             credentials: "include",
             body: JSON.stringify({ walletAddress: address }),
             signal: ac.signal,
