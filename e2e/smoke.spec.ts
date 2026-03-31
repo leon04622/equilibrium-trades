@@ -15,4 +15,9 @@ test.describe("public pages", () => {
     await page.goto("/pricing");
     await expect(page.getByRole("heading", { level: 1 })).toContainText(/Choose the plan/i);
   });
+
+  test("docs route responds (gate or docs shell)", async ({ page }) => {
+    await page.goto("/docs");
+    await expect(page.getByRole("heading", { level: 1 }).filter({ hasText: /Equilibrium/i })).toBeVisible();
+  });
 });

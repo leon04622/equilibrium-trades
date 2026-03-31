@@ -58,6 +58,7 @@ export const patternDetectPostLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: json429,
+  skip: (req) => isMasterAdminRequest(req),
 });
 
 export const journalGradePostLimiter = rateLimit({
@@ -66,4 +67,5 @@ export const journalGradePostLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: json429,
+  skip: (req) => isMasterAdminRequest(req),
 });
