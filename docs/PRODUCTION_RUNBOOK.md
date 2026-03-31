@@ -35,14 +35,23 @@ This repo includes **`.github/workflows/production-uptime.yml`**, which runs **e
 
 The step runs `node script/uptime-ping.mjs` (same as `npm run verify:uptime`). If `LIVE_BASE_URL` is not set, the workflow **succeeds with a notice** so forks do not fail.
 
-### Sentry (optional)
+### Sentry (optional) — Railway checklist
 
-1. Create a Sentry project (e.g. Node + React).
-2. **Railway (server):** add `SENTRY_DSN` from the server/Node DSN. Optional: `SENTRY_ENVIRONMENT=production`, `SENTRY_TRACES_SAMPLE_RATE=0.1` (omit or `0` to disable performance traces).
-3. **Client:** add `VITE_SENTRY_DSN` from the browser client DSN and **redeploy** so Vite bakes it in.
-4. Confirm a test event: trigger a render error in dev with DSN set, or use Sentry’s “send test event”.
+The app already initializes Sentry when DSNs are set (`server/sentry-init.ts`, `client/src/sentry-client.ts`). You only add variables and redeploy.
 
-Unhandled server errors passed to Express with status ≥ 500 are reported automatically. The root `AppErrorBoundary` sends React render failures when the browser DSN is set.
+1. **Sentry.io** → create a project (or use one project with separate **Node** and **Browser** DSNs under *Client Keys*).
+2. **Railway** → your **web service** → **Variables**:
+   - **`SENTRY_DSN`** — paste the **server / Node** DSN (runtime only; do not prefix with `VITE_`).
+   - **`SENTRY_ENVIRONMENT`** — e.g. `production` (optional).
+   - **`SENTRY_TRACES_SAMPLE_RATE`** — `0` for errors-only, or `0.1` for light performance sampling (optional).
+3. **Same Variables tab**, add **build-time** vars so the Docker image’s `npm run build` sees Vite env:
+   - **`VITE_SENTRY_DSN`** — paste the **browser** DSN (different from the Node DSN).
+   - **`VITE_SENTRY_TRACES_SAMPLE_RATE`** — `0` recommended unless you want browser traces.
+   - In Railway, set each `VITE_*` variable to apply at **build** as well as deploy (UI wording varies: *“Available at Build Time”* / include in Docker build). If the browser DSN is missing at build time, the client bundle will not report to Sentry.
+4. **Redeploy** the service (new deploy triggers a fresh Docker build with the `VITE_*` args wired in `Dockerfile`).
+5. **Verify:** Sentry → *Issues* → use **Send test event** for the Node project; open the live site and confirm no CSP errors in the browser console for `*.ingest.sentry.io` (production CSP already allows `https:` for `connect-src`).
+
+Unhandled server errors passed to Express with status ≥ 500 are captured automatically. The root `AppErrorBoundary` reports React render failures when `VITE_SENTRY_DSN` was present at build time.
 
 ## Manual acceptance checks
 
