@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -27,27 +28,32 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 
 import Dashboard from "@/pages/dashboard";
-import Trading from "@/pages/trading";
-import Patterns from "@/pages/patterns";
-import Candles from "@/pages/candles";
-import Learn from "@/pages/learn";
-import Signals from "@/pages/signals";
-import Heatmap from "@/pages/heatmap";
-import EducationalVault from "@/pages/EducationalVault";
-import Docs from "@/pages/Docs";
-import Portfolio from "@/pages/portfolio";
-import Pricing from "@/pages/pricing";
-import Settings from "@/pages/settings";
-import Hyperliquid from "@/pages/hyperliquid";
 import { AdminGuard } from "@/components/admin-guard";
-import AdminCommandCenter from "@/pages/AdminPanel";
-import NotFound from "@/pages/not-found";
 import { JournalView } from "@/components/JournalView";
 import { UserTierSync } from "@/components/user-tier-sync";
+import NotFound from "@/pages/not-found";
+
+const Trading = lazy(() => import("@/pages/trading"));
+const Patterns = lazy(() => import("@/pages/patterns"));
+const Candles = lazy(() => import("@/pages/candles"));
+const Learn = lazy(() => import("@/pages/learn"));
+const Signals = lazy(() => import("@/pages/signals"));
+const Heatmap = lazy(() => import("@/pages/heatmap"));
+const EducationalVault = lazy(() => import("@/pages/EducationalVault"));
+const Docs = lazy(() => import("@/pages/Docs"));
+const Portfolio = lazy(() => import("@/pages/portfolio"));
+const Pricing = lazy(() => import("@/pages/pricing"));
+const Settings = lazy(() => import("@/pages/settings"));
+const Hyperliquid = lazy(() => import("@/pages/hyperliquid"));
+const AdminCommandCenter = lazy(() => import("@/pages/AdminPanel"));
 
 const PAGE_META: Array<{ match: (pathname: string) => boolean; title: string; subtitle: string }> = [
   { match: (pathname) => pathname === "/", title: "Dashboard", subtitle: "Signals, learning, and execution in one calm workspace." },
-  { match: (pathname) => pathname.startsWith("/trading"), title: "Trading Workspace", subtitle: "Move from structure to execution without context switching." },
+  {
+    match: (pathname) => pathname === "/trade" || pathname.startsWith("/trading"),
+    title: "Trading Workspace",
+    subtitle: "Move from structure to execution without context switching.",
+  },
   { match: (pathname) => pathname.startsWith("/patterns"), title: "Pattern Library", subtitle: "Study the setup language behind cleaner decisions." },
   { match: (pathname) => pathname.startsWith("/candles"), title: "Candlesticks", subtitle: "Learn the candle behaviour behind market intent." },
   { match: (pathname) => pathname.startsWith("/learn"), title: "Courses", subtitle: "Structured lessons tied to the way the platform is actually used." },
@@ -67,6 +73,17 @@ function getPageMeta(pathname: string) {
     title: "Equilibrium",
     subtitle: "Trading, education, and review in one connected workspace.",
   };
+}
+
+function RouteChunkFallback({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-8 text-muted-foreground">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/15 bg-primary/10 text-primary shadow-sm">
+        <Loader2 className="h-7 w-7 animate-spin" />
+      </div>
+      <p className="text-sm font-medium text-foreground/80">{label}</p>
+    </div>
+  );
 }
 
 function App() {
@@ -123,6 +140,11 @@ function ShellHeader() {
   const { pathname } = useLocation();
   const meta = getPageMeta(pathname);
 
+  useEffect(() => {
+    const m = getPageMeta(pathname);
+    document.title = m.title === "Equilibrium" ? "Equilibrium" : `${m.title} · Equilibrium`;
+  }, [pathname]);
+
   return (
     <header className="sticky top-0 z-50 border-b bg-background/92 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:px-4">
       <div className="flex h-16 items-center justify-between gap-3">
@@ -161,41 +183,43 @@ function TradingLayout() {
 
   return (
     <>
-      <div
-        className="flex-1 min-h-0 overflow-hidden"
-        style={{ display: isTrading ? "flex" : "none", flexDirection: "column" }}
-      >
-        <Trading visible={isTrading} />
-      </div>
-      {!isTrading && (
+      {isTrading ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <Suspense fallback={<RouteChunkFallback label="Loading trading workspace…" />}>
+            <Trading />
+          </Suspense>
+        </div>
+      ) : (
         <ScrollArea className="flex-1">
           <main className="min-h-0 pb-16 md:pb-0">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/patterns" element={<Patterns />} />
-              <Route path="/candles" element={<Candles />} />
-              <Route path="/learn" element={<Learn />} />
-              <Route path="/signals" element={<Signals />} />
-              <Route path="/heatmap" element={<Heatmap />} />
-              <Route path="/videos" element={<EducationalVault />} />
-              <Route path="/docs" element={<Docs />} />
-              <Route path="/portfolio" element={<Portfolio />} />
-              <Route path="/journal" element={<JournalView />} />
-              <Route path="/pricing" element={<Pricing />} />
-              <Route path="/subscribe" element={<Pricing />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/hyperliquid" element={<Hyperliquid />} />
-              <Route
-                path="/admin"
-                element={
-                  <AdminGuard>
-                    <AdminCommandCenter />
-                  </AdminGuard>
-                }
-              />
-              <Route path="/admin-equilibrium" element={<Navigate to="/admin" replace />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <Suspense fallback={<RouteChunkFallback />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/patterns" element={<Patterns />} />
+                <Route path="/candles" element={<Candles />} />
+                <Route path="/learn" element={<Learn />} />
+                <Route path="/signals" element={<Signals />} />
+                <Route path="/heatmap" element={<Heatmap />} />
+                <Route path="/videos" element={<EducationalVault />} />
+                <Route path="/docs" element={<Docs />} />
+                <Route path="/portfolio" element={<Portfolio />} />
+                <Route path="/journal" element={<JournalView />} />
+                <Route path="/pricing" element={<Pricing />} />
+                <Route path="/subscribe" element={<Pricing />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/hyperliquid" element={<Hyperliquid />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminGuard>
+                      <AdminCommandCenter />
+                    </AdminGuard>
+                  }
+                />
+                <Route path="/admin-equilibrium" element={<Navigate to="/admin" replace />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
           </main>
         </ScrollArea>
       )}
