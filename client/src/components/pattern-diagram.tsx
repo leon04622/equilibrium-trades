@@ -39,42 +39,41 @@ export function PatternDiagram({ patternId, className }: PatternDiagramProps) {
       case "bull-flag":
         return (
           <svg viewBox="0 0 220 100" className="w-full h-full">
-            <Candle x={5} open={85} high={80} low={90} close={75} />
-            <Candle x={20} open={75} high={65} low={78} close={55} />
-            <Candle x={35} open={55} high={45} low={58} close={35} />
-            <Candle x={50} open={35} high={25} low={38} close={22} />
-            <Candle x={65} open={28} high={22} low={35} close={32} />
-            <Candle x={80} open={35} high={30} low={42} close={38} />
-            <Candle x={95} open={40} high={36} low={48} close={45} />
-            <Candle x={110} open={43} high={38} low={50} close={48} />
-            <Candle x={125} open={46} high={40} low={52} close={42} />
-            <Candle x={140} open={40} high={35} low={45} close={38} />
-            <Candle x={155} open={36} high={28} low={40} close={20} />
-            <Candle x={170} open={20} high={12} low={24} close={15} />
-            <line x1="50" y1="22" x2="155" y2="35" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4"/>
-            <line x1="65" y1="35" x2="155" y2="50" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4"/>
-            <text x="75" y="62" className="fill-muted-foreground text-[8px]">Flag</text>
-            <text x="15" y="95" className="fill-muted-foreground text-[8px]">Pole</text>
+            <line x1="22" y1="84" x2="22" y2="16" className="stroke-bullish" strokeWidth="4" strokeLinecap="round" />
+            <polygon points="22,10 16,22 28,22" className="fill-bullish" />
+            <line x1="54" y1="32" x2="150" y2="42" className="stroke-muted-foreground" strokeWidth="1.5" strokeDasharray="4" />
+            <line x1="60" y1="50" x2="156" y2="60" className="stroke-muted-foreground" strokeWidth="1.5" strokeDasharray="4" />
+            <Candle x={44} open={40} high={34} low={48} close={36} width={10} />
+            <Candle x={60} open={44} high={40} low={52} close={48} width={10} />
+            <Candle x={76} open={49} high={45} low={56} close={53} width={10} />
+            <Candle x={92} open={53} high={48} low={58} close={55} width={10} />
+            <Candle x={108} open={56} high={50} low={60} close={52} width={10} />
+            <Candle x={124} open={52} high={46} low={58} close={49} width={10} />
+            <line x1="160" y1="46" x2="188" y2="22" className="stroke-bullish" strokeWidth="3" strokeLinecap="round" />
+            <polygon points="192,18 180,20 188,28" className="fill-bullish" />
+            <text x="14" y="94" className="fill-muted-foreground text-[8px]">Pole up</text>
+            <text x="90" y="72" className="fill-muted-foreground text-[8px]">Pullback channel</text>
+            <text x="160" y="18" className="fill-bullish text-[8px]">Breakout</text>
           </svg>
         );
       case "bear-flag":
         return (
           <svg viewBox="0 0 220 100" className="w-full h-full">
-            <Candle x={5} open={15} high={10} low={20} close={25} />
-            <Candle x={20} open={25} high={22} low={40} close={45} />
-            <Candle x={35} open={45} high={42} low={60} close={65} />
-            <Candle x={50} open={65} high={62} low={78} close={78} />
-            <Candle x={65} open={72} high={68} low={78} close={70} />
-            <Candle x={80} open={68} high={62} low={72} close={65} />
-            <Candle x={95} open={63} high={58} low={68} close={60} />
-            <Candle x={110} open={58} high={52} low={62} close={55} />
-            <Candle x={125} open={57} high={52} low={62} close={58} />
-            <Candle x={140} open={60} high={55} low={65} close={62} />
-            <Candle x={155} open={64} high={60} low={78} close={80} />
-            <Candle x={170} open={80} high={78} low={92} close={90} />
-            <line x1="50" y1="78" x2="155" y2="65" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4"/>
-            <line x1="65" y1="68" x2="155" y2="52" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4"/>
-            <text x="75" y="48" className="fill-muted-foreground text-[8px]">Flag</text>
+            <line x1="24" y1="16" x2="24" y2="84" className="stroke-bearish" strokeWidth="4" strokeLinecap="round" />
+            <polygon points="24,90 18,78 30,78" className="fill-bearish" />
+            <line x1="56" y1="62" x2="152" y2="50" className="stroke-muted-foreground" strokeWidth="1.5" strokeDasharray="4" />
+            <line x1="62" y1="46" x2="158" y2="34" className="stroke-muted-foreground" strokeWidth="1.5" strokeDasharray="4" />
+            <Candle x={46} open={58} high={54} low={68} close={64} width={10} />
+            <Candle x={62} open={54} high={48} low={62} close={50} width={10} />
+            <Candle x={78} open={50} high={44} low={58} close={46} width={10} />
+            <Candle x={94} open={46} high={40} low={54} close={42} width={10} />
+            <Candle x={110} open={42} high={38} low={50} close={47} width={10} />
+            <Candle x={126} open={46} high={42} low={55} close={52} width={10} />
+            <line x1="162" y1="54" x2="190" y2="80" className="stroke-bearish" strokeWidth="3" strokeLinecap="round" />
+            <polygon points="194,84 182,82 188,74" className="fill-bearish" />
+            <text x="12" y="12" className="fill-muted-foreground text-[8px]">Pole down</text>
+            <text x="88" y="26" className="fill-muted-foreground text-[8px]">Bounce channel</text>
+            <text x="158" y="90" className="fill-bearish text-[8px]">Breakdown</text>
           </svg>
         );
       case "ascending-triangle":
@@ -438,6 +437,82 @@ export function PatternDiagram({ patternId, className }: PatternDiagramProps) {
             <line x1="141" y1="22" x2="141" y2="30" className="stroke-bearish" strokeWidth="2"/>
             <line x1="141" y1="70" x2="141" y2="78" className="stroke-bearish" strokeWidth="2"/>
             <Candle x={175} open={72} high={68} low={82} close={78} />
+          </svg>
+        );
+      case "smma-bullish-crossover":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <path d="M10 76 C40 76, 70 72, 100 58 S160 24, 205 18" className="stroke-bullish" strokeWidth="3" fill="none" />
+            <path d="M10 28 C50 30, 95 34, 125 42 S175 56, 205 66" className="stroke-primary" strokeWidth="3" fill="none" opacity="0.8" />
+            <circle cx="112" cy="48" r="3.5" className="fill-warning" />
+            <text x="118" y="42" className="fill-muted-foreground text-[8px]">21 over 200</text>
+            <text x="152" y="22" className="fill-bullish text-[8px]">Bullish crossover</text>
+          </svg>
+        );
+      case "smma-bearish-crossover":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <path d="M10 20 C40 20, 70 24, 100 40 S160 70, 205 78" className="stroke-bearish" strokeWidth="3" fill="none" />
+            <path d="M10 70 C50 68, 95 62, 125 54 S175 40, 205 32" className="stroke-primary" strokeWidth="3" fill="none" opacity="0.8" />
+            <circle cx="112" cy="50" r="3.5" className="fill-warning" />
+            <text x="118" y="44" className="fill-muted-foreground text-[8px]">21 under 200</text>
+            <text x="148" y="86" className="fill-bearish text-[8px]">Bearish crossover</text>
+          </svg>
+        );
+      case "bull-flag-apex":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <line x1="24" y1="86" x2="24" y2="18" className="stroke-bullish" strokeWidth="4" strokeLinecap="round" />
+            <polygon points="24,12 18,24 30,24" className="fill-bullish" />
+            <path d="M58 38 L78 44 L98 40 L118 48 L138 46" className="stroke-primary" strokeWidth="2" fill="none" />
+            <path d="M58 54 L78 58 L98 56 L118 62 L138 60" className="stroke-primary" strokeWidth="2" fill="none" opacity="0.5" />
+            <line x1="146" y1="46" x2="188" y2="22" className="stroke-bullish" strokeWidth="3" strokeLinecap="round" />
+            <polygon points="192,18 180,20 188,28" className="fill-bullish" />
+            <text x="56" y="72" className="fill-muted-foreground text-[8px]">Apex flag pivots</text>
+            <text x="144" y="18" className="fill-bullish text-[8px]">Apex breakout</text>
+          </svg>
+        );
+      case "bear-flag-apex":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <line x1="24" y1="14" x2="24" y2="82" className="stroke-bearish" strokeWidth="4" strokeLinecap="round" />
+            <polygon points="24,88 18,76 30,76" className="fill-bearish" />
+            <path d="M58 60 L78 54 L98 58 L118 50 L138 52" className="stroke-primary" strokeWidth="2" fill="none" />
+            <path d="M58 44 L78 38 L98 42 L118 34 L138 36" className="stroke-primary" strokeWidth="2" fill="none" opacity="0.5" />
+            <line x1="146" y1="52" x2="188" y2="76" className="stroke-bearish" strokeWidth="3" strokeLinecap="round" />
+            <polygon points="192,80 180,78 188,70" className="fill-bearish" />
+            <text x="54" y="24" className="fill-muted-foreground text-[8px]">Apex flag pivots</text>
+            <text x="144" y="90" className="fill-bearish text-[8px]">Apex breakdown</text>
+          </svg>
+        );
+      case "hidden-bullish-divergence":
+      case "regular-bullish-divergence":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <path d="M18 34 L62 46 L104 30 L146 42 L190 26" className="stroke-foreground" strokeWidth="2.5" fill="none" />
+            <path d="M18 78 L62 66 L104 82 L146 70 L190 84" className="stroke-bullish" strokeWidth="2.5" fill="none" />
+            <line x1="62" y1="46" x2="190" y2="26" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4" />
+            <line x1="62" y1="66" x2="190" y2="84" className="stroke-bullish" strokeWidth="1.5" strokeDasharray="4" />
+            <text x="12" y="22" className="fill-muted-foreground text-[7px]">Price</text>
+            <text x="12" y="94" className="fill-bullish text-[7px]">Momentum</text>
+            <text x="124" y="12" className="fill-bullish text-[8px]">
+              {patternId === "hidden-bullish-divergence" ? "Hidden bullish" : "Regular bullish"}
+            </text>
+          </svg>
+        );
+      case "hidden-bearish-divergence":
+      case "regular-bearish-divergence":
+        return (
+          <svg viewBox="0 0 220 100" className="w-full h-full">
+            <path d="M18 66 L62 54 L104 72 L146 58 L190 76" className="stroke-foreground" strokeWidth="2.5" fill="none" />
+            <path d="M18 24 L62 36 L104 18 L146 32 L190 16" className="stroke-bearish" strokeWidth="2.5" fill="none" />
+            <line x1="62" y1="54" x2="190" y2="76" className="stroke-muted-foreground" strokeWidth="1" strokeDasharray="4" />
+            <line x1="62" y1="36" x2="190" y2="16" className="stroke-bearish" strokeWidth="1.5" strokeDasharray="4" />
+            <text x="12" y="88" className="fill-muted-foreground text-[7px]">Price</text>
+            <text x="12" y="14" className="fill-bearish text-[7px]">Momentum</text>
+            <text x="124" y="96" className="fill-bearish text-[8px]">
+              {patternId === "hidden-bearish-divergence" ? "Hidden bearish" : "Regular bearish"}
+            </text>
           </svg>
         );
       default:
