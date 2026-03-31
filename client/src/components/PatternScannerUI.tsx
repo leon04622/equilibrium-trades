@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { RefreshCw, Activity, Search } from "lucide-react";
+import { RefreshCw, Activity, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -98,7 +98,8 @@ export function PatternScannerUI() {
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>("all");
-  const [scanQuery, setScanQuery] = useState("");
+  const [selectedMarketLabels, setSelectedMarketLabels] = useState<string[]>([]);
+  const [searchInput, setSearchInput] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
 
   const marketsQuery = useQuery<ScannerMarketsPayload>({
@@ -114,17 +115,9 @@ export function PatternScannerUI() {
 
   const universeCount = marketsQuery.data?.tickers?.length ?? null;
   const displayByCoin = marketsQuery.data?.displayByCoin;
-  const currentSearchFragment = useMemo(() => {
-    const parts = scanQuery.split(",");
-    return parts[parts.length - 1]?.trim() ?? "";
-  }, [scanQuery]);
   const searchTerms = useMemo(
-    () =>
-      scanQuery
-        .split(",")
-        .map((term) => term.trim())
-        .filter(Boolean),
-    [scanQuery],
+    () => [...selectedMarketLabels, searchInput.trim()].filter(Boolean),
+    [selectedMarketLabels, searchInput],
   );
   const matchedScanCoins = useMemo(() => {
     if (searchTerms.length === 0) return [];
@@ -153,12 +146,17 @@ export function PatternScannerUI() {
   const noSearchMatches = usingSearchScope && matchedScanCoins.length === 0;
   const effectiveUniverseCount = usingSearchScope ? matchedScanCoins.length : universeCount;
   const autocompleteOptions = useMemo(() => {
-    const fragment = normalizeScanText(currentSearchFragment);
+    const fragment = normalizeScanText(searchInput);
     if (!fragment) return [];
     const tickers = marketsQuery.data?.tickers ?? [];
     const ranked = tickers
       .map((coin) => {
         const label = buildScannerMarketLabel(coin, displayByCoin);
+        if (
+          selectedMarketLabels.some((selected) => normalizeScanText(selected) === normalizeScanText(label))
+        ) {
+          return null;
+        }
         const rawNorm = normalizeScanText(coin);
         const labelNorm = normalizeScanText(label);
         const exact = rawNorm === fragment || labelNorm === fragment;
@@ -179,7 +177,7 @@ export function PatternScannerUI() {
         return a.label.localeCompare(b.label);
       });
     return ranked.slice(0, 12);
-  }, [currentSearchFragment, marketsQuery.data?.tickers, displayByCoin]);
+  }, [searchInput, marketsQuery.data?.tickers, displayByCoin, selectedMarketLabels]);
 
   const fastTfParam = useMemo(() => {
     if (selectedTimeframe === "all") {
@@ -304,14 +302,20 @@ export function PatternScannerUI() {
   }, []);
 
   function applySearchSelection(label: string) {
-    const parts = scanQuery.split(",");
-    if (parts.length <= 1) {
-      setScanQuery(label);
-    } else {
-      parts[parts.length - 1] = ` ${label}`;
-      setScanQuery(parts.join(",").replace(/^ /, ""));
-    }
+    setSelectedMarketLabels((prev) => {
+      if (prev.some((selected) => normalizeScanText(selected) === normalizeScanText(label))) {
+        return prev;
+      }
+      return [...prev, label];
+    });
+    setSearchInput("");
     setSearchOpen(false);
+  }
+
+  function removeSelectedMarket(label: string) {
+    setSelectedMarketLabels((prev) =>
+      prev.filter((selected) => normalizeScanText(selected) !== normalizeScanText(label)),
+    );
   }
 
   const tabRows = useMemo(() => {
@@ -380,12 +384,19 @@ export function PatternScannerUI() {
         <div ref={searchBoxRef} className="relative max-w-xl">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            value={scanQuery}
-            onChange={(e) => setScanQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => {
+              setSearchInput(e.target.value);
+              setSearchOpen(true);
+            }}
             onFocus={() => setSearchOpen(true)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 setSearchOpen(false);
+                return;
+              }
+              if (e.key === "Backspace" && !searchInput && selectedMarketLabels.length > 0) {
+                setSelectedMarketLabels((prev) => prev.slice(0, -1));
                 return;
               }
               if (e.key === "Enter" && autocompleteOptions.length > 0) {
@@ -393,7 +404,11 @@ export function PatternScannerUI() {
                 applySearchSelection(autocompleteOptions[0]!.label);
               }
             }}
-            placeholder="Type BTC, ETH, SOL, BTC-USDC, or comma-separated markets"
+            placeholder={
+              selectedMarketLabels.length > 0
+                ? "Add another market..."
+                : "Type BTC, ETH, SOL, BTC-USDC, or any market name"
+            }
             className="pl-9"
             data-testid="input-scan-markets"
           />
@@ -413,8 +428,33 @@ export function PatternScannerUI() {
             </div>
           ) : null}
         </div>
+        {selectedMarketLabels.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedMarketLabels.map((label) => (
+              <button
+                key={label}
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs text-foreground"
+                onClick={() => removeSelectedMarket(label)}
+                aria-label={`Remove ${label}`}
+              >
+                <span>{label}</span>
+                <X className="h-3 w-3 text-muted-foreground" />
+              </button>
+            ))}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setSelectedMarketLabels([])}
+            >
+              Clear
+            </Button>
+          </div>
+        ) : null}
         <p className="text-[10px] md:text-xs text-muted-foreground">
-          Leave blank to scan the whole universe. Type one or more markets to scan only matching tickers.
+          Leave blank to scan the whole universe. Pick one or more markets to scope the scan instantly.
         </p>
         {usingSearchScope ? (
           <p className="text-[10px] md:text-xs text-muted-foreground">
