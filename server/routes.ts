@@ -1939,6 +1939,7 @@ export async function registerRoutes(
       if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
         return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
       }
+      await ensureWalletUserRowForPersistence(wallet);
       await upsertMongoCrmContactOnConnect({ walletAddress: wallet });
       const payload = await buildWalletSubscriptionPayload(wallet);
       const user = await storage.getWalletUser(wallet);
