@@ -15,6 +15,7 @@ import {
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
+import { deleteLocalUploadedVideoByObjectPath } from "./local-upload-routes";
 
 let dbAvailable: boolean | null = null;
 let lastDbCheck = 0;
@@ -545,13 +546,18 @@ export class MemStorage implements IStorage {
     if (!db) {
       const i = this.tutorialVideosMem.findIndex((v) => v.id === id);
       if (i >= 0) {
-        this.tutorialVideosMem.splice(i, 1);
+        const [removed] = this.tutorialVideosMem.splice(i, 1);
+        await deleteLocalUploadedVideoByObjectPath(removed?.videoPath ?? null);
         return true;
       }
       return false;
     }
     try {
+      const [existing] = await db.select().from(tutorialVideos).where(eq(tutorialVideos.id, id));
       const result = await db.delete(tutorialVideos).where(eq(tutorialVideos.id, id)).returning();
+      if (result.length > 0) {
+        await deleteLocalUploadedVideoByObjectPath(existing?.videoPath ?? null);
+      }
       return result.length > 0;
     } catch {
       return false;

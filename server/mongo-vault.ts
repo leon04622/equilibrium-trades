@@ -13,6 +13,7 @@ import {
 import { pushAdminLog } from "./admin-log-bus";
 import { emitSupportMessage } from "./support-events";
 import { deleteVaultVideoById, listAllVaultVideos, upsertVaultVideo, vaultVideoDocToApi } from "./video-service";
+import { deleteLocalUploadedVideoByObjectPath } from "./local-upload-routes";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
 /** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
@@ -680,8 +681,11 @@ function createHandle(db: Db): MongoVaultHandle {
       }
       try {
         const raw = req.params.id;
-        const ok = await deleteVaultVideoById(db, raw);
-        if (ok) res.json({ success: true });
+        const result = await deleteVaultVideoById(db, raw);
+        if (result.ok) {
+          await deleteLocalUploadedVideoByObjectPath(result.videoPath);
+          res.json({ success: true });
+        }
         else res.status(404).json({ error: "Video not found" });
       } catch (e) {
         console.error("[mongo-vault] DELETE /api/videos/:id:", e);

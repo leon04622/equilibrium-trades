@@ -32,6 +32,29 @@ async function resolveUploadedFile(id: string): Promise<string | null> {
   }
 }
 
+export async function deleteLocalUploadedVideoByObjectPath(objectPath: string | null | undefined): Promise<void> {
+  const raw = String(objectPath ?? "").trim();
+  if (!raw) return;
+  let id = "";
+  try {
+    const parsed = raw.startsWith("http://") || raw.startsWith("https://")
+      ? new URL(raw).pathname
+      : raw;
+    const match = parsed.match(/\/api\/uploads\/files\/([^/?#]+)/i);
+    id = match?.[1]?.trim() || "";
+  } catch {
+    return;
+  }
+  if (!id) return;
+  const filePath = await resolveUploadedFile(id);
+  if (!filePath) return;
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // Ignore missing or already-removed files.
+  }
+}
+
 export function registerLocalUploadRoutes(app: Express): void {
   void fs.mkdir(UPLOAD_VIDEOS_DIR, { recursive: true }).catch(() => {});
 

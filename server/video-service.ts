@@ -137,17 +137,23 @@ export async function upsertVaultVideo(db: Db, row: VaultVideoUpsertInput): Prom
   return saved as Document & { _id: ObjectId };
 }
 
-export async function deleteVaultVideoById(db: Db, rawId: string): Promise<boolean> {
+export async function deleteVaultVideoById(db: Db, rawId: string): Promise<{ ok: boolean; videoPath: string | null }> {
   const names = [PRIMARY_VIDEOS_COLLECTION, ...legacyCollectionNames(PRIMARY_VIDEOS_COLLECTION)];
   for (const name of names) {
     const c = db.collection(name);
     if (ObjectId.isValid(rawId)) {
+      const existing = await c.findOne({ $or: [{ _id: new ObjectId(rawId) }, { id: rawId }] });
       const dr = await c.deleteOne({ $or: [{ _id: new ObjectId(rawId) }, { id: rawId }] });
-      if (dr.deletedCount > 0) return true;
+      if (dr.deletedCount > 0) {
+        return { ok: true, videoPath: existing?.videoPath != null ? String(existing.videoPath) : null };
+      }
     } else {
+      const existing = await c.findOne({ id: rawId });
       const dr = await c.deleteOne({ id: rawId });
-      if (dr.deletedCount > 0) return true;
+      if (dr.deletedCount > 0) {
+        return { ok: true, videoPath: existing?.videoPath != null ? String(existing.videoPath) : null };
+      }
     }
   }
-  return false;
+  return { ok: false, videoPath: null };
 }
