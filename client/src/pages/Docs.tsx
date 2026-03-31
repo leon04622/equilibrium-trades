@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { BookMarked, LineChart, Rocket, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 
 /**
  * In-app documentation for users and external reviewers (e.g. Hyperliquid).
@@ -20,8 +19,8 @@ export default function Docs() {
             </div>
             <h1 className="text-3xl font-bold font-display tracking-tight">Equilibrium Trading</h1>
             <p className="text-muted-foreground text-sm md:text-base max-w-2xl">
-              Hyperliquid L1 execution, SMMA trend context, and a geometry-first pattern scanner. Static reference for
-              onboarding, exchange review, and platform trust.
+              Hyperliquid execution, AI pattern scanning, cleaner chart context, and a calmer workflow for learning,
+              scanning, and trading in one place.
             </p>
           </div>
         </CardContent>
@@ -29,70 +28,53 @@ export default function Docs() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <LineChart className="h-5 w-5 text-primary" />
-            Strategy — 21 / 200 SMMA (trend-first)
-          </CardTitle>
-          <CardDescription>
-            How we read trend and how it relates to poles and flags.
-          </CardDescription>
+          <CardTitle className="text-lg">What the platform is for</CardTitle>
+          <CardDescription>The main parts of Equilibrium and how they work together.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
           <p>
-            Charts plot <strong className="text-foreground">21-period</strong> and{" "}
-            <strong className="text-foreground">200-period SMMA</strong> (smoothed moving averages), consistent
-            with Hyperliquid’s methodology. Trend-first context: when 21 is above 200, we describe a{" "}
-            <strong className="text-foreground">bullish bias</strong>; when below, a{" "}
-            <strong className="text-foreground">bearish bias</strong>. Price relative to both lines informs
-            educational copy on pattern cards.
+            <strong className="text-foreground">Trading</strong> gives you live charts, order entry, position management,
+            and Hyperliquid execution in one workspace.
           </p>
           <p>
-            <strong className="text-foreground">Impulse poles</strong> are sharp directional legs — the engine
-            measures a strong move that establishes momentum before price pauses.
+            <strong className="text-foreground">AI Signals</strong> scans markets across multiple timeframes to surface
+            developing and developed chart structures like wedges, flags, triangles, doubles, and head-and-shoulders.
           </p>
           <p>
-            <strong className="text-foreground">Consolidation flags</strong> are tight counter-trend channels
-            after that pole (e.g. bull flag: downward-sloping pause after an upward pole). Breakout states range
-            from forming to confirmed.
+            <strong className="text-foreground">Pattern Library</strong> helps you quickly check what a setup means if
+            the scanner finds something you want to review before acting.
           </p>
-          <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
-            Scanner rule: <strong className="text-foreground">geometry is not vetoed by SMMA.</strong> Bearish
-            structures in bullish regimes (and the reverse) still appear when OHLC rules validate; SMMA is
-            advisory on the card, not a hide filter.
+          <p>
+            <strong className="text-foreground">Portfolio</strong> is where you manage balances, deposits, transfers,
+            and withdrawals without needing to leave the platform.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Technical specs — scanner</CardTitle>
-          <CardDescription>Markets, timeframes, and pattern coverage.</CardDescription>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <LineChart className="h-5 w-5 text-primary" />
+            How Equilibrium reads charts
+          </CardTitle>
+          <CardDescription>Simple context behind the platform’s chart and scanner language.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ul className="list-disc pl-5 space-y-2 leading-relaxed">
-            <li>
-              <strong className="text-foreground">Universe:</strong> top{" "}
-              <strong className="text-foreground">50</strong> Hyperliquid perps by 24h notional volume, plus{" "}
-              <strong className="text-foreground">PAXG</strong> (gold proxy) when listed.
-            </li>
-            <li>
-              <strong className="text-foreground">Timeframes:</strong> multi-TF pipeline includes{" "}
-              <code className="text-xs bg-muted px-1 rounded">1m</code>,{" "}
-              <code className="text-xs bg-muted px-1 rounded">5m</code>,{" "}
-              <code className="text-xs bg-muted px-1 rounded">1h</code>, and{" "}
-              <code className="text-xs bg-muted px-1 rounded">4h</code> among others (15m, 30m, 2h, 1d).
-            </li>
-            <li>
-              <strong className="text-foreground">Lookback:</strong> deep windows (e.g. 1h / 4h) request up to{" "}
-              <strong className="text-foreground">400</strong> bars for macro poles; a minimum of{" "}
-              <strong className="text-foreground">200</strong> bars is required before a pattern is emitted.
-            </li>
-            <li>
-              <strong className="text-foreground">Pattern library:</strong> wedges, triangles, double tops/bottoms,
-              bull/bear flags (incl. volume-aware variants), channels, head &amp; shoulders / inverse H&amp;S, and
-              Apex pole+flag geometry — evaluated across the full universe above.
-            </li>
-          </ul>
+        <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <p>
+            Charts use <strong className="text-foreground">21</strong> and{" "}
+            <strong className="text-foreground">200 SMMA</strong> as trend context. In simple terms, when the faster line
+            is above the slower line, the platform describes a stronger bullish environment; when it is below, the
+            environment is more bearish.
+          </p>
+          <p>
+            The scanner is <strong className="text-foreground">geometry first</strong>. If a wedge, flag, triangle, or
+            reversal pattern is structurally valid, it can still appear even if the moving-average context is mixed.
+            That means the chart patterns are not hidden just because the trend is not perfectly aligned.
+          </p>
+          <p>
+            Results are shown across multiple timeframes so you can compare short-term opportunities with slower, more
+            established structures before making a decision.
+          </p>
         </CardContent>
       </Card>
 
@@ -114,12 +96,9 @@ export default function Docs() {
                 <p className="font-medium text-foreground">Connect your wallet</p>
                 <p className="text-muted-foreground mt-1">
                   Connect on the site header. On <Link className="text-primary underline" to="/portfolio">Portfolio</Link>
-                  , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into <strong>HyperCore</strong> using{" "}
-                  <strong>Circle CCTP</strong> — an institutional, <strong>zero-slippage</strong> burn/mint path (no pool
-                  trading). The app signs <strong>EIP-3009 ReceiveWithAuthorization</strong> and calls{" "}
-                  <code className="text-xs bg-muted px-1 rounded">batchDepositForBurnWithAuth</code> on a server-configured{" "}
-                  <strong>CctpExtension</strong>; contract addresses are never hardcoded in the client bundle. Bridge step
-                  progress is saved to your CRM profile so you can resume after refresh.
+                  , move <strong>native USDC</strong> on <strong>Arbitrum One</strong> into Hyperliquid using{" "}
+                  <strong>Circle CCTP</strong>. The deposit flow is built to be a direct USDC messaging route rather than
+                  a swap-style bridge, and your progress is remembered if you need to come back later.
                 </p>
               </div>
             </li>
@@ -130,8 +109,8 @@ export default function Docs() {
               <div>
                 <p className="font-medium text-foreground">Approve builder fee &amp; trading session</p>
                 <p className="text-muted-foreground mt-1">
-                  Complete Hyperliquid <strong>approveBuilderFee</strong> and agent approval so routed orders
-                  include the platform builder address.
+                  Complete the one-time Hyperliquid trading setup when prompted so the platform can route orders cleanly
+                  and keep the trading workflow fast afterward.
                 </p>
               </div>
             </li>
@@ -155,7 +134,7 @@ export default function Docs() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Deposits — Circle CCTP to HyperCore</CardTitle>
-          <CardDescription>Official cross-chain USDC messaging — not a custom “look-alike” bridge recipient.</CardDescription>
+          <CardDescription>A safer USDC deposit route designed for direct delivery into your trading environment.</CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2 leading-relaxed">
           <p>
@@ -172,20 +151,13 @@ export default function Docs() {
             . This is <strong>1:1 USDC</strong> messaging with <strong>no AMM slippage</strong>.
           </p>
           <p>
-            <strong className="text-foreground">Configuration:</strong> the server exposes{" "}
-            <code className="text-xs bg-muted px-1 rounded">GET /api/cctp/deposit-config</code> and{" "}
-            <code className="text-xs bg-muted px-1 rounded">GET /api/cctp/fees</code> (Iris fee quote). Env vars:{" "}
-            <code className="text-xs bg-muted px-1 rounded">CCTP_EXTENSION_ADDRESS</code>,{" "}
-            <code className="text-xs bg-muted px-1 rounded">CCTP_USDC_ADDRESS</code>,{" "}
-            <code className="text-xs bg-muted px-1 rounded">CCTP_FORWARDER_ADDRESS</code>, domains, etc. — see{" "}
-            <code className="text-xs bg-muted px-1 rounded">.env.example</code>.
+            <strong className="text-foreground">Why it matters:</strong> this route is designed to keep the transfer
+            simple and explicit. It avoids the confusion of sending funds to random bridge addresses and keeps the user
+            flow focused on direct USDC delivery.
           </p>
           <p>
-            <strong className="text-foreground">Progress memory:</strong> each step is persisted to MongoDB via{" "}
-            <code className="text-xs bg-muted px-1 rounded">POST /api/user/cctp-bridge-progress</code> and returned in{" "}
-            <code className="text-xs bg-muted px-1 rounded">GET /api/user/sync</code> so the UI can show where you left off.
-            <strong className="text-foreground"> Pro / Mentor</strong> grants in CRM are not cleared by these updates — manual
-            Pro overrides are preserved when syncing from Postgres.
+            <strong className="text-foreground">Resilience:</strong> if you leave the page during a deposit, the platform
+            can restore your progress so you can continue without starting the whole process again.
           </p>
         </CardContent>
       </Card>
@@ -194,26 +166,25 @@ export default function Docs() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Shield className="h-5 w-5 text-primary" />
-            Identity &amp; builder
+            Platform principles
           </CardTitle>
+          <CardDescription>What users should expect from the experience.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm font-mono text-xs break-all">
+        <CardContent className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <p>
-            <span className="text-muted-foreground font-sans text-sm">Admin wallet: </span>
-            0x115560812df8e7515eecc957b6796531e936edd9
+            <strong className="text-foreground">Clarity first:</strong> the goal is to reduce clutter and show you what
+            matters now, whether that is chart context, a developing pattern, or your current account state.
           </p>
           <p>
-            <span className="text-muted-foreground font-sans text-sm">Builder code recipient: </span>
-            0xad9be64fd7a35d99a138b87cb212baefbcdcf045
+            <strong className="text-foreground">Learning while trading:</strong> Equilibrium is built so you can spot a
+            pattern, jump to the library to review it, and return to the same workflow without losing context.
+          </p>
+          <p>
+            <strong className="text-foreground">Educational, not prescriptive:</strong> AI signals and chart labels are
+            meant to help you read structure faster. They are there to support judgment, not replace it.
           </p>
         </CardContent>
       </Card>
-
-      <Separator />
-
-      <p className="text-xs text-muted-foreground text-center">
-        Markdown export: <code className="bg-muted px-1 rounded">docs/EQUILIBRIUM_PLATFORM.md</code>
-      </p>
     </div>
   );
 }
