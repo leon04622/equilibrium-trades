@@ -110,6 +110,12 @@ function App() {
                       <PaywallProvider>
                         <PaywallModal />
                         <SidebarProvider style={style}>
+                          <a
+                            href="#main-content"
+                            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+                          >
+                            Skip to main content
+                          </a>
                           <div className="flex w-full overflow-hidden" style={{ height: "100dvh" }}>
                             <AppSidebar />
                             <SidebarInset className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -184,14 +190,18 @@ function TradingLayout() {
   return (
     <>
       {isTrading ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
+        >
           <Suspense fallback={<RouteChunkFallback label="Loading trading workspace…" />}>
             <Trading />
           </Suspense>
         </div>
       ) : (
         <ScrollArea className="flex-1">
-          <main className="min-h-0 pb-16 md:pb-0">
+          <main id="main-content" tabIndex={-1} className="min-h-0 pb-16 md:pb-0 outline-none">
             <Suspense fallback={<RouteChunkFallback />}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />

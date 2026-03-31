@@ -235,6 +235,20 @@ export function getDatabaseStatus(): { configured: boolean; message: string | nu
   return { configured: false, message: DATABASE_URL_MISSING_MESSAGE };
 }
 
+/** Lightweight ping for health checks; false if pool missing or query fails. */
+export async function pingPostgres(): Promise<boolean> {
+  if (!pool) return false;
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeDatabasePool(): Promise<void> {
   if (pool) {
     await pool.end();

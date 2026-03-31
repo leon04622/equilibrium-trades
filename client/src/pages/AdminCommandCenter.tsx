@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Activity,
   Check,
+  Download,
 } from "lucide-react";
 import type { TutorialVideo, SupportMessage } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -116,6 +117,41 @@ function sortCrmRows(rows: CrmRow[], key: SortKey, dir: "asc" | "desc"): CrmRow[
   });
 }
 
+function escapeCsvCell(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function crmRowsToCsv(rows: CrmRow[]): string {
+  const headers = [
+    "wallet",
+    "email",
+    "joinDate",
+    "subTier",
+    "status",
+    "manualProOverride",
+    "builderStatus",
+  ] as const;
+  const lines = [headers.join(",")];
+  for (const row of rows) {
+    const cells = headers.map((h) => {
+      const raw =
+        h === "manualProOverride"
+          ? row.manualProOverride === true
+            ? "true"
+            : row.manualProOverride === false
+              ? "false"
+              : ""
+          : String(row[h] ?? "");
+      return escapeCsvCell(raw);
+    });
+    lines.push(cells.join(","));
+  }
+  return lines.join("\r\n");
+}
+
 export default function AdminCommandCenter() {
   const { address } = useWallet();
   const { toast } = useToast();
@@ -168,6 +204,29 @@ export default function AdminCommandCenter() {
     () => sortCrmRows(filteredCrm, crmSort.key, crmSort.dir),
     [filteredCrm, crmSort],
   );
+
+  const exportCrmCsv = useCallback(() => {
+    if (sortedCrm.length === 0) {
+      toast({
+        title: "Nothing to export",
+        description: "Load CRM data or adjust your search filter.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const csv = crmRowsToCsv(sortedCrm);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `equilibrium-crm-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "CRM exported",
+      description: `${sortedCrm.length} row(s) — reflects current sort and search.`,
+    });
+  }, [sortedCrm, toast]);
 
   const manualProMutation = useMutation({
     mutationFn: async ({ wallet, enable }: { wallet: string; enable: boolean }) => {
@@ -505,9 +564,23 @@ export default function AdminCommandCenter() {
                   MongoDB users collection (or Postgres wallet_users) — wallet, email, tier, subscription status.
                 </CardDescription>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => void refetchCrm()} aria-label="Refresh CRM">
-                <RefreshCw className={cn("h-4 w-4", crmLoading && "animate-spin")} />
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => exportCrmCsv()}
+                  disabled={crmLoading || !!crmError}
+                  aria-label="Export CRM as CSV"
+                >
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => void refetchCrm()} aria-label="Refresh CRM">
+                  <RefreshCw className={cn("h-4 w-4", crmLoading && "animate-spin")} />
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="max-w-md space-y-2">

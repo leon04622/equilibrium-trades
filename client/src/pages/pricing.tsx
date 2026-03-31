@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Check, Sparkles, Crown, ArrowRight, Shield, Zap, BookOpen } from "lucide-react";
+import { useEffect, useMemo } from "react";
+import { Check, Sparkles, Crown, ArrowRight, Shield, Zap, BookOpen, Share2, Quote } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,6 +75,35 @@ export default function Pricing() {
     window.location.href = mentoringCheckoutUrl(isConnected ? address : null);
   };
 
+  const shareUrl = useMemo(() => {
+    const base = `${window.location.origin}/pricing`;
+    if (address) {
+      return `${base}?ref=${encodeURIComponent(address)}`;
+    }
+    return base;
+  }, [address]);
+
+  const testimonials = [
+    {
+      quote:
+        "Having signals, the journal, and the vault in one place finally stopped me from bouncing between five tabs during the session.",
+      attribution: "Pro member",
+      role: "Futures & spot",
+    },
+    {
+      quote:
+        "The mentoring add-on was worth it for execution feedback I could not get from generic courses alone.",
+      attribution: "Mentoring member",
+      role: "Part-time trader",
+    },
+    {
+      quote:
+        "Checkout was straightforward and I could cancel my subscription from the billing portal when my schedule changed.",
+      attribution: "Pro member",
+      role: "Swing focus",
+    },
+  ];
+
   const trustPoints = [
     {
       icon: Shield,
@@ -130,6 +159,53 @@ export default function Pricing() {
         <p className="text-muted-foreground text-lg max-w-xl mx-auto">
           One plan for the full platform. One plan for those who want personalised coaching on top.
         </p>
+        <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(shareUrl);
+                toast({
+                  title: "Link copied",
+                  description: address
+                    ? "Share it with traders you trust — your wallet is attached for referral context."
+                    : "Share the pricing page — connect a wallet to attach a referral hint in the URL.",
+                });
+              } catch {
+                toast({
+                  title: "Copy failed",
+                  description: shareUrl,
+                  variant: "destructive",
+                });
+              }
+            }}
+          >
+            <Share2 className="h-4 w-4" />
+            Copy membership link
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border bg-card/60 p-6 md:p-8">
+        <div className="mb-6 text-center">
+          <h2 className="font-display text-xl font-semibold md:text-2xl">What members say</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Anonymous-style quotes reflect common feedback themes — not financial advice.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          {testimonials.map((t) => (
+            <div key={t.quote.slice(0, 40)} className="relative rounded-xl border bg-background/80 p-5 text-left shadow-sm">
+              <Quote className="absolute right-4 top-4 h-8 w-8 text-primary/15" aria-hidden />
+              <p className="text-sm leading-relaxed text-foreground/90">{t.quote}</p>
+              <p className="mt-4 text-xs font-medium text-foreground">{t.attribution}</p>
+              <p className="text-xs text-muted-foreground">{t.role}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Two pricing cards */}
@@ -182,7 +258,7 @@ export default function Pricing() {
               <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
             <p className="text-xs text-center text-muted-foreground">
-              Cancel anytime. No lock-in.
+              Cancel anytime from the Stripe customer portal. No long-term lock-in.
             </p>
           </CardContent>
         </Card>
@@ -239,6 +315,26 @@ export default function Pricing() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      <div className="rounded-xl border border-border/80 bg-muted/20 p-6 text-sm text-muted-foreground">
+        <h3 className="font-display text-center text-base font-semibold text-foreground">Billing, refunds, and membership</h3>
+        <ul className="mx-auto mt-4 max-w-2xl list-disc space-y-2 pl-5">
+          <li>
+            <span className="font-medium text-foreground">Pro (monthly):</span> You can cancel before the next renewal from
+            the Stripe billing portal linked from checkout emails or your account flow. Access typically continues until
+            the end of the paid period.
+          </li>
+          <li>
+            <span className="font-medium text-foreground">Mentoring (one-time):</span> Coaching is a delivered service;
+            refund eligibility depends on what was already scheduled or delivered — contact support if something went
+            wrong with payment or access.
+          </li>
+          <li>
+            <span className="font-medium text-foreground">Fair use:</span> Automated abuse of signup, support, or checkout
+            may be rate-limited or blocked to keep the workspace reliable for paying members.
+          </li>
+        </ul>
       </div>
 
       <div className="rounded-xl border bg-muted/30 p-6 space-y-4">

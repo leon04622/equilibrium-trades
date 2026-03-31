@@ -10,13 +10,15 @@ import { attachSupportChatWs } from "./support-chat-ws";
 import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
-import { getDatabaseStatus, ensurePostgresCoreTables } from './db';
+import { getDatabaseStatus, ensurePostgresCoreTables, pingPostgres } from './db';
 import { getMongoVaultHealth, pingMongoVault, resolveMongoVaultUri } from "./mongo-vault";
 import { getPublicAppBaseUrl } from "./public-url";
 
 initServerSentry();
 
 const app = express();
+/** So `express-rate-limit` and logs see the client IP behind Railway / reverse proxies. */
+app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
 declare module "http" {
@@ -190,9 +192,48 @@ async function initStripe() {
   });
 
   // ── Health check (required by Replit autoscale) ──
-  app.get("/health", (_req, res) => {
+  app.get("/health", async (_req, res) => {
     const dbStatus = getDatabaseStatus();
     const mongoVault = getMongoVaultHealth();
+    const checks = {
+      postgres: { configured: dbStatus.configured, reachable: null as boolean | null },
+      mongoVault: {
+        uriConfigured: mongoVault.uriConfigured,
+        connected: mongoVault.connected,
+        reachable: null as boolean | null,
+      },
+    };
+
+    const timeoutMs = 1200;
+    const deadline = new Promise<void>((r) => setTimeout(r, timeoutMs));
+    const work = async () => {
+      const tasks: Promise<void>[] = [];
+      if (dbStatus.configured) {
+        tasks.push(
+          pingPostgres()
+            .then((ok) => {
+              checks.postgres.reachable = ok;
+            })
+            .catch(() => {
+              checks.postgres.reachable = false;
+            }),
+        );
+      }
+      if (mongoVault.uriConfigured) {
+        tasks.push(
+          pingMongoVault()
+            .then(() => {
+              checks.mongoVault.reachable = true;
+            })
+            .catch(() => {
+              checks.mongoVault.reachable = false;
+            }),
+        );
+      }
+      await Promise.all(tasks);
+    };
+    await Promise.race([work(), deadline]);
+
     res.status(200).json({
       status: "ok",
       timestamp: new Date().toISOString(),
@@ -210,6 +251,7 @@ async function initStripe() {
               ? "Set MONGO_VAULT_URI or MONGODB_URI (mongodb:// or mongodb+srv://) for Admin vault, CRM, and support in MongoDB."
               : undefined,
       },
+      checks,
     });
   });
 

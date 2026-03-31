@@ -90,6 +90,13 @@ import {
   walletUsers,
 } from "@shared/schema";
 import { db } from "./db";
+import {
+  postLeadsLimiter,
+  walletRegisterLimiter,
+  walletEmailPatchLimiter,
+  supportPublicPostLimiter,
+  stripeCheckoutLimiter,
+} from "./public-rate-limit";
 import { eq } from "drizzle-orm";
 import {
   insertTradeJournalEntry,
@@ -1775,7 +1782,7 @@ export async function registerRoutes(
   });
 
   // Register new wallet user
-  app.post("/api/wallet-user/register", async (req: Request, res: Response) => {
+  app.post("/api/wallet-user/register", walletRegisterLimiter, async (req: Request, res: Response) => {
     try {
       const { insertWalletUserSchema } = await import("@shared/schema");
       const validated = insertWalletUserSchema.safeParse(req.body);
@@ -1971,7 +1978,7 @@ export async function registerRoutes(
   });
 
   // Update wallet user email
-  app.patch("/api/wallet-user/:walletAddress/email", async (req: Request, res: Response) => {
+  app.patch("/api/wallet-user/:walletAddress/email", walletEmailPatchLimiter, async (req: Request, res: Response) => {
     try {
       const { email } = req.body;
       const { z } = await import("zod");
@@ -2409,7 +2416,7 @@ export async function registerRoutes(
   // ============ LEADS / EMAIL CAPTURE ============
 
   // Capture email lead (no auth required - public)
-  app.post("/api/leads", async (req: Request, res: Response) => {
+  app.post("/api/leads", postLeadsLimiter, async (req: Request, res: Response) => {
     try {
       if (!requirePersistentLeadBackend(res)) {
         return;
@@ -2515,7 +2522,7 @@ export async function registerRoutes(
   });
 
   // Send a message — end-users / guests, or master admin (support replies from bubble)
-  app.post("/api/support/messages", async (req: Request, res: Response) => {
+  app.post("/api/support/messages", supportPublicPostLimiter, async (req: Request, res: Response) => {
     try {
       if (mongoVaultHandle) {
         return mongoVaultHandle.handleSupportMessagesPost(req, res);
@@ -2668,31 +2675,31 @@ export async function registerRoutes(
     }
   }
 
-  app.post("/api/support/send", handleSupportSendRequest);
+  app.post("/api/support/send", supportPublicPostLimiter, handleSupportSendRequest);
 
   /** Canonical support ingest: persists to `support_tickets` (same as /api/support/send). */
-  app.post("/api/support", async (req: Request, res: Response) => {
+  app.post("/api/support", supportPublicPostLimiter, async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
   });
 
   /** Alias for clients that POST `walletAddress` + `messageContent` (JSON). Same persistence as /api/support/send. */
-  app.post("/api/support/message", async (req: Request, res: Response) => {
+  app.post("/api/support/message", supportPublicPostLimiter, async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
   });
 
   /** Alias of POST /api/support. */
-  app.post("/api/messages", async (req: Request, res: Response) => {
+  app.post("/api/messages", supportPublicPostLimiter, async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
   });
 
   /** Public support ingest alias — same validation and `support_tickets` row as /api/support/send. */
-  app.post("/api/support/chat", async (req: Request, res: Response) => {
+  app.post("/api/support/chat", supportPublicPostLimiter, async (req: Request, res: Response) => {
     const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     req.body = { ...b };
     return handleSupportSendRequest(req, res);
@@ -3236,7 +3243,7 @@ export async function registerRoutes(
   });
 
   // Create checkout session for subscription
-  app.post("/api/stripe/checkout", async (req: Request, res: Response) => {
+  app.post("/api/stripe/checkout", stripeCheckoutLimiter, async (req: Request, res: Response) => {
     try {
       let { priceId, walletAddress, email, tier } = req.body;
       
@@ -3314,7 +3321,7 @@ export async function registerRoutes(
   });
 
   // Create customer portal session for managing subscription
-  app.post("/api/stripe/portal", async (req: Request, res: Response) => {
+  app.post("/api/stripe/portal", stripeCheckoutLimiter, async (req: Request, res: Response) => {
     try {
       const { walletAddress, email } = req.body;
       

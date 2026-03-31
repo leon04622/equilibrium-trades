@@ -139,3 +139,12 @@ LIVE_BASE_URL=https://www.equilibrium-trading.xyz npm run verify:live
 | Quarterly | Rotate non-Stripe secrets that do not auto-rotate; update `LIVE_BASE_URL` secret if the production domain changes |
 
 Add a personal calendar reminder for **monthly verify:live + Sentry** if you do not rely on CI alone.
+
+## Pre-launch dashboard checklist (manual)
+
+These steps are not in git; complete them in each provider UI:
+
+1. **Railway** — `SENTRY_DSN`, `VITE_SENTRY_DSN` (and optional `SENTRY_*` / `VITE_SENTRY_*` sampling vars) so server and client Sentry both initialize after redeploy.
+2. **GitHub** — repository secret **`LIVE_BASE_URL`** (origin only, no path) so **Production uptime** and local `verify:uptime` / `verify:live` match production.
+3. **Onboarding email** — if you want real post-signup mail, wire an ESP (e.g. Resend, SendGrid) or a webhook from your auth/onboarding flow; the app does not send marketing mail by itself.
+4. **`/health`** — after deploy, confirm JSON includes **`checks.postgres.reachable`** and **`checks.mongoVault.reachable`** when those backends are configured (values may be `null` until pings finish within the health timeout).
