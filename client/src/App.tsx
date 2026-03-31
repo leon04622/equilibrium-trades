@@ -27,12 +27,12 @@ import { PaywallProvider } from "@/lib/paywall-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 
-import Dashboard from "@/pages/dashboard";
 import { AdminGuard } from "@/components/admin-guard";
-import { JournalView } from "@/components/JournalView";
+import { LazyJournalView } from "@/components/journal-view.lazy";
 import { UserTierSync } from "@/components/user-tier-sync";
 import NotFound from "@/pages/not-found";
 
+const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Trading = lazy(() => import("@/pages/trading"));
 const Patterns = lazy(() => import("@/pages/patterns"));
 const Candles = lazy(() => import("@/pages/candles"));
@@ -203,7 +203,7 @@ function TradingLayout() {
                 <Route path="/videos" element={<EducationalVault />} />
                 <Route path="/docs" element={<Docs />} />
                 <Route path="/portfolio" element={<Portfolio />} />
-                <Route path="/journal" element={<JournalView />} />
+                <Route path="/journal" element={<LazyJournalView />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/subscribe" element={<Pricing />} />
                 <Route path="/settings" element={<Settings />} />

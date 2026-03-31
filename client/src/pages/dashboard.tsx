@@ -1,9 +1,20 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { 
-  TrendingUp, Target, BookOpen, Zap, ArrowRight, 
-  BarChart3, GraduationCap, Activity, Shield, Sparkles, PlayCircle, BookMarked
+import {
+  TrendingUp,
+  Target,
+  BookOpen,
+  Zap,
+  ArrowRight,
+  BarChart3,
+  GraduationCap,
+  Activity,
+  Shield,
+  Sparkles,
+  PlayCircle,
+  BookMarked,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +24,7 @@ import { StatsCard } from "@/components/stats-card";
 import { PatternCard } from "@/components/pattern-card";
 import { PatternModal } from "@/components/pattern-modal";
 import { EducationalTip, tradingTips } from "@/components/educational-tip";
-import { JournalView } from "@/components/JournalView";
+import { LazyJournalView } from "@/components/journal-view.lazy";
 import { tradingPatterns } from "@/lib/patterns";
 import type { PatternDefinition } from "@shared/schema";
 
@@ -276,7 +287,15 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <JournalView variant="embedded" />
+          <Suspense
+            fallback={
+              <div className="flex min-h-[220px] items-center justify-center rounded-xl border border-border/70 bg-card/40">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
+              </div>
+            }
+          >
+            <LazyJournalView variant="embedded" />
+          </Suspense>
         </div>
 
         <div className="space-y-6">
