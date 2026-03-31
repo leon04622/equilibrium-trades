@@ -45,6 +45,25 @@ function upsertByScore(
 
 export type MultiPatternGatherRow = { p: DetectedPattern; volumeOk: boolean };
 
+function filterOpposingFlagDirections(
+  rows: MultiPatternGatherRow[],
+): MultiPatternGatherRow[] {
+  const bullFlags = rows.filter((row) => row.p.name === "bull_flag");
+  const bearFlags = rows.filter((row) => row.p.name === "bear_flag");
+
+  if (bullFlags.length === 0 || bearFlags.length === 0) return rows;
+
+  const bestBull = Math.max(...bullFlags.map((row) => scoreCandidate(row.p, row.volumeOk)));
+  const bestBear = Math.max(...bearFlags.map((row) => scoreCandidate(row.p, row.volumeOk)));
+  const keepBull = bestBull >= bestBear;
+
+  return rows.filter((row) => {
+    if (keepBull && row.p.name === "bear_flag") return false;
+    if (!keepBull && row.p.name === "bull_flag") return false;
+    return true;
+  });
+}
+
 export function gatherMultiPatternCandidates(
   candles: HyperliquidCandle[],
   timeframe: string,
@@ -70,8 +89,10 @@ export function gatherMultiPatternCandidates(
   const strictBear = detectStrictFlagWithVolume(candles, false);
   if (strictBear) upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk });
 
-  const rows = [...candMap.values()].sort(
-    (a, b) => scoreCandidate(b.p, b.volumeOk) - scoreCandidate(a.p, a.volumeOk),
+  const rows = filterOpposingFlagDirections(
+    [...candMap.values()].sort(
+      (a, b) => scoreCandidate(b.p, b.volumeOk) - scoreCandidate(a.p, a.volumeOk),
+    ),
   );
   return { rows, apexResult };
 }
