@@ -1,0 +1,32 @@
+# External probe of production GET /health (in addition to Railway’s own health check).
+# Add repository secret LIVE_BASE_URL, e.g. https://www.equilibrium-trading.xyz
+# If the secret is missing, the job exits successfully with a notice (safe for forks).
+
+name: Production uptime
+
+on:
+  schedule:
+    # Every 6 hours UTC
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: production-uptime
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: Ping /health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify LIVE_BASE_URL/health
+        env:
+          UPTIME_CHECK_URL: ${{ secrets.LIVE_BASE_URL }}
+        run: |
+          if [ -z "$UPTIME_CHECK_URL" ]; then
+            echo "::notice title=Uptime skipped::Add repository secret LIVE_BASE_URL (site origin only, e.g. https://www.equilibrium-trading.xyz)"
+            exit 0
+          fi
+          node script/uptime-ping.mjs

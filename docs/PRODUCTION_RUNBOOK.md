@@ -25,6 +25,16 @@ Railway already health-checks `/health`. For an extra external probe (cron, Upti
 UPTIME_CHECK_URL=https://www.equilibrium-trading.xyz npm run verify:uptime
 ```
 
+### GitHub Actions (scheduled uptime)
+
+This repo includes **`.github/workflows/production-uptime.yml`**, which runs **every 6 hours** and on **manual dispatch** (`Actions` → **Production uptime** → **Run workflow**).
+
+1. In GitHub: **Settings → Secrets and variables → Actions → New repository secret**
+2. Name: **`LIVE_BASE_URL`**
+3. Value: production origin only, e.g. `https://www.equilibrium-trading.xyz` (no trailing path)
+
+The step runs `node script/uptime-ping.mjs` (same as `npm run verify:uptime`). If `LIVE_BASE_URL` is not set, the workflow **succeeds with a notice** so forks do not fail.
+
 ### Sentry (optional)
 
 1. Create a Sentry project (e.g. Node + React).
@@ -109,3 +119,14 @@ After rotating:
 ```bash
 LIVE_BASE_URL=https://www.equilibrium-trading.xyz npm run verify:live
 ```
+
+## Maintenance cadence (suggested)
+
+| When | What |
+|------|------|
+| After every deploy | `npm run verify:live` (or confirm GitHub Actions CI green + manual spot-check) |
+| Weekly | Glance at Sentry (if enabled) for new error groups; confirm scheduled **Production uptime** runs are green in GitHub Actions |
+| Monthly | Confirm Railway Postgres / Atlas backup settings; skim `DATABASE_URL` / Mongo user still least-privilege |
+| Quarterly | Rotate non-Stripe secrets that do not auto-rotate; update `LIVE_BASE_URL` secret if the production domain changes |
+
+Add a personal calendar reminder for **monthly verify:live + Sentry** if you do not rely on CI alone.
