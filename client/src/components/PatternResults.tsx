@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Activity,
   BarChart3,
-  CheckCircle2,
   Target,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -199,7 +198,6 @@ export interface PatternResultsProps {
   tabRows: PatternTabRows;
   isLoading: boolean;
   isFetching: boolean;
-  hasScanData: boolean;
   isError: boolean;
   error: unknown;
   scanMeta: PatternScanSummaryMeta | null;
@@ -216,7 +214,6 @@ export function PatternResults({
   tabRows,
   isLoading,
   isFetching,
-  hasScanData,
   isError,
   error,
   scanMeta,
@@ -263,76 +260,6 @@ export function PatternResults({
             Unset it for the full universe (unless you need a smaller run for performance).
           </AlertDescription>
         </Alert>
-      ) : null}
-
-      {!isError ? (
-        <div
-          className={cn(
-            "rounded-lg border px-4 py-3 space-y-1.5 transition-colors",
-            isLoading && !hasScanData
-              ? "border-primary/35 bg-primary/5"
-              : signals.length > 0
-                ? "border-emerald-500/35 bg-emerald-500/[0.06]"
-                : scanHasCompleted
-                  ? "border-border bg-muted/25"
-                  : "border-border/80 bg-card/40",
-          )}
-        >
-          {isFetching && hasScanData ? (
-            <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
-              <RefreshCw className="h-3 w-3 animate-spin shrink-0" aria-hidden />
-              Updating scan…
-            </p>
-          ) : null}
-          {isLoading && !hasScanData ? (
-            <p className="text-sm flex items-center gap-2 text-foreground">
-              <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
-              Scanning all markets, all timeframes…
-            </p>
-          ) : scanHasCompleted ? (
-            <div className="flex items-start gap-2">
-              {signals.length > 0 ? (
-                <CheckCircle2
-                  className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
-                  aria-hidden
-                />
-              ) : (
-                <Activity className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" aria-hidden />
-              )}
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium text-foreground leading-snug">
-                  {signals.length > 0 ? (
-                    <>
-                      <strong>{signals.length}</strong> pattern{signals.length === 1 ? "" : "s"} right now.
-                    </>
-                  ) : (
-                    <>No patterns met the rules on this pass — scans keep running.</>
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Evaluated <strong>{scanMeta!.coinCount}</strong> market{scanMeta!.coinCount === 1 ? "" : "s"} in{" "}
-                  {(scanMeta!.durationMs / 1000).toFixed(1)}s
-                  {scanMeta!.cached ? " (cached)" : ""}.
-                </p>
-                {signals.length === 0 && singleFastTimeframeOnly ? (
-                  <p className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border/60 mt-2">
-                    On <strong>1m–5m only</strong>, the engine looks for <strong>specific chart structures</strong> (flags,
-                    triangles, wedges, doubles, etc.). It is normal to see <strong>no match</strong> on many passes — 1m
-                    moves fast and rarely lines up with a full pattern template. Try <strong>5m</strong>,{" "}
-                    <strong>15m</strong>, or <strong>All TF</strong> for more frequent hits.
-                  </p>
-                ) : null}
-                {(scanMeta!.source === "universe" || scanMeta!.source === "top_volume") && scanMeta!.coinsPreview ? (
-                  <p className="text-[10px] font-mono text-muted-foreground/90 break-all pt-0.5">
-                    Sample: {scanMeta!.coinsPreview}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">Waiting for scan to start…</p>
-          )}
-        </div>
       ) : null}
 
       <div className="grid grid-cols-3 gap-2 md:gap-4">

@@ -168,8 +168,6 @@ export function PatternScannerUI() {
     retry: 1,
   });
 
-  const hasScanData = !!(fastQuery.data || slowQuery.data);
-
   const refetchAll = async () => {
     forceNocacheRef.current = true;
     try {
@@ -421,7 +419,6 @@ export function PatternScannerUI() {
         tabRows={tabRows}
         isLoading={isLoading}
         isFetching={isFetching}
-        hasScanData={hasScanData}
         isError={isError}
         error={error}
         scanMeta={scanMeta}
