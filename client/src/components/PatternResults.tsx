@@ -207,6 +207,8 @@ export interface PatternResultsProps {
   timeframeScopeLabel?: string;
   /** User filtered to a single short TF (e.g. 1m only) — explain why empty passes are normal. */
   singleFastTimeframeOnly?: boolean;
+  activeTab?: "all" | "forming" | "developed";
+  onActiveTabChange?: (tab: "all" | "forming" | "developed") => void;
 }
 
 export function PatternResults({
@@ -221,6 +223,8 @@ export function PatternResults({
   refetchAll,
   timeframeScopeLabel = "all timeframes",
   singleFastTimeframeOnly = false,
+  activeTab = "all",
+  onActiveTabChange,
 }: PatternResultsProps) {
   const { formingSignals, developedSignals } = tabRows;
 
@@ -283,7 +287,15 @@ export function PatternResults({
         </Card>
       </div>
 
-      <Tabs defaultValue="all" className="space-y-3 md:space-y-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={(tab) => {
+          if (tab === "all" || tab === "forming" || tab === "developed") {
+            onActiveTabChange?.(tab);
+          }
+        }}
+        className="space-y-3 md:space-y-4"
+      >
         <TabsList className="w-full overflow-x-auto flex justify-start gap-0 h-auto p-1">
           <TabsTrigger value="all" className="text-[10px] md:text-sm px-2 md:px-3 py-1 md:py-1.5" data-testid="tab-all-signals">
             All ({signals.length})

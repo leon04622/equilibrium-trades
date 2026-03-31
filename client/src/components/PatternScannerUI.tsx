@@ -40,8 +40,50 @@ function scannerAuthHeaders(wallet: string | null | undefined): HeadersInit {
 const FAST_TRACK_TFS = ["1m", "3m", "5m"] as const;
 
 const ALL_TF_LIST = [...SCAN_ALL_TIMEFRAMES];
+const SCANNER_SESSION_KEY = "eq_pattern_scanner_session_v1";
 
 type ScannerTfSelection = "all" | ScanTimeframe;
+type ScannerResultTab = "all" | "forming" | "developed";
+
+type ScannerSessionState = {
+  selectedTimeframe: ScannerTfSelection;
+  selectedMarketLabels: string[];
+  searchInput: string;
+  activeTab: ScannerResultTab;
+  scrollTop: number;
+};
+
+function readScannerSession(): ScannerSessionState | null {
+  try {
+    const raw = sessionStorage.getItem(SCANNER_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ScannerSessionState>;
+    const selectedTimeframe =
+      parsed.selectedTimeframe === "all" || ALL_TF_LIST.includes(parsed.selectedTimeframe as ScanTimeframe)
+        ? (parsed.selectedTimeframe as ScannerTfSelection)
+        : "all";
+    const selectedMarketLabels = Array.isArray(parsed.selectedMarketLabels)
+      ? parsed.selectedMarketLabels.filter((label): label is string => typeof label === "string").slice(0, 50)
+      : [];
+    const searchInput = typeof parsed.searchInput === "string" ? parsed.searchInput : "";
+    const activeTab =
+      parsed.activeTab === "all" || parsed.activeTab === "forming" || parsed.activeTab === "developed"
+        ? parsed.activeTab
+        : "all";
+    const scrollTop = typeof parsed.scrollTop === "number" && Number.isFinite(parsed.scrollTop) ? parsed.scrollTop : 0;
+    return { selectedTimeframe, selectedMarketLabels, searchInput, activeTab, scrollTop };
+  } catch {
+    return null;
+  }
+}
+
+function writeScannerSession(state: ScannerSessionState): void {
+  try {
+    sessionStorage.setItem(SCANNER_SESSION_KEY, JSON.stringify(state));
+  } catch {
+    /* ignore session storage issues */
+  }
+}
 
 function isFastTf(tf: string): boolean {
   return (FAST_TRACK_TFS as readonly string[]).includes(tf);
@@ -100,18 +142,25 @@ function buildScannerMarketLabel(coin: string, displayByCoin?: Record<string, st
 
 /** Scans all Hyperliquid markets; optional single-timeframe view; lists forming / developed setups. */
 export function PatternScannerUI() {
+  const initialSession = useMemo(() => readScannerSession(), []);
   const { address } = useWallet();
   const queryClient = useQueryClient();
   const forceNocacheRef = useRef(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>("all");
-  const [selectedMarketLabels, setSelectedMarketLabels] = useState<string[]>([]);
-  const [searchInput, setSearchInput] = useState("");
+  const [selectedTimeframe, setSelectedTimeframe] = useState<ScannerTfSelection>(
+    initialSession?.selectedTimeframe ?? "all",
+  );
+  const [selectedMarketLabels, setSelectedMarketLabels] = useState<string[]>(
+    initialSession?.selectedMarketLabels ?? [],
+  );
+  const [searchInput, setSearchInput] = useState(initialSession?.searchInput ?? "");
   const [searchOpen, setSearchOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>("");
   const [isSavingSet, setIsSavingSet] = useState(false);
   const [isApplyingSavedSet, setIsApplyingSavedSet] = useState(false);
+  const [activeTab, setActiveTab] = useState<ScannerResultTab>(initialSession?.activeTab ?? "all");
 
   const marketsQuery = useQuery<ScannerMarketsPayload>({
     queryKey: ["/api/scanner/markets"],
@@ -332,6 +381,42 @@ export function PatternScannerUI() {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
+  useEffect(() => {
+    const node = rootRef.current;
+    const initialScrollTop = initialSession?.scrollTop ?? 0;
+    if (!node || initialScrollTop <= 0) return;
+    const id = window.requestAnimationFrame(() => {
+      if (rootRef.current) rootRef.current.scrollTop = initialScrollTop;
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [initialSession?.scrollTop]);
+
+  useEffect(() => {
+    writeScannerSession({
+      selectedTimeframe,
+      selectedMarketLabels,
+      searchInput,
+      activeTab,
+      scrollTop: rootRef.current?.scrollTop ?? 0,
+    });
+  }, [selectedTimeframe, selectedMarketLabels, searchInput, activeTab]);
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return;
+    const onScroll = () => {
+      writeScannerSession({
+        selectedTimeframe,
+        selectedMarketLabels,
+        searchInput,
+        activeTab,
+        scrollTop: node.scrollTop,
+      });
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    return () => node.removeEventListener("scroll", onScroll);
+  }, [selectedTimeframe, selectedMarketLabels, searchInput, activeTab]);
+
   function applySearchSelection(label: string) {
     setSelectedMarketLabels((prev) => {
       if (prev.some((selected) => normalizeScanText(selected) === normalizeScanText(label))) {
@@ -443,7 +528,7 @@ export function PatternScannerUI() {
   }, [signals]);
 
   return (
-    <div className="p-3 md:p-6 space-y-4 md:space-y-6 overflow-y-auto">
+    <div ref={rootRef} className="p-3 md:p-6 space-y-4 md:space-y-6 overflow-y-auto">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Activity className="h-6 w-6 md:h-8 md:w-8 text-primary" />
@@ -674,6 +759,8 @@ export function PatternScannerUI() {
           refetchAll={refetchAll}
           timeframeScopeLabel={timeframeScopeLabel}
           singleFastTimeframeOnly={selectedTimeframe !== "all" && isFastTf(selectedTimeframe)}
+          activeTab={activeTab}
+          onActiveTabChange={setActiveTab}
         />
       ) : null}
     </div>
