@@ -248,7 +248,11 @@ export default function Learn() {
               <p className="text-muted-foreground mb-4">
                 You've completed {completedLessonsCount} of {totalLessons} lessons
               </p>
-              <Progress value={progress} className="h-3" />
+              <Progress
+                value={progress}
+                className="h-3"
+                aria-label="Overall lesson completion"
+              />
             </div>
             <div className="flex items-center gap-4">
               <div className="text-center">
@@ -297,7 +301,11 @@ export default function Learn() {
                     <p className="text-xs text-muted-foreground">lessons</p>
                   </div>
                 </div>
-                <Progress value={moduleProgress} className="h-1.5 mt-4" />
+                <Progress
+                  value={moduleProgress}
+                  className="h-1.5 mt-4"
+                  aria-label={`${module.title} module completion`}
+                />
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="space-y-2">

@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "verify": "npm run check && npm run test && npm run build && node script/verify.mjs",
+    "verify:full": "npm run check && npm run test && npm run build && npm run test:e2e && node script/verify.mjs",
     "verify:live": "node script/smoke-live.mjs",
     "verify:uptime": "node script/uptime-ping.mjs",
     "db:push": "drizzle-kit push"
@@ -110,6 +111,7 @@
     "zod-validation-error": "^3.5.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.18",

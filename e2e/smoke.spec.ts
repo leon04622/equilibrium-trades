@@ -25,6 +25,11 @@ test.describe("public pages", () => {
     await page.goto("/learn");
     await expect(page.getByRole("heading", { name: /Learn Trading/i, level: 1 })).toBeVisible();
   });
+
+  test("/subscribe alias shows pricing shell", async ({ page }) => {
+    await page.goto("/subscribe");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/Choose the plan/i);
+  });
 });
 
 test.describe("api", () => {
@@ -33,5 +38,12 @@ test.describe("api", () => {
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(body).toMatchObject({ status: "ok" });
+  });
+
+  test("GET /api/stripe/config returns publishableKey field", async ({ request }) => {
+    const res = await request.get("/api/stripe/config");
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body).toHaveProperty("publishableKey");
   });
 });
