@@ -121,10 +121,10 @@ export function EmailCaptureModal() {
     >
       <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle>Stay in touch</DialogTitle>
+          <DialogTitle>Save your account contact</DialogTitle>
           <DialogDescription>
-            Add an email for your account so we can reach you about billing, support, and product updates. You can
-            change it anytime in Settings.
+            Add an email so billing, support, and important account updates reach the right person. You can change it
+            anytime in Settings.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 py-2">

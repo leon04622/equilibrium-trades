@@ -42,6 +42,12 @@ const PREMIUM_FEATURES = [
   },
 ];
 
+const PROOF_POINTS = [
+  "Persistent access loaded from the live backend",
+  "Non-custodial wallet flow — your funds stay yours",
+  "Cancel anytime with no lock-in",
+];
+
 export function PaywallModal() {
   const { isOpen, triggerFeature, closePaywall } = usePaywall();
   const { address, isConnected, connect } = useWallet();
@@ -75,7 +81,6 @@ export function PaywallModal() {
         <DialogTitle className="sr-only">Unlock Full Platform</DialogTitle>
         <DialogDescription className="sr-only">Subscribe to Equilibrium Pro for £50/month to unlock all premium features.</DialogDescription>
 
-        {/* Header */}
         <div className="relative bg-gradient-to-br from-primary/20 via-primary/10 to-background px-6 pt-8 pb-6 text-center border-b border-border/50">
           <button
             type="button"
@@ -97,11 +102,9 @@ export function PaywallModal() {
             </Badge>
           )}
 
-          <h2 className="text-2xl font-display font-bold text-foreground">
-            Unlock Full Platform
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Everything you need to trade with an edge — one plan, no limits.
+          <h2 className="text-2xl font-display font-bold text-foreground">Unlock the full trading workspace</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Signals, live execution, journal, and premium education in one connected membership.
           </p>
 
           <div className="mt-4 flex items-baseline justify-center gap-1">
@@ -112,6 +115,13 @@ export function PaywallModal() {
 
         {/* Features */}
         <div className="px-6 py-5 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {PROOF_POINTS.map((point) => (
+              <div key={point} className="rounded-xl border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
+                {point}
+              </div>
+            ))}
+          </div>
           {PREMIUM_FEATURES.map(({ icon: Icon, title, description }) => (
             <div key={title} className="flex items-start gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 mt-0.5">
@@ -139,12 +149,12 @@ export function PaywallModal() {
             {isCheckingOut ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Starting checkout...
+                Starting secure checkout...
               </>
             ) : (
               <>
                 <Zap className="h-4 w-4" />
-                Subscribe — £50/month
+                Start Pro — £50/month
               </>
             )}
           </Button>
@@ -157,11 +167,11 @@ export function PaywallModal() {
             )}
             data-testid="button-paywall-dismiss"
           >
-            Maybe later
+            Continue exploring for now
           </button>
 
           <p className="text-center text-[10px] text-muted-foreground">
-            Cancel anytime · Non-custodial · Your keys, your funds
+            Cancel anytime · Non-custodial access · Your keys, your funds
           </p>
         </div>
       </DialogContent>

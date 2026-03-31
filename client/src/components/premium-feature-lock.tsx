@@ -46,13 +46,16 @@ export function PremiumFeatureLock({
           <p className="text-sm text-muted-foreground leading-relaxed">
             {subtitle ?? `Unlock ${featureLabel} with an active Pro subscription.`}
           </p>
+          <p className="text-[11px] text-muted-foreground">
+            One membership unlocks the full platform workflow, not just this page.
+          </p>
         </div>
         <Button
           size="lg"
           className="h-12 min-h-[48px] w-full max-w-xs text-base font-semibold touch-manipulation shadow-lg"
           onClick={() => openPaywall(featureLabel)}
         >
-          Subscribe for $50/mo
+          Unlock Pro for $50/mo
         </Button>
       </div>
     </div>

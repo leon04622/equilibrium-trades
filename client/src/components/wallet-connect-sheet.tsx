@@ -91,13 +91,19 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
       </SheetTrigger>
       <SheetContent side="bottom" className="rounded-t-xl max-h-[85vh] overflow-y-auto">
         <SheetHeader className="text-left pb-2">
-          <SheetTitle>Connect Wallet</SheetTitle>
+          <SheetTitle>Connect your wallet to start</SheetTitle>
           <SheetDescription>
             {isMobile
               ? "Open Equilibrium inside your wallet app’s browser (MetaMask, Coinbase, Rabby, etc.) or use WalletConnect from a desktop browser to deep-link into your phone wallet."
               : "Select your wallet below. Any EVM-compatible wallet works; on mobile, prefer your wallet’s in-app browser or WalletConnect for a smooth handoff."}
           </SheetDescription>
         </SheetHeader>
+
+        <div className="mb-3 grid gap-2 rounded-xl border bg-muted/20 p-3 text-[11px] text-muted-foreground sm:grid-cols-3">
+          <div>Non-custodial access</div>
+          <div>No email or password needed</div>
+          <div>Required for member sync and billing</div>
+        </div>
 
         {/* Error banner */}
         {errorMessage && (
@@ -209,7 +215,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
             /* ── Desktop: no wallets found ── */
             <>
               <p className="text-sm text-muted-foreground mb-3">
-                No wallet extension detected. Install one of the options below, then refresh this page.
+                No wallet extension detected. Install one of the options below, then refresh this page to continue into the platform.
               </p>
               {SUGGESTED_INSTALLS.map((key) => {
                 const meta = WALLET_META[key];
