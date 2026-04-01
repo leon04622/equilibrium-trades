@@ -155,14 +155,16 @@ async function initStripe() {
           "default-src 'self'",
           "base-uri 'self'",
           "object-src 'none'",
-          "script-src 'self' 'unsafe-inline'",
+          // s3.tradingview.com: embed-widget-advanced-chart.js (TradingView free widget)
+          "script-src 'self' 'unsafe-inline' https://s3.tradingview.com",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com data:",
           "img-src 'self' data: https: blob:",
           "connect-src 'self' https: wss: data:",
           "media-src 'self' blob: https: data:",
           "worker-src 'self' blob:",
-          "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com",
+          // www.tradingview-widget.com: advanced chart iframe document
+          "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com https://www.tradingview-widget.com",
         ].join("; "),
       );
       next();
