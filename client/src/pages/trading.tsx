@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { PatternChart } from "@/components/pattern-chart";
@@ -174,6 +174,17 @@ export default function Trading({ visible = true }: TradingProps) {
   const handleAIChartToggle = (checked: boolean) => {
     setShowAIChart(checked);
   };
+
+  const handleTradingViewUnavailable = useCallback(() => {
+    setChartEngine((prev) => {
+      if (prev !== "tradingview") return prev;
+      return "hyperliquid";
+    });
+    toast({
+      title: "Switched to AI chart",
+      description: "TradingView was unavailable for this market or browser, so the native chart was opened instead.",
+    });
+  }, [toast]);
 
   const { data: tickers = [], dataUpdatedAt, isFetching } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
@@ -507,7 +518,7 @@ export default function Trading({ visible = true }: TradingProps) {
               </div>
               {chartEngine === "hyperliquid" && (
                 <>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5">
                     <Switch 
                       checked={showAIChart} 
                       onCheckedChange={handleAIChartToggle}
@@ -561,7 +572,7 @@ export default function Trading({ visible = true }: TradingProps) {
               isFullscreen && "chart-wrapper-mobile"
             )}>
               {(mobileTab === "chart" || isFullscreen) && (
-                <div className="flex-1 relative" style={{ minHeight: 'calc(100dvh - 16rem)' }}>
+                <div className="flex-1 relative" style={{ minHeight: "calc(100dvh - 14rem)" }}>
                   {chartEngine === "hyperliquid" ? (
                     <PatternChart 
                       key={`lc-${coin}-${chartInterval}`}
@@ -579,6 +590,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       symbol={tradingViewSymbol}
                       interval={timeframe}
                       className="absolute inset-0"
+                      onUnavailable={handleTradingViewUnavailable}
                     />
                   )}
                 </div>
@@ -614,13 +626,17 @@ export default function Trading({ visible = true }: TradingProps) {
                   symbol={tradingViewSymbol}
                   interval={timeframe}
                   className="h-full"
+                      onUnavailable={handleTradingViewUnavailable}
                 />
               )}
             </div>
             
             {/* Optional Order Book Panel - Desktop only */}
             {showOrderBook && (
-              <div className="hidden md:flex w-56 xl:w-64 border-l flex-col bg-card/30">
+              <div className={cn(
+                "hidden md:flex border-l flex-col bg-card/30",
+                chartEngine === "hyperliquid" ? "w-48 xl:w-56" : "w-56 xl:w-64",
+              )}>
                 <div className="flex items-center border-b">
                   <button
                     className={cn(
@@ -658,7 +674,10 @@ export default function Trading({ visible = true }: TradingProps) {
         </div>
 
         {/* Right side - Order Entry Panel */}
-        <div className="w-72 xl:w-80 border-l flex flex-col bg-card/30 hidden md:flex">
+        <div className={cn(
+          "border-l flex flex-col bg-card/30 hidden md:flex",
+          chartEngine === "hyperliquid" ? "w-64 xl:w-72" : "w-72 xl:w-80",
+        )}>
           <div className="flex-1 overflow-y-auto">
             <div className="p-3 space-y-3">
               <OrderEntry 

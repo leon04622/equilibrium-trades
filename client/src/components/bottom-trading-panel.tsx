@@ -270,7 +270,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
             </button>
           ))}
         </div>
-        <div className="h-16 md:h-28 flex items-center justify-center text-[10px] md:text-xs text-muted-foreground">
+        <div className="h-16 md:h-24 flex items-center justify-center text-[10px] md:text-xs text-muted-foreground">
           Connect wallet to view positions and orders
         </div>
       </div>
@@ -370,7 +370,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
         {/* Content area - collapsed on mobile by default */}
         <div className={cn(
           "overflow-auto transition-all",
-          mobileExpanded ? "h-32" : "h-0 md:h-28"
+          mobileExpanded ? "h-32" : "h-0 md:h-24"
         )}>
           {activeTab === "positions" && (
             <PositionsTable 
