@@ -1,15 +1,23 @@
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useWallet } from "@/lib/wallet-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, AlertCircle } from "lucide-react";
+import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, AlertCircle, BookOpen, GraduationCap, CreditCard } from "lucide-react";
 
 /** `/admin` Command Center requires a connected wallet (server verifies master via `ADMIN_EQUILIBRIUM_MASTER_WALLET`). */
-const PUBLIC_PATHS = ["/pricing", "/subscribe", "/learn", "/guide/deposit"];
+const PUBLIC_PATHS = ["/pricing", "/subscribe", "/learn", "/guide/deposit", "/docs"];
+
+function normalizePath(pathname: string): string {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+  return pathname;
+}
 
 function isPublicTradingPath(pathname: string): boolean {
-  return pathname === "/trading" || pathname === "/trade";
+  const normalized = normalizePath(pathname);
+  return normalized === "/trading" || normalized === "/trade";
 }
 
 /**
@@ -31,12 +39,13 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState("");
   const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
+  const normalizedPath = normalizePath(pathname);
 
   if (
     isWalletGateDisabled() ||
     isConnected ||
-    PUBLIC_PATHS.includes(pathname) ||
-    isPublicTradingPath(pathname)
+    PUBLIC_PATHS.includes(normalizedPath) ||
+    isPublicTradingPath(normalizedPath)
   ) {
     return <>{children}</>;
   }
@@ -197,6 +206,37 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
           <div className="flex-1 h-px bg-border" />
           <span className="text-xs text-muted-foreground">or stay updated</span>
           <div className="flex-1 h-px bg-border" />
+        </div>
+
+        <div className="w-full grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <Button asChild variant="outline" className="justify-start gap-2">
+            <Link to="/trading">
+              <TrendingUp className="h-4 w-4" />
+              Browse trading
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="justify-start gap-2">
+            <Link to="/learn">
+              <GraduationCap className="h-4 w-4" />
+              Learn first
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="justify-start gap-2">
+            <Link to="/pricing">
+              <CreditCard className="h-4 w-4" />
+              View plans
+            </Link>
+          </Button>
+        </div>
+
+        <div className="w-full rounded-xl border border-border/60 bg-card/40 p-3 text-left text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 font-medium text-foreground">
+            <BookOpen className="h-4 w-4 text-primary" />
+            Need help before connecting?
+          </div>
+          <p className="mt-1 leading-relaxed">
+            You can still browse the trading workspace, courses, pricing, and deposit guide without connecting a wallet first.
+          </p>
         </div>
 
         {/* Email capture */}

@@ -631,8 +631,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       } catch {
         /* ignore */
       }
-      const hostPath = `${u.host}${u.pathname}${u.search}${u.hash}`;
-      window.location.href = `https://metamask.app.link/dapp/${hostPath}`;
+      const fullUrl = u.toString();
+      window.location.href = `https://metamask.app.link/dapp/${encodeURIComponent(fullUrl)}`;
       return;
     }
     if (walletType === "rabby") {

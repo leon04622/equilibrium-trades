@@ -201,7 +201,8 @@ function ShellHeader() {
 
 function TradingLayout() {
   const { pathname } = useLocation();
-  const isTrading = pathname === "/trading" || pathname === "/trade";
+  const normalizedPath = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  const isTrading = normalizedPath === "/trading" || normalizedPath === "/trade";
 
   return (
     <>

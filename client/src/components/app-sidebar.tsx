@@ -42,7 +42,7 @@ import { Button } from "@/components/ui/button";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 const mainNavItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/", guestUrl: "/trading", icon: LayoutDashboard },
   {
     title: "Trading",
     url: "/trading",
@@ -104,7 +104,7 @@ function pathMatches(pathname: string, url: string): boolean {
 
 export function AppSidebar() {
   const { pathname } = useLocation();
-  const { address } = useWallet();
+  const { address, isConnected } = useWallet();
   const { tier, isSubscribed } = useSubscription();
   const { isMasterAdmin } = useIsMasterAdmin();
   const { isAdmin: isAppAdmin } = useIsAdmin();
@@ -192,10 +192,10 @@ export function AppSidebar() {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
-                    isActive={pathMatches(pathname, item.url)}
+                    isActive={pathMatches(pathname, isConnected ? item.url : (item.guestUrl ?? item.url))}
                     data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
                   >
-                    <Link to={item.url}>
+                    <Link to={isConnected ? item.url : (item.guestUrl ?? item.url)}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
                       {item.badge && (
