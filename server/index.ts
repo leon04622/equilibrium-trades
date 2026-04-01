@@ -121,14 +121,18 @@ async function initStripe() {
 
         if (!Buffer.isBuffer(req.body)) {
           log('STRIPE WEBHOOK ERROR: req.body is not a Buffer', 'stripe');
-          return res.status(500).json({ error: 'Webhook processing error' });
+          return res.status(500).json({
+            error: 'Webhook processing error',
+            detail: 'req.body is not a raw Buffer',
+          });
         }
 
         await WebhookHandlers.processWebhook(req.body as Buffer, sig);
         res.status(200).json({ received: true });
       } catch (error: any) {
-        log(`Webhook error: ${error.message}`, 'stripe');
-        res.status(400).json({ error: 'Webhook processing error' });
+        const detail = error instanceof Error ? error.message : String(error);
+        log(`Webhook error: ${detail}`, 'stripe');
+        res.status(400).json({ error: 'Webhook processing error', detail });
       }
     }
   );
