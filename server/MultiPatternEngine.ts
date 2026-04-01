@@ -1,20 +1,53 @@
 /**
- * Multi-pattern scan: runs **every** geometry detector in the Equilibrium library (flags, triangles,
- * doubles, wedges), Apex pole+flag, strict volume flags, and H&S family — **without** SMMA suppressing
- * bearish setups in bullish regimes (SMMA is advisory on the emitted signal only).
+ * Multi-pattern scan: runs geometry detectors (flags, triangles, doubles, wedges), Apex pole+flag,
+ * strict volume flags, and H&S family.
+ *
+ * **Bull vs bear flags:** continuation flags are aligned with 21/200 SMMA trend (and neutral-MA
+ * momentum) so a bearish chart cannot surface a bull flag just because geometry scored higher.
  */
 import type { HyperliquidCandle } from "./hyperliquid";
 import {
   collectPatternCandidates,
   sortPatternCandidatesByActionability,
+  calculateSMAFromCandles,
   getPatternStructuralBias,
   type DetectedPattern,
+  type SMAValues,
 } from "./sma-detection";
 import { runApexGeometricFlagScan, type ApexGeometricResult } from "./ApexDetectionEngine";
 import { detectHeadAndShoulders, detectInverseHeadAndShoulders } from "./pattern-shoulders";
 import { detectStrictFlagWithVolume } from "./pattern-strict-volume";
 
-/** Geometry + actionability only — 21/200 SMMA must not demote or suppress counter-trend setups. */
+/**
+ * Bull/bear flags are continuation patterns. If 21 SMMA is below 200, do not emit a bull flag; if above,
+ * do not emit a bear flag. When MAs are neutral, use ~48-bar momentum so obvious downtrends are not
+ * labeled as bull flags.
+ */
+function flagAgreesWithTrendContext(
+  p: DetectedPattern,
+  sma: SMAValues | null,
+  candles: HyperliquidCandle[],
+): boolean {
+  if (p.name !== "bull_flag" && p.name !== "bear_flag") return true;
+  if (!sma) return true;
+
+  const rel = (sma.sma21 - sma.sma200) / Math.max(Math.abs(sma.sma200), 1e-12);
+  const neutralMa = Math.abs(rel) < 0.0035;
+
+  if (!neutralMa) {
+    if (p.name === "bull_flag") return rel > 0;
+    if (p.name === "bear_flag") return rel < 0;
+  }
+
+  const closes = candles.slice(-48).map((c) => parseFloat(c.c));
+  if (closes.length < 20) return true;
+  const netPct = ((closes[closes.length - 1] - closes[0]) / Math.max(closes[0], 1e-12)) * 100;
+  const momEps = 0.15;
+  if (p.name === "bull_flag" && netPct < -momEps) return false;
+  if (p.name === "bear_flag" && netPct > momEps) return false;
+  return true;
+}
+
 function scoreCandidate(p: DetectedPattern, volumeOk: boolean): number {
   const structural = getPatternStructuralBias(p);
   let s = 220 + p.confidence;
@@ -92,14 +125,18 @@ export function gatherMultiPatternCandidates(
   candles: HyperliquidCandle[],
   timeframe: string,
 ): { rows: MultiPatternGatherRow[]; apexResult: ApexGeometricResult } {
+  const sma = calculateSMAFromCandles(candles);
   const apexResult = runApexGeometricFlagScan(candles, timeframe);
   const candMap = new Map<string, { p: DetectedPattern; volumeOk: boolean }>();
 
   const base = collectPatternCandidates(candles, timeframe);
   sortPatternCandidatesByActionability(base);
-  for (const p of base) upsertByScore(candMap, { p, volumeOk: false });
+  for (const p of base) {
+    if (!flagAgreesWithTrendContext(p, sma, candles)) continue;
+    upsertByScore(candMap, { p, volumeOk: false });
+  }
 
-  if (apexResult.pattern) {
+  if (apexResult.pattern && flagAgreesWithTrendContext(apexResult.pattern, sma, candles)) {
     upsertByScore(candMap, { p: apexResult.pattern, volumeOk: !!apexResult.volumeOk });
   }
 
@@ -109,14 +146,37 @@ export function gatherMultiPatternCandidates(
   if (ihs) upsertByScore(candMap, { p: ihs, volumeOk: false });
 
   const strictBull = detectStrictFlagWithVolume(candles, true);
-  if (strictBull) upsertByScore(candMap, { p: strictBull.pattern, volumeOk: strictBull.volumeOk });
+  if (strictBull && flagAgreesWithTrendContext(strictBull.pattern, sma, candles)) {
+    upsertByScore(candMap, { p: strictBull.pattern, volumeOk: strictBull.volumeOk });
+  }
   const strictBear = detectStrictFlagWithVolume(candles, false);
-  if (strictBear) upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk });
+  if (strictBear && flagAgreesWithTrendContext(strictBear.pattern, sma, candles)) {
+    upsertByScore(candMap, { p: strictBear.pattern, volumeOk: strictBear.volumeOk });
+  }
 
   const rows = applyBeginnerOpposingFilters(
     [...candMap.values()].sort(
       (a, b) => scoreCandidate(b.p, b.volumeOk) - scoreCandidate(a.p, a.volumeOk),
     ),
   );
-  return { rows, apexResult };
+
+  let apexForUi = apexResult;
+  if (
+    apexResult.pattern &&
+    (apexResult.pattern.name === "bull_flag" || apexResult.pattern.name === "bear_flag") &&
+    !flagAgreesWithTrendContext(apexResult.pattern, sma, candles)
+  ) {
+    apexForUi = {
+      ...apexResult,
+      pattern: null,
+      scanState: "no_pattern",
+      note: "Apex flag geometry disagreed with trend context (21/200 SMMA + recent momentum).",
+      volumeOk: undefined,
+      poleMovePct: undefined,
+      poleBodyRatio: undefined,
+      retraceRatio: undefined,
+    };
+  }
+
+  return { rows, apexResult: apexForUi };
 }
