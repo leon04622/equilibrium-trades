@@ -43,7 +43,8 @@ function TradingViewChartComponent({
 
     const markError = () => {
       setLoadState("error");
-      onUnavailable?.();
+      // Do not call onUnavailable here: that switches chart engine and unmounts this widget.
+      // Timeout/slow loads would incorrectly force AI chart; recovery after load would be impossible.
     };
 
     const studies: (string | { id: string; inputs: Record<string, any> })[] = [
@@ -143,7 +144,7 @@ function TradingViewChartComponent({
         observer.disconnect();
         markError();
       }
-    }, 7000);
+    }, 20_000);
 
     return () => {
       window.clearTimeout(failTimer);
@@ -175,7 +176,7 @@ function TradingViewChartComponent({
           <div className="max-w-sm text-center space-y-3">
             <p className="text-sm font-medium text-foreground">TradingView chart unavailable</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              This market or browser is not loading the TradingView embed right now. Switch back to the AI chart to keep trading.
+              The embed did not appear after waiting, or the script failed to load. You can switch to the native chart below, or reload the page and try again.
             </p>
             <Button size="sm" variant="outline" onClick={() => onUnavailable?.()}>
               Use AI chart instead
