@@ -15,6 +15,33 @@ interface DetectedPatternResult {
   description: string;
 }
 
+function calculateSmmaFromPrices(prices: number[], period: number): number | null {
+  if (prices.length < period) return null;
+  let smma = prices.slice(0, period).reduce((sum, price) => sum + price, 0) / period;
+  for (let i = period; i < prices.length; i++) {
+    smma = (smma * (period - 1) + prices[i]) / period;
+  }
+  return smma;
+}
+
+function buildSmmaTrendSummary(prices: number[]): string {
+  const smma21 = calculateSmmaFromPrices(prices, 21);
+  const smma200 = calculateSmmaFromPrices(prices, 200);
+  if (smma21 == null || smma200 == null) {
+    return "There is not enough history to confirm the 21/200 SMMA trend, so do not assume a bullish or bearish bias.";
+  }
+
+  const delta = smma21 - smma200;
+  const threshold = Math.max(Math.abs(smma200) * 0.0005, 1e-9);
+  if (delta > threshold) {
+    return `The 21 SMMA is above the 200 SMMA (${smma21.toFixed(2)} vs ${smma200.toFixed(2)}), suggesting bullish trend context.`;
+  }
+  if (delta < -threshold) {
+    return `The 21 SMMA is below the 200 SMMA (${smma21.toFixed(2)} vs ${smma200.toFixed(2)}), suggesting bearish trend context.`;
+  }
+  return `The 21 SMMA is very close to the 200 SMMA (${smma21.toFixed(2)} vs ${smma200.toFixed(2)}), suggesting neutral trend context.`;
+}
+
 const PATTERN_DETECTION_PROMPT = `You are an expert technical analyst specializing in chart pattern recognition. Analyze the given market data and identify any trading patterns that may be forming or confirmed.
 
 Focus on these patterns (use EXACTLY these pattern IDs):
@@ -65,6 +92,7 @@ export async function analyzePatterns(
       return [];
     }
     const mockPriceData = priceData;
+    const smmaTrendSummary = buildSmmaTrendSummary(mockPriceData);
     
     const response = await openai.chat.completions.create({
       model: "gpt-5.1",
@@ -81,7 +109,7 @@ Current price: ${mockPriceData[mockPriceData.length - 1]}
 High: ${Math.max(...mockPriceData.slice(-20))}
 Low: ${Math.min(...mockPriceData.slice(-20))}
 
-The 21 SMA is currently above the 200 SMA, suggesting a bullish trend.
+${smmaTrendSummary}
 
 Identify any patterns forming or confirmed in this data.`
         }

@@ -154,6 +154,43 @@ function rankApexTier(tier?: EducationalPatternSignal["apexTier"]): number {
   return 0;
 }
 
+function getPatternStatusPresentation(status: EducationalPatternSignal["patternStatus"]): {
+  label: string;
+  className: string;
+} {
+  if (status === "forming") {
+    return { label: "FORMING", className: "bg-blue-800" };
+  }
+  if (status === "breakout_watch") {
+    return { label: "WATCH", className: "bg-amber-800 text-amber-100" };
+  }
+  return { label: "DEVELOPED", className: "bg-emerald-800" };
+}
+
+function buildLiveSmmaReason(
+  signal: EducationalPatternSignal,
+  smaStatus: { sma21: number; sma200: number; isBullish: boolean } | null,
+  livePrice: number | null,
+): string {
+  if (!smaStatus || livePrice == null || !Number.isFinite(livePrice)) {
+    return signal.maFilterReason;
+  }
+
+  if (signal.bias === "bullish") {
+    const aligned = livePrice > smaStatus.sma21 && livePrice > smaStatus.sma200;
+    return aligned
+      ? "Live chart context aligns: price is above the chart's 21/200 SMMA."
+      : "Live chart context is mixed: bullish geometry is present, but price is not above both chart SMMAs.";
+  }
+  if (signal.bias === "bearish") {
+    const aligned = livePrice < smaStatus.sma21 && livePrice < smaStatus.sma200;
+    return aligned
+      ? "Live chart context aligns: price is below the chart's 21/200 SMMA."
+      : "Live chart context is mixed: bearish geometry is present, but price is not below both chart SMMAs.";
+  }
+  return "Live chart context is neutral: use the 21/200 SMMA and higher timeframe for direction.";
+}
+
 function selectBestSignal(
   signals: EducationalPatternSignal[] | undefined,
   coin: string,
@@ -453,6 +490,21 @@ function PatternChartComponent({
     const currentSignal = selectBestSignal(signals, coin, interval);
     setActiveSignal(currentSignal ?? null);
   }, [signals, coin, interval]);
+
+  const liveChartPrice = useMemo(() => {
+    if (candles && candles.length > 0) {
+      return parsePrice(candles[candles.length - 1]!.c);
+    }
+    if (activeSignal) return activeSignal.currentPrice;
+    if (Number.isFinite(currentPrice)) return currentPrice;
+    return null;
+  }, [candles, activeSignal, currentPrice, parsePrice]);
+
+  const activeSignalStatus = activeSignal ? getPatternStatusPresentation(activeSignal.patternStatus) : null;
+  const liveSmmaReason = activeSignal ? buildLiveSmmaReason(activeSignal, smaStatus, liveChartPrice) : "";
+  const displayedSma21 = smaStatus?.sma21 ?? activeSignal?.sma21 ?? null;
+  const displayedSma200 = smaStatus?.sma200 ?? activeSignal?.sma200 ?? null;
+  const smmaLabel = smaStatus ? "Live chart SMMA" : "Scanner snapshot";
 
   // ── Chart initialization — runs ONCE on mount, re-runs only if theme/hideIndicators changes ──
   useEffect(() => {
@@ -971,8 +1023,8 @@ function PatternChartComponent({
               <span className={`text-[11px] font-bold ${activeSignal.bias === "bullish" ? "text-green-300" : activeSignal.bias === "bearish" ? "text-red-300" : "text-yellow-300"}`}>
                 {activeSignal.bias === "bullish" ? "Bullish Pattern" : activeSignal.bias === "bearish" ? "Bearish Pattern" : "Neutral Pattern"}
               </span>
-              <Badge className={`ml-auto text-[8px] px-1 shrink-0 ${activeSignal.patternStatus === "forming" ? "bg-blue-800" : "bg-emerald-800"}`}>
-                {activeSignal.patternStatus === "forming" ? "FORMING" : "DEVELOPED"}
+              <Badge className={`ml-auto text-[8px] px-1 shrink-0 ${activeSignalStatus?.className ?? "bg-emerald-800"}`}>
+                {activeSignalStatus?.label ?? "DEVELOPED"}
               </Badge>
             </div>
             <div className="flex items-center gap-1.5 mb-2">
@@ -992,21 +1044,22 @@ function PatternChartComponent({
             </div>
 
             {/* MA filter reason */}
-            <p className="text-[9px] text-[#8c9ab5] mb-2 leading-relaxed">{activeSignal.maFilterReason}</p>
+            <p className="text-[9px] text-[#8c9ab5] mb-2 leading-relaxed">{liveSmmaReason}</p>
 
             {/* SMMA values */}
             <div className="flex gap-3 text-[9px] mb-2">
               <span className="flex items-center gap-1">
                 <span className="w-3 h-0.5 bg-white inline-block" />
                 <span className="text-[#8c9ab5]">SMMA 21</span>
-                <span className="font-mono text-[#e8ecf1]">{activeSignal.sma21.toFixed(2)}</span>
+                <span className="font-mono text-[#e8ecf1]">{displayedSma21?.toFixed(2) ?? "N/A"}</span>
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-3 h-0.5 inline-block" style={{ background: "#f5e642" }} />
                 <span className="text-[#8c9ab5]">SMMA 200</span>
-                <span className="font-mono text-[#e8ecf1]">{activeSignal.sma200.toFixed(2)}</span>
+                <span className="font-mono text-[#e8ecf1]">{displayedSma200?.toFixed(2) ?? "N/A"}</span>
               </span>
             </div>
+            <p className="text-[8px] text-[#6b7a99] mb-2">{smmaLabel}</p>
 
             {/* Educational note */}
             <div className="border-t border-[#2a3249] pt-1.5 space-y-1.5">
