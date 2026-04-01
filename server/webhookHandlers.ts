@@ -1,5 +1,5 @@
 import { getStripeSync } from "./stripeClient";
-import { tryPersistStripeReferralFromWebhookPayload } from "./stripe-referral-webhook";
+import { processVerifiedStripeWebhookPayload } from "./stripe-referral-webhook";
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
@@ -14,9 +14,20 @@ export class WebhookHandlers {
       );
     }
 
-    await tryPersistStripeReferralFromWebhookPayload(payload, signature);
+    const verifiedByAppSecret = await processVerifiedStripeWebhookPayload(payload, signature);
 
     const sync = await getStripeSync();
-    await sync.processWebhook(payload, signature);
+    try {
+      await sync.processWebhook(payload, signature);
+    } catch (error) {
+      // If the webhook was verified and handled with the app's configured `whsec_...`,
+      // do not fail the request just because stripe-replit-sync does not recognize a
+      // manually created Stripe endpoint secret. Core access/referral side effects already ran.
+      if (verifiedByAppSecret) {
+        console.warn("[stripe webhook] sync.processWebhook skipped after app-secret verification:", error);
+        return;
+      }
+      throw error;
+    }
   }
 }

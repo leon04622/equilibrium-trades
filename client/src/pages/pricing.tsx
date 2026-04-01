@@ -34,6 +34,7 @@ export default function Pricing() {
   const { toast } = useToast();
   const { address, isConnected, connect } = useWallet();
   const [checkoutBusy, setCheckoutBusy] = useState<null | "pro" | "mentoring">(null);
+  const [portalBusy, setPortalBusy] = useState(false);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -48,11 +49,15 @@ export default function Pricing() {
 
     const success = urlParams.get("success");
     const canceled = urlParams.get("canceled");
+    const tier = urlParams.get("tier");
 
     if (success === "true") {
       toast({
         title: "Subscription Active!",
-        description: "Welcome! You now have access to all Pro tools.",
+        description:
+          tier === "mentoring"
+            ? "Welcome! Your mentoring access is active and includes the full Pro platform."
+            : "Welcome! You now have access to all Pro tools.",
       });
       window.history.replaceState({}, "", "/pricing");
     } else if (canceled === "true") {
@@ -64,6 +69,46 @@ export default function Pricing() {
       window.history.replaceState({}, "", "/pricing");
     }
   }, [toast]);
+
+  const handlePortalOpen = async () => {
+    if (!isConnected || !address) {
+      try {
+        await connect();
+      } catch {
+        toast({
+          title: "Wallet Required",
+          description: "Please connect your wallet first so we can open the right billing portal.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
+    setPortalBusy(true);
+    try {
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || "Could not open billing portal");
+      }
+      window.location.href = data.url;
+    } catch (error) {
+      toast({
+        title: "Billing portal unavailable",
+        description:
+          error instanceof Error
+            ? error.message
+            : "We could not open the Stripe billing portal right now.",
+        variant: "destructive",
+      });
+    } finally {
+      setPortalBusy(false);
+    }
+  };
 
   const handleProCheckout = async () => {
     if (!isConnected || !address) {
@@ -255,6 +300,17 @@ export default function Pricing() {
           >
             <Share2 className="h-4 w-4" />
             Copy membership link
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => void handlePortalOpen()}
+            disabled={portalBusy || checkoutBusy !== null}
+          >
+            {portalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Manage billing
           </Button>
         </div>
       </div>

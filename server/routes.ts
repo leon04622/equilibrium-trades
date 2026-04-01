@@ -3350,16 +3350,22 @@ export async function registerRoutes(
         customerId = customer.id;
       }
 
-      // Determine if this is a subscription or one-time payment
-      // Default to 'subscription' — safer than defaulting to 'payment' for recurring prices
+      // Determine if this is a subscription or one-time payment.
+      // Fall back to Stripe directly when the local stripe.prices mirror is empty/stale so
+      // one-time mentoring checkout still works before sync catches up.
       let mode: 'subscription' | 'payment' = 'subscription';
       try {
-        const price = await stripeService.getPrice(priceId);
-        if (price && !(price as any)?.recurring) {
-          mode = 'payment';
+        const dbPrice = await stripeService.getPrice(priceId);
+        if (dbPrice) {
+          if (!(dbPrice as any)?.recurring) mode = 'payment';
+        } else {
+          const stripe = await getUncachableStripeClient();
+          const livePrice = await stripe.prices.retrieve(priceId);
+          if (!livePrice.recurring) mode = 'payment';
         }
-      } catch {
-        // Keep default 'subscription' mode
+      } catch (e) {
+        console.warn("Stripe price mode detection fallback failed:", e);
+        // Keep default 'subscription' mode for recurring plans if detection fails.
       }
 
       const baseUrl = getPublicAppBaseUrl();
