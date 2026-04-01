@@ -163,8 +163,8 @@ async function initStripe() {
           "connect-src 'self' https: wss: data:",
           "media-src 'self' blob: https: data:",
           "worker-src 'self' blob:",
-          // www.tradingview-widget.com: advanced chart iframe document
-          "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com https://www.tradingview-widget.com",
+          // TradingView: widget iframe + CSP fallback host used by embed (see s.tradingview.com fallback in TV script)
+          "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com https://www.tradingview-widget.com https://s.tradingview.com https://www.tradingview.com",
         ].join("; "),
       );
       next();
