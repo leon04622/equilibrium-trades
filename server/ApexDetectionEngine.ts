@@ -12,18 +12,28 @@ import {
 const POLE_LEN = 15;
 const MIN_FLAG = 5;
 const MAX_FLAG = 28;
-const IMPULSE_MIN_PCT = 0.24;
-const BODY_RATIO_MIN = 0.48;
-const MAX_RETRACE = 0.72;
 
+/** Stricter than before: 0.24% pole moves were mostly noise; require a visible impulse + real flag channel. */
 function apexThresholds(timeframe: string) {
+  const scalping = timeframe === "1m" || timeframe === "3m" || timeframe === "5m";
   return {
-    impulseMinPct: IMPULSE_MIN_PCT,
-    bodyRatioMin: BODY_RATIO_MIN,
-    maxRetrace: MAX_RETRACE,
-    maxFlagSlopePct: 0.9,
-    loosePivot: true,
+    impulseMinPct: scalping ? 0.42 : 0.58,
+    bodyRatioMin: scalping ? 0.54 : 0.6,
+    maxRetrace: scalping ? 0.58 : 0.48,
+    maxFlagSlopePct: scalping ? 0.38 : 0.28,
+    /** Loose pivots accepted almost any two swings as a “flag” — use strict descending highs / rising lows. */
+    loosePivot: false,
   };
+}
+
+function avgVolume(slice: HyperliquidCandle[]): number {
+  if (slice.length === 0) return 0;
+  let s = 0;
+  for (const x of slice) {
+    const v = parseFloat(x.v || "0");
+    if (Number.isFinite(v)) s += v;
+  }
+  return s / slice.length;
 }
 
 function cClose(x: HyperliquidCandle): number {
@@ -169,7 +179,7 @@ function buildBullFlag(
     takeProfit,
     breakoutLevel: flagHi,
     currentPrice,
-    confidence: status === "breakout_confirmed" ? 86 : status === "breakout_pending" ? 72 : 58,
+    confidence: status === "breakout_confirmed" ? 86 : status === "breakout_pending" ? 72 : 48,
   };
 }
 
@@ -205,7 +215,7 @@ function buildBearFlag(
     takeProfit,
     breakoutLevel: flagLo,
     currentPrice,
-    confidence: status === "breakout_confirmed" ? 86 : status === "breakout_pending" ? 72 : 58,
+    confidence: status === "breakout_confirmed" ? 86 : status === "breakout_pending" ? 72 : 48,
   };
 }
 
@@ -218,6 +228,8 @@ export interface ApexGeometricResult {
   poleMovePct?: number;
   poleBodyRatio?: number;
   retraceRatio?: number;
+  /** True when flag-period volume is not inflated vs pole (classic bull/bear flag textbook). */
+  volumeOk?: boolean;
 }
 
 /**
@@ -240,6 +252,7 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
       poleMove: number;
       bodyR: number;
       retr: number;
+      volumeOk: boolean;
     } | null = null;
 
     const len = candles.length;
@@ -269,10 +282,26 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
 
           const pat = buildBullFlag(pole, flag, tail, timeframe);
           if (!pat) continue;
-          const score = pat.confidence + (retrace < 0.35 ? 12 : 0) + (bullPole.bodyRatio >= 0.8 ? 5 : 0);
-          const note = `Pole +${bullPole.movePct.toFixed(2)}% (${(bullPole.bodyRatio * 100).toFixed(0)}% bull bodies); retrace ${(retrace * 100).toFixed(0)}% of pole; pivot channel OK.`;
+          const vPole = avgVolume(pole);
+          const vFlag = avgVolume(flag);
+          const volumeOk = vPole > 0 ? vFlag < vPole * 1.1 : false;
+          const score =
+            pat.confidence +
+            (retrace < 0.35 ? 12 : 0) +
+            (bullPole.bodyRatio >= 0.8 ? 5 : 0) +
+            (volumeOk ? 6 : 0);
+          const note = `Pole +${bullPole.movePct.toFixed(2)}% (${(bullPole.bodyRatio * 100).toFixed(0)}% bull bodies); retrace ${(retrace * 100).toFixed(0)}% of pole; pivot channel OK.${volumeOk ? " Flag vol ≤ pole." : ""}`;
           if (!best || score > best.score) {
-            best = { pat, score, note, state: "bull_flag", poleMove: bullPole.movePct, bodyR: bullPole.bodyRatio, retr: retrace };
+            best = {
+              pat,
+              score,
+              note,
+              state: "bull_flag",
+              poleMove: bullPole.movePct,
+              bodyR: bullPole.bodyRatio,
+              retr: retrace,
+              volumeOk,
+            };
           }
         }
 
@@ -290,10 +319,26 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
 
           const pat = buildBearFlag(pole, flag, tail, timeframe);
           if (!pat) continue;
-          const score = pat.confidence + (retrace < 0.35 ? 12 : 0) + (bearPole.bodyRatio >= 0.8 ? 5 : 0);
-          const note = `Pole −${bearPole.movePct.toFixed(2)}% (${(bearPole.bodyRatio * 100).toFixed(0)}% bear bodies); retrace ${(retrace * 100).toFixed(0)}% of pole; pivot channel OK.`;
+          const vPole = avgVolume(pole);
+          const vFlag = avgVolume(flag);
+          const volumeOk = vPole > 0 ? vFlag < vPole * 1.1 : false;
+          const score =
+            pat.confidence +
+            (retrace < 0.35 ? 12 : 0) +
+            (bearPole.bodyRatio >= 0.8 ? 5 : 0) +
+            (volumeOk ? 6 : 0);
+          const note = `Pole −${bearPole.movePct.toFixed(2)}% (${(bearPole.bodyRatio * 100).toFixed(0)}% bear bodies); retrace ${(retrace * 100).toFixed(0)}% of pole; pivot channel OK.${volumeOk ? " Flag vol ≤ pole." : ""}`;
           if (!best || score > best.score) {
-            best = { pat, score, note, state: "bear_flag", poleMove: bearPole.movePct, bodyR: bearPole.bodyRatio, retr: retrace };
+            best = {
+              pat,
+              score,
+              note,
+              state: "bear_flag",
+              poleMove: bearPole.movePct,
+              bodyR: bearPole.bodyRatio,
+              retr: retrace,
+              volumeOk,
+            };
           }
         }
       }
@@ -307,6 +352,7 @@ export function runApexGeometricFlagScan(candles: HyperliquidCandle[], timeframe
         poleMovePct: best.poleMove,
         poleBodyRatio: best.bodyR,
         retraceRatio: best.retr,
+        volumeOk: best.volumeOk,
       };
     }
 

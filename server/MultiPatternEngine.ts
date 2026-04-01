@@ -100,7 +100,7 @@ export function gatherMultiPatternCandidates(
   for (const p of base) upsertByScore(candMap, { p, volumeOk: false });
 
   if (apexResult.pattern) {
-    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: true });
+    upsertByScore(candMap, { p: apexResult.pattern, volumeOk: !!apexResult.volumeOk });
   }
 
   const hs = detectHeadAndShoulders(candles);

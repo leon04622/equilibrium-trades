@@ -79,7 +79,8 @@ export function getThresholds(timeframe: string) {
   return thresholds[timeframe] || thresholds["1h"];
 }
 
-const SHORT_SCAN_TFS = new Set(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]);
+/** Only these TFs use looser flag geometry (noise on 1m–5m). Was incorrectly set to *all* TFs, which made 4h/1d use scalping tolerances and produced many false bull/bear flags. */
+const SHORT_SCAN_TFS = new Set(["1m", "3m", "5m"]);
 
 /** Breakouts / pending formations rank above “forming only”; then higher confidence. */
 export function sortPatternCandidatesByActionability(patterns: DetectedPattern[]): void {
@@ -228,12 +229,12 @@ function detectFlagPatternInFixedWindow(
   if (window.length < 60) return null;
 
   const shortTf = SHORT_SCAN_TFS.has(timeframe);
-  /** 1m/3m/5m: aggressive — smaller pole % OK, wider flag/retrace tolerance (scanner does not veto geometry on SMMA). */
-  const maxFlagToPoleRatio = shortTf ? 0.92 : 0.65;
-  const maxPoleRetraceRatio = shortTf ? 0.82 : 0.6;
-  const poleMinMult = shortTf ? 0.68 : 1;
-  const bullFlagMaxUpSlope = shortTf ? 0.58 : 0.3;
-  const bearFlagMinSlope = shortTf ? -0.62 : -0.3;
+  /** 1m/3m/5m: still need a real pole + counter-slope flag; higher TFs use stricter ratios. */
+  const maxFlagToPoleRatio = shortTf ? 0.78 : 0.58;
+  const maxPoleRetraceRatio = shortTf ? 0.68 : 0.52;
+  const poleMinMult = shortTf ? 0.82 : 1;
+  const bullFlagMaxUpSlope = shortTf ? 0.32 : 0.22;
+  const bearFlagMinSlope = shortTf ? -0.38 : -0.22;
 
   const poleCandles = window.slice(0, 25);
   const flagCandles = window.slice(25, 50);
@@ -299,7 +300,7 @@ function detectFlagPatternInFixedWindow(
       takeProfit,
       breakoutLevel: flagUpperBound,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 52,
+      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 44,
     };
 
   } else {
@@ -358,7 +359,7 @@ function detectFlagPatternInFixedWindow(
       takeProfit,
       breakoutLevel: flagLowerBound,
       currentPrice,
-      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 52,
+      confidence: status === "breakout_confirmed" ? 80 : status === "breakout_pending" ? 65 : 44,
     };
   }
 }

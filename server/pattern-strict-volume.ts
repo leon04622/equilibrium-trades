@@ -32,7 +32,7 @@ export function detectStrictFlagWithVolume(
     const poleHeight = high - low;
     if (poleHeight <= 0) continue;
     const movePct = isBullish ? (poleHeight / low) * 100 : (poleHeight / high) * 100;
-    if (movePct < 0.35) continue;
+    if (movePct < 0.48) continue;
     const c0 = parseFloat(pole[0].c);
     const c9 = parseFloat(pole[POLE_LEN - 1].c);
     if (isBullish && c9 <= c0) continue;
