@@ -468,8 +468,8 @@ export default function Trading({ visible = true }: TradingProps) {
             </Button>
 
             {chartEngine === "tradingview" && (
-              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[160px] leading-tight shrink-0">
-                TV: use <strong className="text-foreground">AI</strong> for chart TP/SL (native drag)
+              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[200px] leading-tight shrink-0">
+                TV: trend lines from the <strong className="text-foreground">left toolbar</strong>; TP/SL on <strong className="text-foreground">AI</strong>
               </span>
             )}
 

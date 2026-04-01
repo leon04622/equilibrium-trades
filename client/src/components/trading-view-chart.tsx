@@ -96,6 +96,7 @@ function TradingViewChartComponent({
     script.onerror = () => {
       markError();
     };
+    // TV embed strips non-whitelisted keys (drawings_access never reached the iframe).
     script.innerHTML = JSON.stringify({
       autosize: true,
       symbol: symbol,
@@ -115,7 +116,9 @@ function TradingViewChartComponent({
       save_image: false,
       support_host: "https://www.tradingview.com",
       studies: studies,
-      drawings_access: { type: "all" },
+      horztouchdrag: true,
+      verttouchdrag: true,
+      enabled_features: ["left_toolbar", "side_toolbar_in_fullscreen_mode"],
     });
 
     host.appendChild(script);
