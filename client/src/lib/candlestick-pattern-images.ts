@@ -2,10 +2,16 @@
  * Lazy-resolve diagram PNGs so the candles page does not pull every asset into the main bundle.
  * Paths are relative to this file → repo `attached_assets/generated_images/`.
  */
-const loaders = import.meta.glob<{ default: string }>("../../../attached_assets/generated_images/*.png", {
-  import: "default",
-  eager: false,
-});
+const loaders = {
+  ...import.meta.glob<{ default: string }>("/attached_assets/generated_images/*.png", {
+    import: "default",
+    eager: false,
+  }),
+  ...import.meta.glob<{ default: string }>("../../../attached_assets/generated_images/*.png", {
+    import: "default",
+    eager: false,
+  }),
+};
 
 const loaderByFilename = new Map<string, () => Promise<{ default: string }>>();
 for (const [path, loader] of Object.entries(loaders)) {
