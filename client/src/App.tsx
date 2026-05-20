@@ -27,6 +27,8 @@ import { PaywallProvider } from "@/lib/paywall-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
+import { WalletUsdcStrip } from "@/components/wallet-usdc-strip";
+import { WalletBalanceEffects } from "@/components/wallet-balance-effects";
 
 import { AdminGuard } from "@/components/admin-guard";
 import { LazyJournalView } from "@/components/journal-view.lazy";
@@ -115,6 +117,7 @@ function App() {
             <UserPersistenceProvider>
             <UserTierSync />
             <TradingProvider>
+              <WalletBalanceEffects />
               <TradeHandshakeProvider>
                 <ChatProvider>
                   <TooltipProvider delayDuration={200}>
@@ -134,6 +137,7 @@ function App() {
                             <AppSidebar />
                             <SidebarInset className="flex flex-col flex-1 min-w-0 overflow-hidden">
                               <ShellHeader />
+                              <WalletUsdcStrip />
                               <TradingLayout />
                             </SidebarInset>
                           </div>

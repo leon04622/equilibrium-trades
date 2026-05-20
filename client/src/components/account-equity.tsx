@@ -15,9 +15,12 @@ export function AccountEquity() {
     accountValue,
     spotUsdcTotal,
     unifiedAccountUsd,
+    walletUsdcArbitrum,
+    displayTotalUsd,
     balance,
     marginUsed,
     isLoadingAccount,
+    isLoadingWalletUsdc,
     positions,
   } = useTrading();
   const { data: userSync } = useUserSync();
@@ -29,8 +32,12 @@ export function AccountEquity() {
   const maintenanceMargin = marginUsed * 0.03;
 
   const mongoTotal = userSync?.totalBalance ?? userSync?.hlBalance?.totalUsd ?? null;
-  const displayUnified =
+  const displayTrading =
     unifiedAccountUsd > 0 ? unifiedAccountUsd : mongoTotal != null && mongoTotal > 0 ? mongoTotal : unifiedAccountUsd;
+  const displayTotal =
+    displayTotalUsd > 0
+      ? displayTotalUsd
+      : displayTrading + walletUsdcArbitrum;
 
   const formatValue = (v: number) => {
     if (v === 0) return "$0.00";
@@ -82,7 +89,7 @@ export function AccountEquity() {
       </div>
 
       <div className="space-y-3 p-3 text-xs">
-        {isLoadingAccount ? (
+        {isLoadingAccount || isLoadingWalletUsdc ? (
           <div className="space-y-2">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
@@ -93,24 +100,43 @@ export function AccountEquity() {
             <div className="rounded-xl border border-primary/15 bg-primary/5 p-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  Unified total
+                  Total balance
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
                   <ShieldCheck className="h-3 w-3 text-primary" />
-                  Perp + spot
+                  Wallet + trading
                 </span>
               </div>
-              <div className="mt-2 font-mono text-2xl font-semibold">{formatValue(displayUnified)}</div>
+              <div className="mt-2 font-mono text-2xl font-semibold">{formatValue(displayTotal)}</div>
             </div>
 
             <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground">Perp account value</span>
-              <span className="font-mono">{formatValue(accountValue)}</span>
+              <span className="text-muted-foreground">In wallet (Arbitrum)</span>
+              <span className="font-mono">{formatValue(walletUsdcArbitrum)}</span>
             </div>
             <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground">Spot USDC (HL)</span>
+              <span className="text-muted-foreground">Ready to trade</span>
+              <span className="font-mono">{formatValue(displayTrading)}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-muted-foreground/80">
+              <span>Perp account value</span>
+              <span className="font-mono">{formatValue(accountValue)}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-muted-foreground/80">
+              <span>Spot USDC (HL)</span>
               <span className="font-mono">{formatValue(spotUsdcTotal)}</span>
             </div>
+
+            {walletUsdcArbitrum >= 0.01 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full h-8 text-xs"
+                onClick={() => navigate("/funding?tab=deposit&activate=1")}
+              >
+                Add {formatValue(walletUsdcArbitrum)} to trading
+              </Button>
+            )}
 
             {mongoTotal != null && mongoTotal > 0 && unifiedAccountUsd <= 0 && (
               <p className="text-[10px] text-muted-foreground">
@@ -163,7 +189,7 @@ export function AccountEquity() {
               </div>
             </div>
 
-            {displayUnified === 0 && (
+            {displayTotal === 0 && (
               <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[10px] text-center">
                 <p className="text-muted-foreground">
                   Deposit funds to start trading. Visit the{" "}

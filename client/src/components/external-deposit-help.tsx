@@ -45,11 +45,9 @@ export function ExternalDepositHelp({
           Sent USDC from Revolut or another app?
         </p>
         <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-          Bank and exchange withdrawals only move USDC to your{" "}
-          <strong className="text-foreground">wallet on Arbitrum</strong>. They do{" "}
-          <strong className="text-foreground">not</strong> credit your Hyperliquid trading balance by themselves.
-          After it arrives, connect the <strong className="text-foreground">same wallet</strong> here and press{" "}
-          <strong className="text-foreground">Deposit USDC</strong> to complete the Circle CCTP bridge (1:1 native USDC).
+          Bank and exchange sends appear in <strong className="text-foreground">your total balance</strong> as soon as
+          they land on Arbitrum (usually within a few minutes). Press{" "}
+          <strong className="text-foreground">Add to trading</strong> once to move wallet USDC into Hyperliquid.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <code className="text-[11px] bg-muted px-2 py-1 rounded font-mono">{shortAddress(walletAddress)}</code>

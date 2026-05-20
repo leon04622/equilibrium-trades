@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WalletConnectSheet } from "./wallet-connect-sheet";
+import { useTrading } from "@/lib/trading-context";
 
 const ARBITRUM_CHAIN_ID = 42161;
 
@@ -24,6 +25,7 @@ export function WalletConnect() {
     disconnect,
     switchToArbitrum 
   } = useWallet();
+  const { walletUsdcArbitrum, displayTotalUsd, isLoadingWalletUsdc } = useTrading();
 
   const isWrongNetwork = isConnected && chainId !== ARBITRUM_CHAIN_ID;
 
@@ -59,6 +61,11 @@ export function WalletConnect() {
           <Wallet className="h-4 w-4" />
           <span className="hidden sm:inline">{shortenAddress(address!)}</span>
           <span className="sm:hidden">{address!.slice(0, 4)}...</span>
+          {!isLoadingWalletUsdc && displayTotalUsd > 0 ? (
+            <span className="hidden md:inline text-xs font-mono text-emerald-600 dark:text-emerald-400">
+              {displayTotalUsd.toFixed(2)}
+            </span>
+          ) : null}
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
@@ -68,6 +75,11 @@ export function WalletConnect() {
           onSelect={(e) => e.preventDefault()}
         >
           Connected to Arbitrum
+          {!isLoadingWalletUsdc ? (
+            <span className="block font-mono text-foreground mt-0.5">
+              Total {displayTotalUsd.toFixed(2)} · Wallet {walletUsdcArbitrum.toFixed(2)} USDC
+            </span>
+          ) : null}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
