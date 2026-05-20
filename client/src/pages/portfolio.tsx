@@ -53,6 +53,8 @@ import {
   type SpotBalance,
 } from "@/lib/hyperliquid-client";
 import { queryClient } from "@/lib/queryClient";
+import { getArbitrumBridgedUsdcBalance } from "@/lib/arbitrum-usdc";
+import { ExternalDepositHelp } from "@/components/external-deposit-help";
 import { Progress } from "@/components/ui/progress";
 import { Link } from "react-router-dom";
 import { useUserSync } from "@/context/AuthContext";
@@ -96,6 +98,7 @@ export default function Portfolio() {
   const [depositStep, setDepositStep] = useState<string>("");
   const [depositResult, setDepositResult] = useState<{ success: boolean; txHash?: string; error?: string } | null>(null);
   const [arbUsdcBalance, setArbUsdcBalance] = useState<number | null>(null);
+  const [arbBridgedUsdcBalance, setArbBridgedUsdcBalance] = useState<number | null>(null);
   const [isLoadingArbBalance, setIsLoadingArbBalance] = useState(false);
   const [depositAwaitingChain, setDepositAwaitingChain] = useState(false);
   const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
@@ -372,13 +375,18 @@ export default function Portfolio() {
     try {
       const cfg = await fetchHyperliquidDepositConfig();
       setDepositCfg(cfg);
-      const bal = await getArbitrumUsdcBalance(address, cfg.usdc);
+      const [bal, bridged] = await Promise.all([
+        getArbitrumUsdcBalance(address, cfg.usdc),
+        getArbitrumBridgedUsdcBalance(address),
+      ]);
       setArbUsdcBalance(bal);
+      setArbBridgedUsdcBalance(bridged);
       const safeMax = Math.floor(bal * 100) / 100;
       setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
     } catch (e: any) {
       setDepositCfgLoadError(e?.message || "Could not load deposit settings from the server.");
       setArbUsdcBalance(null);
+      setArbBridgedUsdcBalance(null);
     } finally {
       setIsLoadingArbBalance(false);
     }
@@ -1179,10 +1187,20 @@ export default function Portfolio() {
             </div>
           )}
 
+          {address ? (
+            <ExternalDepositHelp
+              walletAddress={address}
+              nativeUsdc={arbUsdcBalance}
+              bridgedUsdc={arbBridgedUsdcBalance}
+              minDepositUsdc={depositCfg?.minDepositUsdc ?? 5}
+              isLoading={isLoadingArbBalance}
+            />
+          ) : null}
+
           <div className="space-y-4 py-2">
             {/* Arbitrum USDC balance */}
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 text-sm">
-              <span className="text-muted-foreground">Available on Arbitrum</span>
+              <span className="text-muted-foreground">Native USDC on Arbitrum</span>
               <span className="font-semibold font-mono">
                 {isLoadingArbBalance ? (
                   <span className="flex items-center gap-1 text-muted-foreground">

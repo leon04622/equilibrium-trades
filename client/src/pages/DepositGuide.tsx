@@ -136,6 +136,40 @@ export default function DepositGuide() {
         </p>
       </div>
 
+      <Card className="overflow-hidden border-amber-500/25">
+        <CardHeader>
+          <CardTitle className="text-lg">Revolut, Coinbase, or bank app withdrawal?</CardTitle>
+          <CardDescription>
+            Sending USDC to your wallet is only step one — you still need the in-app deposit button.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+          <ol className="list-decimal pl-5 space-y-2">
+            <li>
+              In Revolut (or your exchange), withdraw <strong className="text-foreground">USDC</strong> on{" "}
+              <strong className="text-foreground">Arbitrum</strong> to the <strong className="text-foreground">same wallet address</strong> you
+              connect on Equilibrium (MetaMask, Rabby, etc.).
+            </li>
+            <li>
+              Wait until the transfer shows on{" "}
+              <a className="text-primary underline" href="https://arbiscan.io" target="_blank" rel="noopener noreferrer">
+                Arbiscan
+              </a>{" "}
+              as <strong className="text-foreground">native USDC</strong> in that wallet (not USDC.e).
+            </li>
+            <li>
+              Open Equilibrium → <Link className="text-primary underline" to="/funding?tab=deposit">Funding → Deposit</Link>{" "}
+              (or Portfolio → Deposit), connect that wallet, and press <strong className="text-foreground">Deposit USDC</strong> to
+              bridge into your trading account via Circle CCTP.
+            </li>
+          </ol>
+          <p className="text-xs border border-border/80 rounded-lg p-3 bg-muted/30">
+            A $10 Revolut send does <strong className="text-foreground">not</strong> appear in trading balance until you complete step 3.
+            Minimum credited amount is shown in the deposit dialog (usually 5 USDC plus a small forward fee).
+          </p>
+        </CardContent>
+      </Card>
+
       <Card className="overflow-hidden border-primary/20">
         <CardHeader>
           <CardTitle className="text-lg">1. Before you start</CardTitle>

@@ -21,9 +21,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import {
-  depositUsdcToHyperliquid,
   fetchHyperliquidDepositConfig,
   getArbitrumUsdcBalance,
+} from "@/lib/cctp-deposit";
+import { getArbitrumBridgedUsdcBalance } from "@/lib/arbitrum-usdc";
+import { ExternalDepositHelp } from "@/components/external-deposit-help";
+import {
+  depositUsdcToHyperliquid,
   withdrawUsdcToWallet,
   type CctpDepositStep,
   type HyperliquidDepositConfig,
@@ -62,6 +66,7 @@ export default function Funding() {
   const [depositStep, setDepositStep] = useState("");
   const [depositResult, setDepositResult] = useState<{ success: boolean; txHash?: string; error?: string } | null>(null);
   const [arbUsdcBalance, setArbUsdcBalance] = useState<number | null>(null);
+  const [arbBridgedUsdcBalance, setArbBridgedUsdcBalance] = useState<number | null>(null);
   const [isLoadingArbBalance, setIsLoadingArbBalance] = useState(false);
   const [depositAwaitingChain, setDepositAwaitingChain] = useState(false);
   const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
@@ -94,6 +99,7 @@ export default function Funding() {
     if (!address) {
       setDepositCfg(null);
       setArbUsdcBalance(null);
+      setArbBridgedUsdcBalance(null);
       return;
     }
 
@@ -102,8 +108,12 @@ export default function Funding() {
       const cfg = await fetchHyperliquidDepositConfig();
       setDepositCfg(cfg);
       setDepositCfgLoadError(null);
-      const bal = await getArbitrumUsdcBalance(address, cfg.usdc);
+      const [bal, bridged] = await Promise.all([
+        getArbitrumUsdcBalance(address, cfg.usdc),
+        getArbitrumBridgedUsdcBalance(address),
+      ]);
       setArbUsdcBalance(bal);
+      setArbBridgedUsdcBalance(bridged);
       setDepositAmount((current) => {
         if (current.trim().length > 0) return current;
         const safeMax = Math.floor(bal * 100) / 100;
@@ -112,6 +122,7 @@ export default function Funding() {
     } catch (e: any) {
       setDepositCfgLoadError(e?.message || "Could not load deposit settings from the server.");
       setArbUsdcBalance(null);
+      setArbBridgedUsdcBalance(null);
     } finally {
       setIsLoadingArbBalance(false);
     }
@@ -466,11 +477,19 @@ export default function Funding() {
                       Connected wallet: <span className="font-medium text-foreground">{shortAddress(address)}</span>
                     </p>
                     <p>
-                      Arbitrum USDC:{" "}
+                      Arbitrum USDC (native):{" "}
                       <span className="font-medium text-foreground">
                         {isLoadingArbBalance ? "Loading..." : arbUsdcBalance == null ? "--" : `${formatPrice(arbUsdcBalance)} USDC`}
                       </span>
                     </p>
+                    {!isLoadingArbBalance && (arbBridgedUsdcBalance ?? 0) > 0 ? (
+                      <p>
+                        Arbitrum USDC.e (bridged):{" "}
+                        <span className="font-medium text-amber-600 dark:text-amber-400">
+                          {formatPrice(arbBridgedUsdcBalance!)} — swap to native before deposit
+                        </span>
+                      </p>
+                    ) : null}
                     <p>
                       Minimum deposit:{" "}
                       <span className="font-medium text-foreground">
@@ -524,6 +543,14 @@ export default function Funding() {
                   <span>{depositCfgLoadError}</span>
                 </div>
               )}
+
+              <ExternalDepositHelp
+                walletAddress={address}
+                nativeUsdc={arbUsdcBalance}
+                bridgedUsdc={arbBridgedUsdcBalance}
+                minDepositUsdc={depositCfg?.minDepositUsdc ?? 5}
+                isLoading={isLoadingArbBalance}
+              />
 
               {!isOnArbitrum && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
