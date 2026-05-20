@@ -164,6 +164,7 @@ export default function Candles() {
                     <CandlestickPatternImage
                       imageFile={pattern.imageFile}
                       alt={`${pattern.name} candlestick pattern`}
+                      patternName={pattern.name}
                       className="h-52 w-full rounded-t-lg border-b border-border/60"
                       imgClassName="p-3"
                     />
@@ -243,6 +244,7 @@ export default function Candles() {
                     <CandlestickPatternImage
                       imageFile={selectedPattern.imageFile}
                       alt={`${selectedPattern.name} candlestick pattern diagram`}
+                      patternName={selectedPattern.name}
                       className="h-64 w-full rounded-lg border"
                       imgClassName="p-4"
                     />
