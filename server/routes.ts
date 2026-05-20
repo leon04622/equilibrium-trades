@@ -394,6 +394,30 @@ function isPayloadEntitled(payload: WalletSubscriptionPayload | null | undefined
   return !Number.isNaN(expMs) && expMs > Date.now();
 }
 
+async function hasPaidFeatureAccess(walletAddressRaw: string | null | undefined): Promise<boolean> {
+  const walletAddress = walletAddressRaw?.trim().toLowerCase();
+  if (!walletAddress || !/^0x[a-f0-9]{40}$/.test(walletAddress)) return false;
+  const payload = await buildWalletSubscriptionPayload(walletAddress);
+  const user = await storage.getWalletUser(walletAddress);
+  if (user?.manualProOverride) {
+    return isPaidTier(payload.tier);
+  }
+  return isPayloadEntitled(payload);
+}
+
+async function requirePaidFeatureAccess(req: Request, res: Response): Promise<boolean> {
+  const wallet = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+  if (!wallet) {
+    res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+    return false;
+  }
+  if (!(await hasPaidFeatureAccess(wallet))) {
+    res.status(403).json({ error: "Pro subscription required" });
+    return false;
+  }
+  return true;
+}
+
 /** Prefer highest paid tier among Stripe, Postgres, and Mongo CRM (admin grants must not be ignored). */
 function pickBestPaidSubscriptionPayload(
   candidates: (WalletSubscriptionPayload | null | undefined)[],
@@ -1327,6 +1351,9 @@ export async function registerRoutes(
   // Scan for educational patterns (no entry/SL/TP — for learning)
   app.get("/api/signals/patterns", async (req: Request, res: Response) => {
     try {
+      if (!(await requirePaidFeatureAccess(req, res))) {
+        return;
+      }
       const coinsParam = req.query.coins as string;
       const timeframesParam = req.query.timeframes as string;
       const wallet = resolveWalletAddressFromRequest(req)?.trim();
@@ -1732,9 +1759,12 @@ export async function registerRoutes(
     }
   });
 
-  // Tutorial Videos API — Mongo only when vault connected (`server/video-service.ts`); no session; public catalog.
+  // Tutorial Videos API — Pro-only catalog for subscribed wallets.
   app.get("/api/videos", async (req: Request, res: Response) => {
     try {
+      if (!(await requirePaidFeatureAccess(req, res))) {
+        return;
+      }
       const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
       const host = req.get("host");
       const origin = host && proto ? `${proto}://${host}`.replace(/\/$/, "") : getPublicAppBaseUrl();

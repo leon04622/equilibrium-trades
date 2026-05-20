@@ -235,7 +235,7 @@ function VaultUpgradeInline() {
 
 /** Educational Vault — lessons from GET /api/videos, grouped by the category name set in Command Center. */
 export default function VideoVault() {
-  const { isConnected } = useWallet();
+  const { isConnected, address } = useWallet();
   const { isPro, isLoading: subLoading, tier, isSyncError, refetch: refetchUserSync } = useSubscription();
   const [active, setActive] = useState<VaultItem | null>(null);
 
@@ -247,9 +247,15 @@ export default function VideoVault() {
     error: listErrorObj,
     refetch: refetchVideos,
   } = useQuery<TutorialVideo[]>({
-    queryKey: ["/api/videos"],
+    queryKey: ["/api/videos", address ?? ""],
     queryFn: async () => {
-      const res = await fetch("/api/videos", { credentials: "include" });
+      const headers: Record<string, string> = {};
+      if (address?.trim()) {
+        const wallet = address.trim();
+        headers["x-wallet-address"] = wallet;
+        headers.Authorization = `Bearer ${wallet}`;
+      }
+      const res = await fetch("/api/videos", { credentials: "include", headers });
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || res.statusText || "Failed to load videos");
@@ -267,6 +273,7 @@ export default function VideoVault() {
     gcTime: 10 * 60_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
+    enabled: Boolean(address),
   });
 
   useEffect(() => {
