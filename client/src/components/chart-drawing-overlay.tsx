@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -64,6 +65,8 @@ type ChartDrawingProviderProps = {
   seriesRef: RefObject<ISeriesApi<"Candlestick"> | null>;
   paneRef: RefObject<HTMLDivElement | null>;
   layoutTick?: number;
+  /** Bumps when the LW chart instance is created — refs do not retrigger effects. */
+  chartReadyTick?: number;
   children: ReactNode;
 };
 
@@ -124,10 +127,12 @@ export function ChartDrawingProvider({
   seriesRef,
   paneRef,
   layoutTick = 0,
+  chartReadyTick = 0,
   children,
 }: ChartDrawingProviderProps) {
   const { address } = useWallet();
   const [tool, setTool] = useState<DrawTool>("select");
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [draftPoints, setDraftPoints] = useState<ChartDrawingPoint[]>([]);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -324,7 +329,7 @@ export function ChartDrawingProvider({
         /* disposed */
       }
     };
-  }, [chartRef, enabled, onChartClick, onChartDblClick]);
+  }, [chartRef, enabled, chartReadyTick, onChartClick, onChartDblClick]);
 
   /** TP/SL drag handles sit above the canvas; disable them while drawing. */
   useEffect(() => {
@@ -337,29 +342,90 @@ export function ChartDrawingProvider({
     });
   }, [paneRef, enabled, tool, layoutTick]);
 
-  /** While a draw tool is active, disable chart pan/zoom so clicks land as drawings. */
+  /** Keep pan/zoom enabled; restore defaults when chart (re)mounts. */
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !enabled) return;
-    const pan = tool === "select";
     chart.applyOptions({
       handleScroll: {
-        mouseWheel: pan,
-        pressedMouseMove: pan,
-        horzTouchDrag: pan,
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
         vertTouchDrag: false,
       },
       handleScale: {
-        mouseWheel: pan,
-        pinch: pan,
-        axisPressedMouseMove: pan,
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: true,
       },
     });
-  }, [chartRef, enabled, tool]);
+  }, [chartRef, enabled, chartReadyTick]);
+
+  /** Fallback: short click on pane (not drag) places draw points while chart stays pannable. */
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane || !enabled) return;
+
+    const CLICK_DRAG_THRESHOLD_PX = 6;
+
+    const pointerToPointFromClient = (
+      clientX: number,
+      clientY: number,
+    ): { pt: ChartDrawingPoint; px: number; py: number } | null => {
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series) return null;
+      const el = chart.chartElement();
+      const rect = el.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      const rawTime = chart.timeScale().coordinateToTime(x);
+      const price = series.coordinateToPrice(y);
+      const timeSec =
+        rawTime != null ? lightweightTimeToSeconds(rawTime as Time) : null;
+      if (timeSec == null || price == null) return null;
+      return { pt: { time: timeSec, price }, px: x, py: y };
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (tool === "select") return;
+      pointerDownRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (tool === "select" || !pointerDownRef.current) return;
+      const start = pointerDownRef.current;
+      pointerDownRef.current = null;
+      const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+      if (moved > CLICK_DRAG_THRESHOLD_PX) return;
+
+      const hit = pointerToPointFromClient(e.clientX, e.clientY);
+      if (!hit) return;
+      applyChartPoint(hit.pt, hit.px, hit.py);
+    };
+
+    pane.addEventListener("pointerdown", onPointerDown, true);
+    pane.addEventListener("pointerup", onPointerUp, true);
+    return () => {
+      pane.removeEventListener("pointerdown", onPointerDown, true);
+      pane.removeEventListener("pointerup", onPointerUp, true);
+      pointerDownRef.current = null;
+    };
+  }, [
+    paneRef,
+    enabled,
+    tool,
+    chartReadyTick,
+    applyChartPoint,
+    chartRef,
+    seriesRef,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDraftPoints([]);
+      if (e.key !== "Escape") return;
+      setDraftPoints([]);
+      setTool("select");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

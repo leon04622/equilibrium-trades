@@ -987,6 +987,7 @@ function PatternChartComponent({
             seriesRef={candleSeriesRef}
             paneRef={chartPaneRef}
             layoutTick={chartLayoutTick}
+            chartReadyTick={chartVersion}
           >
             <div className="flex flex-1 flex-row min-h-0 h-full">
               <ChartDrawingLeftToolbar />
