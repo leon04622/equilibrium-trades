@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
-import { 
-  Info, 
-  AlertTriangle, 
-  TrendingUp, 
-  TrendingDown, 
+import {
+  Info,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
   Activity,
   Pause,
   Play,
@@ -17,41 +17,26 @@ import {
   Flame,
   ZoomIn,
   ZoomOut,
-  Crosshair
+  Crosshair,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
 import { useBookmapFeed } from "@/hooks/use-bookmap-feed";
-import type { HeatmapCell, HeatmapGridMeta, HeatmapTrade } from "@shared/heatmap-grid";
+import type { HeatmapCell, HeatmapGridMeta } from "@shared/heatmap-grid";
+import {
+  BOOKMAP_PAD,
+  bookmapHeatColor,
+  buildSessionVolumeProfile,
+  maxHeatmapVolume,
+  plotRightEdge,
+  priceToY,
+  timeToX,
+} from "@/lib/bookmap-render";
 
 type HeatmapData = HeatmapCell;
 
-const PLOT_PAD_LEFT = 52;
-const PLOT_PAD_RIGHT = 4;
-const PLOT_PAD_TOP = 8;
-const PLOT_PAD_BOTTOM = 22;
-
-/** Zoom slider 20–100 → ~0.5%–2.5% price window each side of mid. */
 function zoomToRange(zoom: number): number {
   return 0.005 + ((zoom - 20) / 80) * 0.02;
-}
-
-function priceToY(price: number, meta: HeatmapGridMeta, height: number): number {
-  const plotH = height - PLOT_PAD_TOP - PLOT_PAD_BOTTOM;
-  const ratio = (price - meta.minPrice) / (meta.maxPrice - meta.minPrice);
-  return PLOT_PAD_TOP + plotH * (1 - Math.max(0, Math.min(1, ratio)));
-}
-
-function timeToX(
-  time: number,
-  minTime: number,
-  maxTime: number,
-  width: number,
-): number {
-  if (maxTime <= minTime) return width - PLOT_PAD_RIGHT;
-  const plotW = width - PLOT_PAD_LEFT - PLOT_PAD_RIGHT;
-  const ratio = (time - minTime) / (maxTime - minTime);
-  return PLOT_PAD_LEFT + ratio * plotW;
 }
 
 interface OrderBookLevel {
@@ -76,7 +61,7 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
   const [historyFrames, setHistoryFrames] = useState<HeatmapData[][][]>([]);
   const maxHistoryFrames = 300;
   const isLive = scrollPosition >= 95;
-  const lastFrameLenRef = useRef(0);
+  const lastSnapshotTimeRef = useRef(0);
 
   const {
     connected: feedConnected,
@@ -95,17 +80,12 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
   const currentPrice = feedMidPrice;
 
-  // Get the heatmap data to display based on scroll position
   const displayHeatmap = (() => {
-    if (isLive || historyFrames.length === 0) {
-      return heatmapData;
-    }
-    // Map scroll position (0-94) to history frame index
+    if (isLive || historyFrames.length === 0) return heatmapData;
     const frameIndex = Math.floor((scrollPosition / 95) * historyFrames.length);
     return historyFrames[Math.min(frameIndex, historyFrames.length - 1)] || heatmapData;
   })();
 
-  // Fetch current ticker and order book
   const { data: tickers = [] } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
     refetchInterval: 5000,
@@ -118,90 +98,83 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
   const currentTicker = tickers.find((t) => t.coin === coin);
   const tickerPrice = currentTicker ? parseFloat(currentTicker.markPx) : 0;
-
   const bids = orderBook?.levels?.[0] || [];
   const asks = orderBook?.levels?.[1] || [];
 
   useEffect(() => {
     setHistoryFrames([]);
     setScrollPosition(100);
-    lastFrameLenRef.current = 0;
+    lastSnapshotTimeRef.current = 0;
   }, [coin]);
 
   useEffect(() => {
     if (isPaused || heatmapData.length === 0) return;
-    if (heatmapData.length === lastFrameLenRef.current) return;
-    lastFrameLenRef.current = heatmapData.length;
+    const lastTime = heatmapData[heatmapData.length - 1]?.[0]?.time ?? 0;
+    if (lastTime === lastSnapshotTimeRef.current) return;
+    lastSnapshotTimeRef.current = lastTime;
     setHistoryFrames((prev) => {
       const next = [...prev, heatmapData];
       return next.length > maxHistoryFrames ? next.slice(-maxHistoryFrames) : next;
     });
   }, [heatmapData, isPaused]);
 
-  // Draw heatmap on canvas — Bookmap: time → X, price → Y, liquidity = heat
+  const formatPrice = useCallback((p: number) => {
+    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    if (p >= 1) return p.toFixed(2);
+    return p.toFixed(4);
+  }, []);
+
+  const formatTime = useCallback((ts: number) => {
+    return new Date(ts).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  }, []);
+
   const drawHeatmap = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const width = canvas.width;
     const height = canvas.height;
     const meta = gridMeta;
+    const heatEnd = plotRightEdge(width);
 
-    ctx.fillStyle = "#0a0a0f";
+    ctx.fillStyle = "#0c0c0c";
     ctx.fillRect(0, 0, width, height);
 
-    if (displayHeatmap.length === 0 || !meta) {
-      const gradient = ctx.createLinearGradient(0, 0, 0, height);
-      gradient.addColorStop(0, "rgba(239, 68, 68, 0.08)");
-      gradient.addColorStop(0.5, "rgba(80, 80, 100, 0.04)");
-      gradient.addColorStop(1, "rgba(34, 197, 94, 0.08)");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(PLOT_PAD_LEFT, 0, width - PLOT_PAD_LEFT, height);
-      return;
-    }
+    if (displayHeatmap.length === 0 || !meta) return;
 
     const columns = displayHeatmap.length;
     const rows = displayHeatmap[0]?.length || 0;
-    if (rows === 0 || columns === 0) return;
+    if (rows === 0) return;
 
     const times = displayHeatmap.map((col) => col[0]?.time ?? 0);
     const minTime = times[0] ?? 0;
     const maxTime = times[times.length - 1] ?? minTime;
-    const plotW = width - PLOT_PAD_LEFT - PLOT_PAD_RIGHT;
-
-    let maxVolume = 0;
-    for (const column of displayHeatmap) {
-      for (const cell of column) {
-        maxVolume = Math.max(
-          maxVolume,
-          cell.totalVolume ?? cell.bidVolume + cell.askVolume,
-        );
-      }
-    }
-
-    /** Bookmap-style heat: dark → cyan → yellow → orange */
-    const heatColor = (intensity: number) => {
-      if (intensity < 0.03) return null;
-      const t = Math.pow(Math.min(1, intensity), 0.48);
-      const r = Math.floor(8 + t * 247);
-      const g = Math.floor(t < 0.45 ? t * 200 : 90 + (t - 0.45) * 330);
-      const b = Math.floor(140 - t * 130);
-      return `rgba(${r},${Math.min(255, g)},${Math.max(0, b)},${0.12 + t * 0.82})`;
-    };
-
-    const sideTint = (intensity: number, side: "bid" | "ask") => {
-      if (intensity < 0.08) return null;
-      const t = Math.pow(intensity, 0.6);
-      return side === "bid"
-        ? `rgba(0, 200, 83, ${0.08 + t * 0.35})`
-        : `rgba(255, 82, 82, ${0.08 + t * 0.35})`;
-    };
-
+    const maxVolume = maxHeatmapVolume(displayHeatmap);
     const trail = new Array(rows).fill(0);
 
+    // Vertical time grid (~15s or every 8 columns)
+    const gridStep = Math.max(1, Math.floor(columns / 12));
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    for (let col = 0; col < columns; col += gridStep) {
+      const t = displayHeatmap[col][0]?.time ?? minTime;
+      const x = timeToX(t, minTime, maxTime, width);
+      ctx.beginPath();
+      ctx.moveTo(x, BOOKMAP_PAD.top);
+      ctx.lineTo(x, height - BOOKMAP_PAD.bottom);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Liquidity heat + persistence trail
     for (let col = 0; col < columns; col++) {
       const t0 = displayHeatmap[col][0]?.time ?? minTime;
       const t1 =
@@ -219,125 +192,160 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
         const cellH = Math.max(1, yBot - yTop);
 
         const total = cell.totalVolume ?? cell.bidVolume + cell.askVolume;
-        trail[row] = Math.max(total, trail[row] * 0.94);
+        trail[row] = Math.max(total, trail[row] * 0.965);
         const intensity = maxVolume > 0 ? trail[row] / maxVolume : 0;
-
-        const base = heatColor(intensity);
-        if (base) {
-          ctx.fillStyle = base;
-          ctx.fillRect(x0, yTop, cellW + 0.5, cellH + 0.5);
-        }
-
-        const isBidSide = cell.priceLevel <= meta.midPrice;
-        const sideVol = isBidSide ? cell.bidVolume : cell.askVolume;
-        const sideIntensity = maxVolume > 0 ? sideVol / maxVolume : 0;
-        const tint = sideTint(sideIntensity, isBidSide ? "bid" : "ask");
-        if (tint) {
-          ctx.fillStyle = tint;
+        const color = bookmapHeatColor(intensity);
+        if (color) {
+          ctx.fillStyle = color;
           ctx.fillRect(x0, yTop, cellW + 0.5, cellH + 0.5);
         }
       }
     }
 
-    // Current book depth strip (COB) on right edge of heatmap
-    const lastCol = displayHeatmap[columns - 1];
-    if (lastCol) {
-      let cobMax = 0;
-      for (const cell of lastCol) {
-        cobMax = Math.max(cobMax, cell.bidVolume, cell.askVolume);
+    // Trade bubbles (large, semi-transparent — Bookmap style)
+    const bubbles = recentTrades.length > 0 ? recentTrades : largeOrders;
+    for (const item of bubbles) {
+      if (item.price < meta.minPrice || item.price > meta.maxPrice) continue;
+      const orderY = priceToY(item.price, meta, height);
+      const orderX = timeToX(item.timestamp, minTime, maxTime, width);
+      if (orderX < BOOKMAP_PAD.left || orderX > heatEnd) continue;
+
+      const bubbleSize = Math.min(48, Math.max(6, Math.sqrt(item.size) * 8));
+      const isBuy = item.side === "bid";
+      ctx.globalAlpha = 0.38;
+      const grad = ctx.createRadialGradient(orderX, orderY, 0, orderX, orderY, bubbleSize);
+      if (isBuy) {
+        grad.addColorStop(0, "rgba(0, 230, 118, 0.9)");
+        grad.addColorStop(0.6, "rgba(0, 180, 80, 0.35)");
+        grad.addColorStop(1, "rgba(0, 120, 50, 0)");
+      } else {
+        grad.addColorStop(0, "rgba(255, 82, 82, 0.9)");
+        grad.addColorStop(0.6, "rgba(220, 50, 50, 0.35)");
+        grad.addColorStop(1, "rgba(160, 30, 30, 0)");
       }
-      const cobW = 36;
-      const cobX = width - PLOT_PAD_RIGHT - cobW;
-      for (const cell of lastCol) {
-        const yMid = priceToY(cell.priceLevel, meta, height);
-        const isBid = cell.priceLevel <= meta.midPrice;
-        const vol = isBid ? cell.bidVolume : cell.askVolume;
-        const barW = cobMax > 0 ? (vol / cobMax) * cobW : 0;
-        if (barW < 1) continue;
-        ctx.fillStyle = isBid ? "rgba(0,200,83,0.55)" : "rgba(255,82,82,0.55)";
-        if (isBid) {
-          ctx.fillRect(cobX + cobW - barW, yMid - 1, barW, 2);
-        } else {
-          ctx.fillRect(cobX + cobW - barW, yMid - 1, barW, 2);
-        }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(orderX, orderY, bubbleSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Current order book (COB) — resting depth at right of heat
+    const cobX = heatEnd;
+    const cobW = BOOKMAP_PAD.cob - 2;
+    let cobMax = 0;
+    for (const bid of bids) cobMax = Math.max(cobMax, parseFloat(bid.sz) || 0);
+    for (const ask of asks) cobMax = Math.max(cobMax, parseFloat(ask.sz) || 0);
+    for (const ask of asks) {
+      const px = parseFloat(ask.px);
+      const sz = parseFloat(ask.sz);
+      if (px < meta.minPrice || px > meta.maxPrice) continue;
+      const y = priceToY(px, meta, height);
+      const barW = cobMax > 0 ? (sz / cobMax) * cobW : 0;
+      ctx.fillStyle = "rgba(255, 70, 70, 0.65)";
+      ctx.fillRect(cobX, y - 1, barW, 2);
+    }
+    for (const bid of bids) {
+      const px = parseFloat(bid.px);
+      const sz = parseFloat(bid.sz);
+      if (px < meta.minPrice || px > meta.maxPrice) continue;
+      const y = priceToY(px, meta, height);
+      const barW = cobMax > 0 ? (sz / cobMax) * cobW : 0;
+      ctx.fillStyle = "rgba(0, 200, 83, 0.65)";
+      ctx.fillRect(cobX, y - 1, barW, 2);
+    }
+
+    // SVP — session volume profile (green right / red left from axis)
+    const svp = buildSessionVolumeProfile(recentTrades, meta, minTime, maxTime);
+    const svpX = width - BOOKMAP_PAD.svp;
+    const svpMid = width - BOOKMAP_PAD.priceAxis - BOOKMAP_PAD.svp / 2;
+    let svpMax = 0;
+    for (let i = 0; i < rows; i++) {
+      svpMax = Math.max(svpMax, svp.buy[i] ?? 0, svp.sell[i] ?? 0);
+    }
+    const svpBarMax = (BOOKMAP_PAD.svp / 2) * 0.9;
+
+    ctx.font = "8px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.textAlign = "center";
+    ctx.fillText("SVP", svpMid, BOOKMAP_PAD.top + 8);
+
+    for (let row = 0; row < rows; row++) {
+      const cell = displayHeatmap[0][row];
+      const yMid = priceToY(cell.priceLevel, meta, height);
+      const buyW = svpMax > 0 ? ((svp.buy[row] ?? 0) / svpMax) * svpBarMax : 0;
+      const sellW = svpMax > 0 ? ((svp.sell[row] ?? 0) / svpMax) * svpBarMax : 0;
+      if (buyW > 0.5) {
+        ctx.fillStyle = "rgba(0, 200, 83, 0.75)";
+        ctx.fillRect(svpMid, yMid - 1, buyW, 2);
+      }
+      if (sellW > 0.5) {
+        ctx.fillStyle = "rgba(255, 70, 70, 0.75)";
+        ctx.fillRect(svpMid - sellW, yMid - 1, sellW, 2);
       }
     }
 
-    // Executed trades as bubbles (Bookmap volume dots)
-    if (isLive) {
-      const bubbleSource = recentTrades.length > 0 ? recentTrades : largeOrders;
-      for (const item of bubbleSource) {
-        if (item.price < meta.minPrice || item.price > meta.maxPrice) continue;
-        const orderY = priceToY(item.price, meta, height);
-        const orderX = timeToX(item.timestamp, minTime, maxTime, width);
-        if (orderX < PLOT_PAD_LEFT || orderX > width - PLOT_PAD_RIGHT) continue;
-
-        const bubbleSize = Math.min(14, Math.max(3, Math.sqrt(item.size) * 2.5));
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle = item.side === "bid" ? "#00c853" : "#ff5252";
-        ctx.beginPath();
-        ctx.arc(orderX, orderY, bubbleSize, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.45)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-    }
-
+    // Price axis (right) + current price highlight
     const displayPrice = currentPrice || tickerPrice;
+    const priceAxisX = width - BOOKMAP_PAD.priceAxis;
+
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "9px monospace";
+    ctx.textAlign = "left";
+    for (let i = 0; i <= 10; i++) {
+      const p = meta.minPrice + ((meta.maxPrice - meta.minPrice) * i) / 10;
+      const y = priceToY(p, meta, height);
+      ctx.fillText(formatPrice(p), priceAxisX + 4, y + 3);
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.beginPath();
+      ctx.moveTo(BOOKMAP_PAD.left, y);
+      ctx.lineTo(heatEnd, y);
+      ctx.stroke();
+    }
+
     if (displayPrice >= meta.minPrice && displayPrice <= meta.maxPrice) {
       const priceY = priceToY(displayPrice, meta, height);
-      ctx.strokeStyle = "#fbbf24";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(PLOT_PAD_LEFT, priceY);
-      ctx.lineTo(width - PLOT_PAD_RIGHT, priceY);
-      ctx.stroke();
 
-      ctx.fillStyle = "#fbbf24";
-      ctx.fillRect(PLOT_PAD_LEFT, priceY - 9, 50, 18);
-      ctx.fillStyle = "#000";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(BOOKMAP_PAD.left, priceY);
+      ctx.lineTo(heatEnd + cobW, priceY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const label = formatPrice(displayPrice);
       ctx.font = "bold 10px monospace";
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(priceAxisX, priceY - 9, tw, 18);
+      ctx.fillStyle = "#fff";
       ctx.textAlign = "left";
-      ctx.fillText(formatPrice(displayPrice), PLOT_PAD_LEFT + 4, priceY + 4);
+      ctx.fillText(label, priceAxisX + 5, priceY + 4);
     }
 
-    // Price axis labels (left)
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.font = "9px monospace";
-    ctx.textAlign = "right";
-    for (let i = 0; i <= 8; i++) {
-      const p = meta.minPrice + ((meta.maxPrice - meta.minPrice) * i) / 8;
-      const y = priceToY(p, meta, height);
-      ctx.fillText(formatPrice(p), PLOT_PAD_LEFT - 4, y + 3);
-      ctx.strokeStyle = "rgba(255,255,255,0.04)";
-      ctx.beginPath();
-      ctx.moveTo(PLOT_PAD_LEFT, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-
-    // Time axis (bottom)
+    // Time axis
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(255,255,255,0.35)";
-    for (let i = 0; i <= 4; i++) {
-      const t = minTime + ((maxTime - minTime) * i) / 4;
+    ctx.font = "9px monospace";
+    for (let i = 0; i <= 5; i++) {
+      const t = minTime + ((maxTime - minTime) * i) / 5;
       const x = timeToX(t, minTime, maxTime, width);
       ctx.fillText(formatTime(t), x, height - 6);
     }
 
-    if (showCrosshair && mousePos && mousePos.x > PLOT_PAD_LEFT) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    if (showCrosshair && mousePos && mousePos.x > BOOKMAP_PAD.left && mousePos.x < heatEnd) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.moveTo(PLOT_PAD_LEFT, mousePos.y);
-      ctx.lineTo(width, mousePos.y);
+      ctx.moveTo(BOOKMAP_PAD.left, mousePos.y);
+      ctx.lineTo(heatEnd, mousePos.y);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(mousePos.x, 0);
-      ctx.lineTo(mousePos.x, height - PLOT_PAD_BOTTOM);
+      ctx.moveTo(mousePos.x, BOOKMAP_PAD.top);
+      ctx.lineTo(mousePos.x, height - BOOKMAP_PAD.bottom);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -350,15 +358,16 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
     tickerPrice,
     showCrosshair,
     mousePos,
-    isLive,
+    bids,
+    asks,
+    formatPrice,
+    formatTime,
   ]);
 
-  // Redraw when data changes
   useEffect(() => {
     drawHeatmap();
   }, [drawHeatmap]);
 
-  // Handle canvas resize
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -382,309 +391,185 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    setMousePos({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    });
+    setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
   };
 
-  const handleMouseLeave = () => {
-    setMousePos(null);
-  };
-
-  const formatPrice = (p: number) => {
-    if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    if (p >= 1) return p.toFixed(2);
-    return p.toFixed(4);
-  };
-
-  const formatTime = (ts: number) => {
-    return new Date(ts).toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  };
-
-  // Calculate max size for order book depth bars
-  const maxBidSize = Math.max(...bids.map((b) => parseFloat(b.sz) || 0), 1);
-  const maxAskSize = Math.max(...asks.map((a) => parseFloat(a.sz) || 0), 1);
-
-  // Locked state - show preview
   if (locked) {
     return (
       <Card className={cn("overflow-hidden", className)} data-testid="liquidity-heatmap">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-display flex items-center gap-2">
-              <Flame className="h-4 w-4 text-warning" />
-              Liquidity Heatmap
-            </CardTitle>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Lock className="h-3 w-3" />
-              Elite Feature
-            </div>
-          </div>
+          <CardTitle className="text-base font-display flex items-center gap-2">
+            <Flame className="h-4 w-4 text-warning" />
+            Liquidity Heatmap
+          </CardTitle>
         </CardHeader>
         <CardContent className="relative h-64">
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <Lock className="h-8 w-8 text-muted-foreground mb-3" />
             <p className="text-sm font-medium mb-1">Unlock Bookmap-style Heatmap</p>
-            <p className="text-xs text-muted-foreground text-center mb-4 max-w-[200px]">
-              See real-time order flow and identify where institutional orders are placed
-            </p>
             <Link to="/">
-              <Button size="sm" data-testid="button-upgrade-heatmap">
-                Upgrade to Elite
-              </Button>
+              <Button size="sm">Upgrade to Elite</Button>
             </Link>
           </div>
-          
-          <div className="absolute inset-0 blur-sm pointer-events-none bg-gradient-to-b from-bullish/20 via-transparent to-bearish/20" />
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <div className={cn("flex flex-col h-full bg-[#0d0d0d]", className)} data-testid="liquidity-heatmap">
-      {/* Bookmap-style Header Toolbar */}
-      <div className="flex items-center justify-between gap-4 px-3 py-2 bg-[#1a1a1a] border-b border-[#333]">
-        <div className="flex items-center gap-3">
-          <Badge
-            variant={feedConnected ? (isLive ? "default" : "secondary") : "destructive"}
-            className="text-xs"
-          >
-            <Activity className="h-3 w-3 mr-1" />
-            {!feedConnected
-              ? "Connecting..."
-              : isLive
-                ? feedSource === "hyperliquid"
-                  ? "LIVE"
-                  : "LIVE (REST)"
-                : "HISTORY"}
-          </Badge>
-          <span className="text-sm font-semibold text-white">{coin}/USDC</span>
-          {(currentPrice || tickerPrice) > 0 && (
-            <span className="text-sm font-mono text-yellow-400">
-              ${formatPrice(currentPrice || tickerPrice)}
-            </span>
-          )}
+    <div className={cn("flex flex-col h-full bg-[#0c0c0c]", className)} data-testid="liquidity-heatmap">
+      {/* Top toolbar + Bookmap color scale */}
+      <div className="flex items-center gap-3 px-3 py-1.5 bg-[#161616] border-b border-[#2a2a2a]">
+        <Badge
+          variant={feedConnected ? (isLive ? "default" : "secondary") : "destructive"}
+          className="text-xs shrink-0"
+        >
+          <Activity className="h-3 w-3 mr-1" />
+          {!feedConnected
+            ? "Connecting..."
+            : isLive
+              ? feedSource === "hyperliquid"
+                ? "LIVE"
+                : "LIVE (REST)"
+              : "HISTORY"}
+        </Badge>
+        <span className="text-xs font-mono text-white/80 shrink-0">
+          {coin}-USDC:PERP
+        </span>
+        {(currentPrice || tickerPrice) > 0 && (
+          <span className="text-xs font-mono text-red-400 shrink-0">
+            {formatPrice(currentPrice || tickerPrice)}
+          </span>
+        )}
+
+        <div className="flex-1 flex items-center gap-2 min-w-0 px-2">
+          <span className="text-[9px] text-white/40 shrink-0 hidden sm:inline">Low</span>
+          <div
+            className="flex-1 h-2.5 rounded-sm border border-white/10"
+            style={{
+              background:
+                "linear-gradient(90deg, #0a1628 0%, #0e7490 22%, #22d3ee 40%, #eab308 62%, #f97316 82%, #dc2626 100%)",
+            }}
+            title="Liquidity intensity"
+          />
+          <span className="text-[9px] text-white/40 shrink-0 hidden sm:inline">High</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            className={cn(
-              "h-7 w-7",
-              showCrosshair && "bg-white/10"
-            )}
+            className={cn("h-7 w-7", showCrosshair && "bg-white/10")}
             onClick={() => setShowCrosshair(!showCrosshair)}
-            data-testid="button-crosshair"
           >
-            <Crosshair className="h-4 w-4 text-white/70" />
+            <Crosshair className="h-3.5 w-3.5 text-white/70" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
             onClick={() => setIsPaused(!isPaused)}
-            data-testid="button-pause-heatmap"
           >
-            {isPaused ? <Play className="h-4 w-4 text-white/70" /> : <Pause className="h-4 w-4 text-white/70" />}
+            {isPaused ? (
+              <Play className="h-3.5 w-3.5 text-white/70" />
+            ) : (
+              <Pause className="h-3.5 w-3.5 text-white/70" />
+            )}
           </Button>
-          <div className="flex items-center gap-1 ml-2">
-            <ZoomOut className="h-3 w-3 text-white/50" />
-            <Slider
-              value={zoom}
-              onValueChange={setZoom}
-              min={20}
-              max={100}
-              className="w-20"
-            />
-            <ZoomIn className="h-3 w-3 text-white/50" />
-          </div>
+          <ZoomOut className="h-3 w-3 text-white/40" />
+          <Slider value={zoom} onValueChange={setZoom} min={20} max={100} className="w-16" />
+          <ZoomIn className="h-3 w-3 text-white/40" />
         </div>
       </div>
 
-      {/* Timeline scrollbar */}
-      <div className="h-6 bg-[#111] border-b border-[#333] flex items-center gap-2 px-3">
-        <span className="text-[10px] text-white/40">Timeline ({historyFrames.length} frames)</span>
+      {/* Timeline */}
+      <div className="h-5 bg-[#111] border-b border-[#2a2a2a] flex items-center gap-2 px-3">
         <input
           type="range"
           min={0}
           max={100}
           value={scrollPosition}
           onChange={(e) => setScrollPosition(parseInt(e.target.value))}
-          className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-400"
-          data-testid="slider-timeline"
+          className="flex-1 h-1 bg-white/15 rounded appearance-none cursor-pointer [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:appearance-none"
         />
-        <span className={cn(
-          "text-[10px] min-w-[50px] text-right font-mono",
-          isLive ? "text-yellow-400" : "text-white/60"
-        )}>
-          {isLive ? "LIVE" : `${Math.round((100 - scrollPosition) / 100 * 5)}m ago`}
+        <span className={cn("text-[9px] font-mono min-w-[44px] text-right", isLive ? "text-amber-400" : "text-white/50")}>
+          {isLive ? "LIVE" : `${Math.round(((100 - scrollPosition) / 100) * 5)}m`}
         </span>
         {!isLive && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-2 text-[10px] text-yellow-400"
-            onClick={() => setScrollPosition(100)}
-            data-testid="button-go-live"
-          >
-            Go Live
+          <Button variant="ghost" size="sm" className="h-4 px-1.5 text-[9px] text-amber-400" onClick={() => setScrollPosition(100)}>
+            Live
           </Button>
         )}
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 flex min-h-0">
-        {/* Heatmap Canvas */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           <canvas
             ref={canvasRef}
             className="absolute inset-0 w-full h-full cursor-crosshair"
             onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
+            onMouseLeave={() => setMousePos(null)}
             data-testid="canvas-heatmap"
           />
-          
+
           {!feedConnected && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#0d0d0d]/90">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0c0c0c]/92 z-10">
               <div className="text-center">
-                <Activity className="h-12 w-12 mx-auto text-white/30 mb-2 animate-pulse" />
-                <p className="text-sm text-white/50">Connecting to Hyperliquid book...</p>
+                <Activity className="h-10 w-10 mx-auto text-white/25 mb-2 animate-pulse" />
+                <p className="text-sm text-white/50">Connecting to Hyperliquid…</p>
               </div>
             </div>
           )}
 
           {heatmapData.length === 0 && feedConnected && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <Activity className="h-12 w-12 mx-auto text-white/30 mb-2 animate-pulse" />
-                <p className="text-sm text-white/50">Building heatmap data...</p>
-                <p className="text-xs text-white/30 mt-1">This may take 15-30 seconds</p>
-              </div>
+            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+              <p className="text-sm text-white/40">Building liquidity history…</p>
             </div>
           )}
         </div>
 
-        {/* Current Order Book (COB) Column - Bookmap style */}
-        <div className="w-28 bg-[#111] border-l border-[#333] flex flex-col">
-          <div className="p-1 text-center text-[10px] text-white/50 border-b border-[#333]">
-            ORDER BOOK
-          </div>
-          
-          {/* Asks (top) */}
-          <div className="flex-1 flex flex-col-reverse overflow-hidden">
-            {asks.slice(0, 12).map((ask, i) => {
-              const size = parseFloat(ask.sz);
-              const widthPct = (size / maxAskSize) * 100;
-              return (
-                <div key={`ask-${i}`} className="relative h-5 flex items-center px-1">
-                  <div
-                    className="absolute right-0 top-0 bottom-0 bg-red-500/30"
-                    style={{ width: `${widthPct}%` }}
-                  />
-                  <span className="relative text-[10px] font-mono text-red-400 flex-1 text-right">
-                    {formatPrice(parseFloat(ask.px))}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          
-          {/* Spread indicator */}
-          <div className="py-1 px-2 bg-yellow-500/20 text-center">
-            <span className="text-[10px] font-mono text-yellow-400">
-              {formatPrice(currentPrice || tickerPrice)}
-            </span>
-          </div>
-          
-          {/* Bids (bottom) */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {bids.slice(0, 12).map((bid, i) => {
-              const size = parseFloat(bid.sz);
-              const widthPct = (size / maxBidSize) * 100;
-              return (
-                <div key={`bid-${i}`} className="relative h-5 flex items-center px-1">
-                  <div
-                    className="absolute right-0 top-0 bottom-0 bg-green-500/30"
-                    style={{ width: `${widthPct}%` }}
-                  />
-                  <span className="relative text-[10px] font-mono text-green-400 flex-1 text-right">
-                    {formatPrice(parseFloat(bid.px))}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right Sidebar - Large Orders */}
-        <div className="w-52 bg-[#0d0d0d] border-l border-[#333] flex flex-col">
-          <div className="p-2 border-b border-[#333]">
-            <h3 className="font-semibold text-xs flex items-center gap-2 text-white">
-              <AlertTriangle className="h-3 w-3 text-yellow-400" />
-              Whale Activity
-            </h3>
+        {/* Trade tape */}
+        <div className="w-44 shrink-0 bg-[#0c0c0c] border-l border-[#2a2a2a] flex flex-col hidden md:flex">
+          <div className="px-2 py-1.5 border-b border-[#2a2a2a] text-[10px] font-semibold text-white/60 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3 text-amber-400" />
+            Trades
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-2 space-y-1">
-              {largeOrders.length === 0 ? (
-                <div className="text-center py-6 text-white/30">
-                  <Info className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                  <p className="text-[10px]">Scanning for whales...</p>
-                </div>
+            <div className="p-1.5 space-y-0.5">
+              {recentTrades.length === 0 ? (
+                <p className="text-[10px] text-white/30 text-center py-4">Waiting for trades…</p>
               ) : (
-                largeOrders.slice().reverse().slice(0, 10).map((order, i) => (
-                  <div
-                    key={`${order.timestamp}-${i}`}
-                    className={cn(
-                      "p-2 rounded text-xs",
-                      order.side === "bid" ? "bg-green-500/10 border-l-2 border-green-500" : "bg-red-500/10 border-l-2 border-red-500"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1">
-                        {order.side === "bid" ? (
-                          <TrendingUp className="h-3 w-3 text-green-400" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3 text-red-400" />
-                        )}
-                        <span className="font-mono text-white/80">${formatPrice(order.price)}</span>
-                      </div>
-                      <span className={cn(
-                        "font-mono font-semibold",
-                        order.side === "bid" ? "text-green-400" : "text-red-400"
-                      )}>
-                        {order.size.toFixed(2)}
-                      </span>
+                recentTrades
+                  .slice()
+                  .reverse()
+                  .slice(0, 24)
+                  .map((t, i) => (
+                    <div
+                      key={`${t.timestamp}-${i}`}
+                      className={cn(
+                        "flex justify-between gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono",
+                        t.side === "bid" ? "text-green-400" : "text-red-400",
+                      )}
+                    >
+                      <span>{formatPrice(t.price)}</span>
+                      <span className="text-white/50">{t.size.toFixed(3)}</span>
                     </div>
-                    <p className="text-[10px] text-white/40 mt-0.5">
-                      {formatTime(order.timestamp)}
-                    </p>
-                  </div>
-                ))
+                  ))
               )}
             </div>
           </ScrollArea>
-
-          {/* Legend */}
-          <div className="p-2 border-t border-[#333] space-y-1">
-            <div className="flex items-center gap-2 text-[10px] text-white/60">
-              <div className="h-2 w-2 rounded-full bg-green-500" />
-              <span>Bid (Buy) Volume</span>
+          <div className="p-2 border-t border-[#2a2a2a] space-y-1 text-[9px] text-white/45">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-400/80" />
+              Buy aggressor
             </div>
-            <div className="flex items-center gap-2 text-[10px] text-white/60">
-              <div className="h-2 w-2 rounded-full bg-red-500" />
-              <span>Ask (Sell) Volume</span>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-400/80" />
+              Sell aggressor
             </div>
-            <div className="flex items-center gap-2 text-[10px] text-white/60">
-              <div className="h-2 w-4 bg-yellow-500" />
-              <span>Current Price</span>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded-sm bg-gradient-to-r from-[#0a1628] to-[#dc2626]" />
+              Resting liquidity
             </div>
           </div>
         </div>

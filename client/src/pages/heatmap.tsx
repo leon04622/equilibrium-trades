@@ -104,32 +104,46 @@ function HeatmapContent() {
           />
         </div>
 
-        {/* Info Sidebar */}
-        <div className="w-72 border-l p-4 space-y-4 overflow-y-auto hidden lg:block">
+        {/* Info Sidebar — collapsed on smaller screens so the chart matches Bookmap width */}
+        <div className="w-56 border-l p-3 space-y-3 overflow-y-auto hidden xl:block shrink-0">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-display">How to Read</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-xs">
               <div className="flex items-start gap-2">
-                <div className="h-4 w-4 rounded-sm bg-bullish/60 mt-0.5 shrink-0" />
+                <div className="h-3 w-10 rounded-sm shrink-0 mt-0.5 bg-gradient-to-r from-[#0a1628] via-[#22d3ee] to-[#dc2626]" />
                 <div>
-                  <p className="font-medium">Green = Bid liquidity</p>
-                  <p className="text-muted-foreground">Below mid price; brighter = thicker book</p>
+                  <p className="font-medium">Heatmap colors</p>
+                  <p className="text-muted-foreground">Blue = thin book; yellow/red = heavy resting liquidity</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <div className="h-4 w-4 rounded-sm bg-bearish/60 mt-0.5 shrink-0" />
+                <div className="h-4 w-4 rounded-full bg-green-500/50 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium">Red = Ask liquidity</p>
-                  <p className="text-muted-foreground">Above mid price; scroll timeline to replay</p>
+                  <p className="font-medium">Green bubbles</p>
+                  <p className="text-muted-foreground">Buy trades (size = circle area)</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <div className="h-4 w-4 rounded-full bg-warning/80 mt-0.5 shrink-0" />
+                <div className="h-4 w-4 rounded-full bg-red-500/50 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium">Current Price Line</p>
-                  <p className="text-muted-foreground">Shows where price is now</p>
+                  <p className="font-medium">Red bubbles</p>
+                  <p className="text-muted-foreground">Sell trades through the book</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <div className="h-4 w-4 border border-dashed border-white/60 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">White dashed line</p>
+                  <p className="text-muted-foreground">Current price (red tag on the right)</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <div className="h-4 w-6 rounded-sm bg-green-500/40 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">SVP column</p>
+                  <p className="text-muted-foreground">Session volume at each price (green buy / red sell)</p>
                 </div>
               </div>
             </CardContent>
