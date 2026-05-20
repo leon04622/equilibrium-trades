@@ -1,12 +1,13 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +50,7 @@ const TOOL_COLORS: Record<ChartDrawingType, string> = {
   bull_flag: "#00c853",
 };
 
-type ChartDrawingOverlayProps = {
+type ChartDrawingProviderProps = {
   enabled: boolean;
   coin: string;
   interval: string;
@@ -57,9 +58,29 @@ type ChartDrawingOverlayProps = {
   seriesRef: RefObject<ISeriesApi<"Candlestick"> | null>;
   paneRef: RefObject<HTMLDivElement | null>;
   layoutTick?: number;
-  /** When set, toolbar renders in the trading header (always visible). */
-  toolbarPortal?: HTMLElement | null;
+  children: ReactNode;
 };
+
+type ChartDrawingContextValue = {
+  enabled: boolean;
+  tool: DrawTool;
+  setTool: (t: DrawTool) => void;
+  drawings: ChartDrawing[];
+  setDrawings: React.Dispatch<React.SetStateAction<ChartDrawing[]>>;
+  setDraftPoints: React.Dispatch<React.SetStateAction<ChartDrawingPoint[]>>;
+  guideText: string | null;
+  handlePaneClick: (e: React.MouseEvent) => void;
+  handlePaneDoubleClick: (e: React.MouseEvent) => void;
+  svgElements: ReactNode;
+};
+
+const ChartDrawingCtx = createContext<ChartDrawingContextValue | null>(null);
+
+function useChartDrawingCtx(): ChartDrawingContextValue {
+  const v = useContext(ChartDrawingCtx);
+  if (!v) throw new Error("Chart drawing components must be inside ChartDrawingProvider");
+  return v;
+}
 
 function pointToPixel(
   chart: IChartApi,
@@ -91,7 +112,7 @@ function distToSegment(
   return Math.hypot(px - lx, py - ly);
 }
 
-export function ChartDrawingOverlay({
+export function ChartDrawingProvider({
   enabled,
   coin,
   interval,
@@ -99,8 +120,8 @@ export function ChartDrawingOverlay({
   seriesRef,
   paneRef,
   layoutTick = 0,
-  toolbarPortal = null,
-}: ChartDrawingOverlayProps) {
+  children,
+}: ChartDrawingProviderProps) {
   const { address } = useWallet();
   const [tool, setTool] = useState<DrawTool>("select");
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
@@ -454,38 +475,77 @@ export function ChartDrawingOverlay({
                 ? "Click a line or zone to remove"
                 : null;
 
+  const ctxValue = useMemo<ChartDrawingContextValue>(
+    () => ({
+      enabled,
+      tool,
+      setTool,
+      drawings,
+      setDrawings,
+      setDraftPoints,
+      guideText,
+      handlePaneClick,
+      handlePaneDoubleClick,
+      svgElements,
+    }),
+    [
+      enabled,
+      tool,
+      drawings,
+      guideText,
+      handlePaneClick,
+      handlePaneDoubleClick,
+      svgElements,
+    ],
+  );
+
+  return (
+    <ChartDrawingCtx.Provider value={ctxValue}>
+      {children}
+    </ChartDrawingCtx.Provider>
+  );
+}
+
+const DRAW_TOOLS: { id: DrawTool; icon: ReactNode; title: string }[] = [
+  { id: "select", icon: <MousePointer2 className="h-4 w-4" />, title: "Cursor — pan & zoom" },
+  { id: "trendline", icon: <TrendingUp className="h-4 w-4" />, title: "Trend line" },
+  { id: "hline", icon: <Minus className="h-4 w-4" />, title: "Horizontal line" },
+  { id: "rect", icon: <Square className="h-4 w-4" />, title: "Rectangle" },
+  { id: "polyline", icon: <Pencil className="h-4 w-4" />, title: "Polyline" },
+  { id: "bull_flag", icon: <Flag className="h-4 w-4" />, title: "Bull flag (4 clicks)" },
+  { id: "erase", icon: <Eraser className="h-4 w-4" />, title: "Eraser" },
+];
+
+/** TradingView-style vertical tool rail on the left of the chart. */
+export function ChartDrawingLeftToolbar() {
+  const {
+    enabled,
+    tool,
+    setTool,
+    drawings,
+    setDrawings,
+    setDraftPoints,
+    guideText,
+  } = useChartDrawingCtx();
+
   if (!enabled) return null;
 
-  const tools: { id: DrawTool; icon: ReactNode; title: string }[] = [
-    { id: "select", icon: <MousePointer2 className="h-3.5 w-3.5" />, title: "Pan chart" },
-    { id: "trendline", icon: <TrendingUp className="h-3.5 w-3.5" />, title: "Trend line" },
-    { id: "hline", icon: <Minus className="h-3.5 w-3.5" />, title: "Horizontal line" },
-    { id: "rect", icon: <Square className="h-3.5 w-3.5" />, title: "Zone / rectangle" },
-    { id: "polyline", icon: <Pencil className="h-3.5 w-3.5" />, title: "Freehand lines" },
-    { id: "bull_flag", icon: <Flag className="h-3.5 w-3.5" />, title: "Bull flag (4 clicks)" },
-    { id: "erase", icon: <Eraser className="h-3.5 w-3.5" />, title: "Erase" },
-  ];
-
-  const toolbar = (
-    <div
-      className={cn(
-        "flex items-center gap-1 pointer-events-auto",
-        !toolbarPortal &&
-          "absolute top-12 left-2 z-[50] flex-col rounded-lg border-2 border-primary/40 bg-[#1a2035] p-1.5 shadow-xl",
-      )}
+  return (
+    <aside
+      className="flex w-11 shrink-0 flex-col border-r border-[#2a2e39] bg-[#131722] z-40"
       data-testid="chart-drawing-toolbar"
     >
-      <span className="text-[10px] font-semibold text-primary whitespace-nowrap px-1 hidden sm:inline">
-        Draw
-      </span>
-      <div className="flex items-center gap-0.5 flex-wrap">
-        {tools.map((t) => (
+      <div className="flex flex-col items-center gap-0.5 py-1.5">
+        {DRAW_TOOLS.map((t) => (
           <Button
             key={t.id}
             type="button"
-            variant={tool === t.id ? "secondary" : "ghost"}
+            variant="ghost"
             size="icon"
-            className={cn("h-7 w-7 shrink-0", tool === t.id && "ring-1 ring-primary")}
+            className={cn(
+              "h-9 w-9 rounded-sm text-[#b2b5be] hover:text-[#d1d4dc] hover:bg-[#2a2e39]",
+              tool === t.id && "bg-[#2a2e39] text-[#2962ff]",
+            )}
             title={t.title}
             onClick={() => {
               setTool(t.id);
@@ -496,55 +556,61 @@ export function ChartDrawingOverlay({
             {t.icon}
           </Button>
         ))}
+      </div>
+      <div className="mx-1.5 border-t border-[#2a2e39]" />
+      <div className="flex flex-col items-center gap-0.5 py-1.5">
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0"
+          className="h-9 w-9 rounded-sm text-[#b2b5be] hover:text-[#d1d4dc] hover:bg-[#2a2e39]"
           title="Undo last"
           disabled={drawings.length === 0}
           onClick={() => setDrawings((prev) => prev.slice(0, -1))}
         >
-          <Undo2 className="h-3.5 w-3.5" />
+          <Undo2 className="h-4 w-4" />
         </Button>
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0 text-red-400"
-          title="Clear all"
+          className="h-9 w-9 rounded-sm text-[#f23645] hover:bg-[#2a2e39] disabled:opacity-40"
+          title="Clear all drawings"
           disabled={drawings.length === 0}
           onClick={() => {
             setDrawings([]);
             setDraftPoints([]);
           }}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="h-4 w-4" />
         </Button>
       </div>
       {guideText ? (
-        <span className="text-[9px] text-amber-300 max-w-[140px] leading-tight hidden lg:inline">
+        <p className="mt-auto px-1 pb-2 text-center text-[8px] leading-tight text-[#787b86]">
           {guideText}
-        </span>
+        </p>
       ) : null}
-    </div>
+    </aside>
   );
+}
+
+export function ChartDrawingCanvas() {
+  const { enabled, tool, handlePaneClick, handlePaneDoubleClick, svgElements } =
+    useChartDrawingCtx();
+
+  if (!enabled) return null;
 
   return (
-    <>
-      {toolbarPortal ? createPortal(toolbar, toolbarPortal) : toolbar}
-
-      <svg
-        className={cn(
-          "absolute inset-0 z-[22] overflow-visible",
-          tool === "select" ? "pointer-events-none" : "pointer-events-auto cursor-crosshair",
-        )}
-        onClick={handlePaneClick}
-        onDoubleClick={handlePaneDoubleClick}
-        aria-hidden
-      >
-        <g>{svgElements}</g>
-      </svg>
-    </>
+    <svg
+      className={cn(
+        "absolute inset-0 z-[22] overflow-visible",
+        tool === "select" ? "pointer-events-none" : "pointer-events-auto cursor-crosshair",
+      )}
+      onClick={handlePaneClick}
+      onDoubleClick={handlePaneDoubleClick}
+      aria-hidden
+    >
+      <g>{svgElements}</g>
+    </svg>
   );
 }

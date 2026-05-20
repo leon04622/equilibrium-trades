@@ -19,7 +19,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
-import { ChartDrawingOverlay } from "@/components/chart-drawing-overlay";
+import {
+  ChartDrawingProvider,
+  ChartDrawingLeftToolbar,
+  ChartDrawingCanvas,
+} from "@/components/chart-drawing-overlay";
+import { ChartCandleCountdown } from "@/components/chart-candle-countdown";
+import { cn } from "@/lib/utils";
 import { ApexSovereign } from "@/components/apex-sovereign";
 import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { PremiumFeatureLock } from "@/components/premium-feature-lock";
@@ -56,10 +62,8 @@ interface PatternChartProps {
   currentPrice?: number;
   /** When true, fetches educational patterns for this symbol/timeframe and shows the top-left alert card (Pro). */
   patternScanEnabled?: boolean;
-  /** When true, shows drawing toolbar + persisted pattern sketches (bull flag, lines, zones). */
+  /** When true, shows left draw toolbar + persisted pattern sketches (bull flag, lines, zones). */
   drawingEnabled?: boolean;
-  /** Mount drawing toolbar into this element (trading page header). */
-  drawingToolbarPortal?: HTMLElement | null;
   hideIndicators?: boolean;
   /** Blur RSI/Stoch stack with Pro CTA (non-subscribers can still use the main candle pane). */
   lockPremiumIndicatorStack?: boolean;
@@ -243,11 +247,11 @@ function PatternChartComponent({
   currentPrice = 0,
   patternScanEnabled = false,
   drawingEnabled = false,
-  drawingToolbarPortal = null,
   hideIndicators = false,
   lockPremiumIndicatorStack = false,
 }: PatternChartProps) {
   const outerRef = useRef<HTMLDivElement>(null);
+  const chartPaneRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const stochContainerRef = useRef<HTMLDivElement>(null);
@@ -971,75 +975,155 @@ function PatternChartComponent({
       {/* ── Main chart pane ── */}
       <div
         style={{ flexGrow: weights[0], minHeight: 100 }}
-        className="relative isolate overflow-hidden"
+        className="relative isolate overflow-hidden flex flex-col min-h-[100px]"
         data-chart-layout-tick={chartLayoutTick}
       >
-        <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
-        <ApexSovereign
-          coin={coin}
-          currentPrice={currentPrice ?? 0}
-          chartPaneRef={mainContainerRef}
-          candleSeriesRef={candleSeriesRef}
-          chartVersion={chartVersion}
-          chartLayoutTick={chartLayoutTick}
-          pendingOverride={nativeTpslOverride}
-          onPendingCommit={onTpslPendingCommit}
-          onPendingClear={onTpslPendingClear}
-        />
-        <ChartOrderLines
-          coin={coin}
-          currentPrice={currentPrice ?? 0}
-          visiblePriceRange={visiblePriceRange}
-          tpslRenderedExternally
-          entryRenderedExternally
-          liqRenderedExternally
-        />
-        <ChartDrawingOverlay
-          enabled={drawingEnabled}
-          coin={coin}
-          interval={interval}
-          chartRef={mainChartRef}
-          seriesRef={candleSeriesRef}
-          paneRef={mainContainerRef}
-          layoutTick={chartLayoutTick}
-          toolbarPortal={drawingToolbarPortal}
-        />
-
-        {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
-        {showChartLoadingOverlay && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-2">
-              <svg className="animate-spin h-7 w-7 text-[#b2b5be]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              <span className="text-[11px] text-[#b2b5be]">
-                {isRetryingEmptyCandles ? "Retrying chart data…" : "Loading chart…"}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* No data fallback */}
-        {showNoDataFallback && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
-            <div className="flex flex-col items-center gap-3">
-              <p className="text-[#b2b5be] text-sm">No chart data available</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-[#2a3249] bg-[#1b2035] text-[#b2b5be] hover:bg-[#252a40] hover:text-white"
-                onClick={() => void refetchCandles()}
-                data-testid="button-retry-chart-data"
+        {drawingEnabled ? (
+          <ChartDrawingProvider
+            enabled={drawingEnabled}
+            coin={coin}
+            interval={interval}
+            chartRef={mainChartRef}
+            seriesRef={candleSeriesRef}
+            paneRef={chartPaneRef}
+            layoutTick={chartLayoutTick}
+          >
+            <div className="flex flex-1 flex-row min-h-0 h-full">
+              <ChartDrawingLeftToolbar />
+              <div
+                ref={chartPaneRef}
+                className="relative flex-1 min-w-0 isolate overflow-hidden"
               >
-                Retry chart
-              </Button>
+                <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
+                <ApexSovereign
+                  coin={coin}
+                  currentPrice={currentPrice ?? 0}
+                  chartPaneRef={mainContainerRef}
+                  candleSeriesRef={candleSeriesRef}
+                  chartVersion={chartVersion}
+                  chartLayoutTick={chartLayoutTick}
+                  pendingOverride={nativeTpslOverride}
+                  onPendingCommit={onTpslPendingCommit}
+                  onPendingClear={onTpslPendingClear}
+                />
+                <ChartOrderLines
+                  coin={coin}
+                  currentPrice={currentPrice ?? 0}
+                  visiblePriceRange={visiblePriceRange}
+                  tpslRenderedExternally
+                  entryRenderedExternally
+                  liqRenderedExternally
+                />
+                <ChartDrawingCanvas />
+                <ChartCandleCountdown
+                  interval={interval}
+                  candles={candles}
+                  chartRef={mainChartRef}
+                  seriesRef={candleSeriesRef}
+                  paneRef={chartPaneRef}
+                  layoutTick={chartLayoutTick}
+                />
+                {showChartLoadingOverlay && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
+                    <div className="flex flex-col items-center gap-2">
+                      <svg className="animate-spin h-7 w-7 text-[#b2b5be]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      <span className="text-[11px] text-[#b2b5be]">
+                        {isRetryingEmptyCandles ? "Retrying chart data…" : "Loading chart…"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {showNoDataFallback && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-[#b2b5be] text-sm">No chart data available</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-[#2a3249] bg-[#1b2035] text-[#b2b5be] hover:bg-[#252a40] hover:text-white"
+                        onClick={() => void refetchCandles()}
+                        data-testid="button-retry-chart-data"
+                      >
+                        Retry chart
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
+          </ChartDrawingProvider>
+        ) : (
+          <div ref={chartPaneRef} className="relative flex-1 isolate overflow-hidden">
+            <div ref={mainContainerRef} className="absolute inset-0 z-0" data-testid="pattern-chart" />
+            <ApexSovereign
+              coin={coin}
+              currentPrice={currentPrice ?? 0}
+              chartPaneRef={mainContainerRef}
+              candleSeriesRef={candleSeriesRef}
+              chartVersion={chartVersion}
+              chartLayoutTick={chartLayoutTick}
+              pendingOverride={nativeTpslOverride}
+              onPendingCommit={onTpslPendingCommit}
+              onPendingClear={onTpslPendingClear}
+            />
+            <ChartOrderLines
+              coin={coin}
+              currentPrice={currentPrice ?? 0}
+              visiblePriceRange={visiblePriceRange}
+              tpslRenderedExternally
+              entryRenderedExternally
+              liqRenderedExternally
+            />
+            <ChartCandleCountdown
+              interval={interval}
+              candles={candles}
+              chartRef={mainChartRef}
+              seriesRef={candleSeriesRef}
+              paneRef={chartPaneRef}
+              layoutTick={chartLayoutTick}
+            />
+            {showChartLoadingOverlay && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-2">
+                  <svg className="animate-spin h-7 w-7 text-[#b2b5be]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  <span className="text-[11px] text-[#b2b5be]">
+                    {isRetryingEmptyCandles ? "Retrying chart data…" : "Loading chart…"}
+                  </span>
+                </div>
+              </div>
+            )}
+            {showNoDataFallback && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#131722]">
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-[#b2b5be] text-sm">No chart data available</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-[#2a3249] bg-[#1b2035] text-[#b2b5be] hover:bg-[#252a40] hover:text-white"
+                    onClick={() => void refetchCandles()}
+                    data-testid="button-retry-chart-data"
+                  >
+                    Retry chart
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Volume label */}
-        <div className="absolute top-1 left-1 z-10 pointer-events-none flex items-center gap-1">
+        <div
+          className={cn(
+            "absolute top-1 z-10 pointer-events-none flex items-center gap-1",
+            drawingEnabled ? "left-12" : "left-1",
+          )}
+        >
           <span className="text-[10px] text-[#b2b5be] font-mono">Volume SMA</span>
           {lastVol !== null && <span className="text-[10px] text-[#f59e0b] font-mono">{fmtVol(lastVol)}</span>}
         </div>
@@ -1058,7 +1142,12 @@ function PatternChartComponent({
 
         {/* Pattern alert — top-left; independent of “AI Chart” drawing toggle */}
         {patternScanEnabled && activeSignal ? (
-          <Card className="absolute top-2 left-2 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-primary/30 shadow-xl max-w-[min(92vw,280px)] z-30 pointer-events-auto">
+          <Card
+            className={cn(
+              "absolute top-2 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-primary/30 shadow-xl max-w-[min(92vw,280px)] z-30 pointer-events-auto",
+              drawingEnabled ? "left-12" : "left-2",
+            )}
+          >
             {/* Header */}
             <div className="flex items-center gap-1.5 mb-2">
               {activeSignal.bias === "bullish"
