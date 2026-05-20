@@ -21,49 +21,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
+import { useBookmapFeed } from "@/hooks/use-bookmap-feed";
+import type { HeatmapCell, HeatmapGridMeta, HeatmapTrade } from "@shared/heatmap-grid";
 
-interface HeatmapData {
-  priceLevel: number;
-  time: number;
-  bidVolume: number;
-  askVolume: number;
-  totalVolume?: number;
-}
-
-interface HeatmapGridMeta {
-  midPrice: number;
-  minPrice: number;
-  maxPrice: number;
-  binSize: number;
-  priceBins: number;
-}
-
-interface HeatmapTrade {
-  price: number;
-  size: number;
-  side: "bid" | "ask";
-  timestamp: number;
-}
-
-interface LargeOrder {
-  price: number;
-  size: number;
-  side: "bid" | "ask";
-  timestamp: number;
-}
-
-interface HeatmapMessage {
-  type: string;
-  coin: string;
-  data: {
-    heatmap: HeatmapData[][];
-    meta: HeatmapGridMeta | null;
-    largeOrders: LargeOrder[];
-    recentTrades?: HeatmapTrade[];
-    currentPrice: number;
-    timestamp: number;
-  };
-}
+type HeatmapData = HeatmapCell;
 
 const PLOT_PAD_LEFT = 52;
 const PLOT_PAD_RIGHT = 4;
@@ -107,21 +68,32 @@ interface LiquidityHeatmapProps {
 
 export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityHeatmapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [wsConnected, setWsConnected] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [heatmapData, setHeatmapData] = useState<HeatmapData[][]>([]);
-  const [gridMeta, setGridMeta] = useState<HeatmapGridMeta | null>(null);
-  const [largeOrders, setLargeOrders] = useState<LargeOrder[]>([]);
-  const [recentTrades, setRecentTrades] = useState<HeatmapTrade[]>([]);
-  const [currentPrice, setCurrentPrice] = useState(0);
   const [zoom, setZoom] = useState([50]);
   const [showCrosshair, setShowCrosshair] = useState(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
-  const [scrollPosition, setScrollPosition] = useState(100); // 100 = live (rightmost), 0 = oldest
+  const [scrollPosition, setScrollPosition] = useState(100);
   const [historyFrames, setHistoryFrames] = useState<HeatmapData[][][]>([]);
-  const maxHistoryFrames = 300; // Store up to 5 minutes of history at 1 frame/sec
+  const maxHistoryFrames = 300;
   const isLive = scrollPosition >= 95;
-  const wsRef = useRef<WebSocket | null>(null);
+  const lastFrameLenRef = useRef(0);
+
+  const {
+    connected: feedConnected,
+    feedSource,
+    heatmap: heatmapData,
+    meta: gridMeta,
+    largeOrders,
+    recentTrades,
+    midPrice: feedMidPrice,
+  } = useBookmapFeed({
+    coin,
+    rangePct: zoomToRange(zoom[0]),
+    paused: isPaused,
+    enabled: !locked,
+  });
+
+  const currentPrice = feedMidPrice;
 
   // Get the heatmap data to display based on scroll position
   const displayHeatmap = (() => {
@@ -150,83 +122,21 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
   const bids = orderBook?.levels?.[0] || [];
   const asks = orderBook?.levels?.[1] || [];
 
-  // Connect to WebSocket when not locked
   useEffect(() => {
-    if (locked) return;
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/heatmap`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setWsConnected(true);
-      ws.send(
-        JSON.stringify({ type: "subscribe", coin, rangePct: zoomToRange(zoom[0]) }),
-      );
-    };
-
-    ws.onmessage = (event) => {
-      if (isPaused) return;
-
-      try {
-        const message: HeatmapMessage = JSON.parse(event.data);
-        if (message.type === "heatmap" && message.coin === coin) {
-          setHeatmapData(message.data.heatmap);
-          setGridMeta(message.data.meta);
-          setLargeOrders(message.data.largeOrders);
-          setRecentTrades(message.data.recentTrades || []);
-          setCurrentPrice(message.data.currentPrice);
-          // Always store history frames for scrolling
-          setHistoryFrames((prev: HeatmapData[][][]) => {
-            const newFrames: HeatmapData[][][] = [...prev, message.data.heatmap];
-            if (newFrames.length > maxHistoryFrames) {
-              return newFrames.slice(-maxHistoryFrames);
-            }
-            return newFrames;
-          });
-        }
-      } catch (e) {
-        console.error("Error parsing heatmap message:", e);
-      }
-    };
-
-    ws.onclose = () => {
-      setWsConnected(false);
-    };
-
-    ws.onerror = () => {
-      setWsConnected(false);
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, [coin, isPaused, locked, zoom]);
-
-  // Update subscription when coin changes
-  useEffect(() => {
-    if (locked) return;
-    setHeatmapData([]);
-    setGridMeta(null);
     setHistoryFrames([]);
     setScrollPosition(100);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({ type: "subscribe", coin, rangePct: zoomToRange(zoom[0]) }),
-      );
-    }
-  }, [coin, locked]);
+    lastFrameLenRef.current = 0;
+  }, [coin]);
 
-  // Bookmap-style price zoom → server grid range
   useEffect(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && !locked) {
-      wsRef.current.send(
-        JSON.stringify({ type: "config", rangePct: zoomToRange(zoom[0]) }),
-      );
-    }
-  }, [zoom, locked]);
+    if (isPaused || heatmapData.length === 0) return;
+    if (heatmapData.length === lastFrameLenRef.current) return;
+    lastFrameLenRef.current = heatmapData.length;
+    setHistoryFrames((prev) => {
+      const next = [...prev, heatmapData];
+      return next.length > maxHistoryFrames ? next.slice(-maxHistoryFrames) : next;
+    });
+  }, [heatmapData, isPaused]);
 
   // Draw heatmap on canvas — Bookmap: time → X, price → Y, liquidity = heat
   const drawHeatmap = useCallback(() => {
@@ -272,18 +182,25 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       }
     }
 
-    const liquidityColor = (intensity: number, side: "bid" | "ask") => {
-      if (intensity < 0.04) return null;
-      const t = Math.pow(Math.min(1, intensity), 0.55);
-      if (side === "bid") {
-        if (t < 0.35) return `rgba(0, 120, 70, ${t * 1.8})`;
-        if (t < 0.7) return `rgba(0, 200, 83, ${0.35 + t * 0.9})`;
-        return `rgba(100, 255, 150, ${0.55 + t * 0.45})`;
-      }
-      if (t < 0.35) return `rgba(140, 30, 30, ${t * 1.8})`;
-      if (t < 0.7) return `rgba(255, 82, 82, ${0.35 + t * 0.9})`;
-      return `rgba(255, 150, 120, ${0.55 + t * 0.45})`;
+    /** Bookmap-style heat: dark → cyan → yellow → orange */
+    const heatColor = (intensity: number) => {
+      if (intensity < 0.03) return null;
+      const t = Math.pow(Math.min(1, intensity), 0.48);
+      const r = Math.floor(8 + t * 247);
+      const g = Math.floor(t < 0.45 ? t * 200 : 90 + (t - 0.45) * 330);
+      const b = Math.floor(140 - t * 130);
+      return `rgba(${r},${Math.min(255, g)},${Math.max(0, b)},${0.12 + t * 0.82})`;
     };
+
+    const sideTint = (intensity: number, side: "bid" | "ask") => {
+      if (intensity < 0.08) return null;
+      const t = Math.pow(intensity, 0.6);
+      return side === "bid"
+        ? `rgba(0, 200, 83, ${0.08 + t * 0.35})`
+        : `rgba(255, 82, 82, ${0.08 + t * 0.35})`;
+    };
+
+    const trail = new Array(rows).fill(0);
 
     for (let col = 0; col < columns; col++) {
       const t0 = displayHeatmap[col][0]?.time ?? minTime;
@@ -297,25 +214,51 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
       for (let row = 0; row < rows; row++) {
         const cell = displayHeatmap[col][row];
-        const yTop = priceToY(
-          cell.priceLevel + meta.binSize / 2,
-          meta,
-          height,
-        );
-        const yBot = priceToY(
-          cell.priceLevel - meta.binSize / 2,
-          meta,
-          height,
-        );
+        const yTop = priceToY(cell.priceLevel + meta.binSize / 2, meta, height);
+        const yBot = priceToY(cell.priceLevel - meta.binSize / 2, meta, height);
         const cellH = Math.max(1, yBot - yTop);
 
-        const isBidSide = cell.priceLevel <= meta.midPrice;
-        const vol = isBidSide ? cell.bidVolume : cell.askVolume;
-        const intensity = maxVolume > 0 ? vol / maxVolume : 0;
-        const color = liquidityColor(intensity, isBidSide ? "bid" : "ask");
-        if (color) {
-          ctx.fillStyle = color;
+        const total = cell.totalVolume ?? cell.bidVolume + cell.askVolume;
+        trail[row] = Math.max(total, trail[row] * 0.94);
+        const intensity = maxVolume > 0 ? trail[row] / maxVolume : 0;
+
+        const base = heatColor(intensity);
+        if (base) {
+          ctx.fillStyle = base;
           ctx.fillRect(x0, yTop, cellW + 0.5, cellH + 0.5);
+        }
+
+        const isBidSide = cell.priceLevel <= meta.midPrice;
+        const sideVol = isBidSide ? cell.bidVolume : cell.askVolume;
+        const sideIntensity = maxVolume > 0 ? sideVol / maxVolume : 0;
+        const tint = sideTint(sideIntensity, isBidSide ? "bid" : "ask");
+        if (tint) {
+          ctx.fillStyle = tint;
+          ctx.fillRect(x0, yTop, cellW + 0.5, cellH + 0.5);
+        }
+      }
+    }
+
+    // Current book depth strip (COB) on right edge of heatmap
+    const lastCol = displayHeatmap[columns - 1];
+    if (lastCol) {
+      let cobMax = 0;
+      for (const cell of lastCol) {
+        cobMax = Math.max(cobMax, cell.bidVolume, cell.askVolume);
+      }
+      const cobW = 36;
+      const cobX = width - PLOT_PAD_RIGHT - cobW;
+      for (const cell of lastCol) {
+        const yMid = priceToY(cell.priceLevel, meta, height);
+        const isBid = cell.priceLevel <= meta.midPrice;
+        const vol = isBid ? cell.bidVolume : cell.askVolume;
+        const barW = cobMax > 0 ? (vol / cobMax) * cobW : 0;
+        if (barW < 1) continue;
+        ctx.fillStyle = isBid ? "rgba(0,200,83,0.55)" : "rgba(255,82,82,0.55)";
+        if (isBid) {
+          ctx.fillRect(cobX + cobW - barW, yMid - 1, barW, 2);
+        } else {
+          ctx.fillRect(cobX + cobW - barW, yMid - 1, barW, 2);
         }
       }
     }
@@ -509,11 +452,17 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
       <div className="flex items-center justify-between gap-4 px-3 py-2 bg-[#1a1a1a] border-b border-[#333]">
         <div className="flex items-center gap-3">
           <Badge
-            variant={wsConnected ? (isLive ? "default" : "secondary") : "destructive"}
+            variant={feedConnected ? (isLive ? "default" : "secondary") : "destructive"}
             className="text-xs"
           >
             <Activity className="h-3 w-3 mr-1" />
-            {wsConnected ? (isLive ? "LIVE" : "HISTORY") : "Connecting..."}
+            {!feedConnected
+              ? "Connecting..."
+              : isLive
+                ? feedSource === "hyperliquid"
+                  ? "LIVE"
+                  : "LIVE (REST)"
+                : "HISTORY"}
           </Badge>
           <span className="text-sm font-semibold text-white">{coin}/USDC</span>
           {(currentPrice || tickerPrice) > 0 && (
@@ -602,16 +551,16 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
             data-testid="canvas-heatmap"
           />
           
-          {!wsConnected && (
+          {!feedConnected && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#0d0d0d]/90">
               <div className="text-center">
                 <Activity className="h-12 w-12 mx-auto text-white/30 mb-2 animate-pulse" />
-                <p className="text-sm text-white/50">Connecting to heatmap feed...</p>
+                <p className="text-sm text-white/50">Connecting to Hyperliquid book...</p>
               </div>
             </div>
           )}
 
-          {heatmapData.length === 0 && wsConnected && (
+          {heatmapData.length === 0 && feedConnected && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <Activity className="h-12 w-12 mx-auto text-white/30 mb-2 animate-pulse" />
