@@ -160,15 +160,12 @@ export default function Candles() {
                   onClick={() => handlePatternClick(pattern)}
                   data-testid={`card-pattern-${pattern.id}`}
                 >
-                  {pattern.imageFile ? (
-                    <CandlestickPatternImage
-                      imageFile={pattern.imageFile}
-                      alt={`${pattern.name} candlestick pattern`}
-                      patternName={pattern.name}
-                      className="h-52 w-full rounded-t-lg border-b border-border/60"
-                      imgClassName="p-3"
-                    />
-                  ) : null}
+                  <CandlestickPatternImage
+                    patternId={pattern.id}
+                    alt={`${pattern.name} candlestick pattern`}
+                    className="h-52 w-full rounded-t-lg border-b border-border/60"
+                    imgClassName="p-3"
+                  />
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -240,15 +237,12 @@ export default function Candles() {
 
               <ScrollArea className="max-h-[60vh] pr-4">
                 <div className="space-y-6 py-4">
-                  {selectedPattern.imageFile ? (
-                    <CandlestickPatternImage
-                      imageFile={selectedPattern.imageFile}
-                      alt={`${selectedPattern.name} candlestick pattern diagram`}
-                      patternName={selectedPattern.name}
-                      className="h-64 w-full rounded-lg border"
-                      imgClassName="p-4"
-                    />
-                  ) : null}
+                  <CandlestickPatternImage
+                    patternId={selectedPattern.id}
+                    alt={`${selectedPattern.name} candlestick pattern diagram`}
+                    className="h-64 w-full rounded-lg border"
+                    imgClassName="p-4"
+                  />
 
                   <div>
                     <h3 className="font-semibold flex items-center gap-2 mb-2">
