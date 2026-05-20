@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { ChartOrderLines } from "@/components/chart-order-lines";
+import { ChartDrawingOverlay } from "@/components/chart-drawing-overlay";
 import { ApexSovereign } from "@/components/apex-sovereign";
 import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { PremiumFeatureLock } from "@/components/premium-feature-lock";
@@ -55,6 +56,8 @@ interface PatternChartProps {
   currentPrice?: number;
   /** When true, fetches educational patterns for this symbol/timeframe and shows the top-left alert card (Pro). */
   patternScanEnabled?: boolean;
+  /** When true, shows drawing toolbar + persisted pattern sketches (bull flag, lines, zones). */
+  drawingEnabled?: boolean;
   hideIndicators?: boolean;
   /** Blur RSI/Stoch stack with Pro CTA (non-subscribers can still use the main candle pane). */
   lockPremiumIndicatorStack?: boolean;
@@ -237,6 +240,7 @@ function PatternChartComponent({
   className = "",
   currentPrice = 0,
   patternScanEnabled = false,
+  drawingEnabled = false,
   hideIndicators = false,
   lockPremiumIndicatorStack = false,
 }: PatternChartProps) {
@@ -595,6 +599,7 @@ function PatternChartComponent({
     syncVisiblePriceRange();
     const onTimeScaleChange = () => {
       syncVisiblePriceRange();
+      setChartLayoutTick((t) => t + 1);
       const logicalRange = mainChart.timeScale().getVisibleLogicalRange();
       if (!logicalRange) return;
       const visibleBars = Math.round(logicalRange.to - logicalRange.from);
@@ -985,6 +990,15 @@ function PatternChartComponent({
           tpslRenderedExternally
           entryRenderedExternally
           liqRenderedExternally
+        />
+        <ChartDrawingOverlay
+          enabled={drawingEnabled}
+          coin={coin}
+          interval={interval}
+          chartRef={mainChartRef}
+          seriesRef={candleSeriesRef}
+          paneRef={mainContainerRef}
+          layoutTick={chartLayoutTick}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
