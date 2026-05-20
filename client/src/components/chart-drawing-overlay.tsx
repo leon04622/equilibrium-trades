@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,6 +57,8 @@ type ChartDrawingOverlayProps = {
   seriesRef: RefObject<ISeriesApi<"Candlestick"> | null>;
   paneRef: RefObject<HTMLDivElement | null>;
   layoutTick?: number;
+  /** When set, toolbar renders in the trading header (always visible). */
+  toolbarPortal?: HTMLElement | null;
 };
 
 function pointToPixel(
@@ -96,6 +99,7 @@ export function ChartDrawingOverlay({
   seriesRef,
   paneRef,
   layoutTick = 0,
+  toolbarPortal = null,
 }: ChartDrawingOverlayProps) {
   const { address } = useWallet();
   const [tool, setTool] = useState<DrawTool>("select");
@@ -462,71 +466,73 @@ export function ChartDrawingOverlay({
     { id: "erase", icon: <Eraser className="h-3.5 w-3.5" />, title: "Erase" },
   ];
 
-  return (
-    <>
-      <div
-        className="absolute bottom-3 right-3 z-[25] flex flex-col gap-1 rounded-lg border border-[#2a3249] bg-[#1a2035]/95 p-1 shadow-lg backdrop-blur-sm pointer-events-auto"
-        data-testid="chart-drawing-toolbar"
-      >
-        <p className="text-[9px] text-[#8c9ab5] px-1.5 pt-0.5 font-medium">Draw pattern</p>
-        <div className="flex flex-wrap gap-0.5 max-w-[168px]">
-          {tools.map((t) => (
-            <Button
-              key={t.id}
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "h-7 w-7",
-                tool === t.id && "bg-primary/25 text-primary",
-              )}
-              title={t.title}
-              onClick={() => {
-                setTool(t.id);
-                setDraftPoints([]);
-              }}
-              data-testid={`draw-tool-${t.id}`}
-            >
-              {t.icon}
-            </Button>
-          ))}
-        </div>
-        <div className="flex gap-0.5 border-t border-[#2a3249] pt-1">
+  const toolbar = (
+    <div
+      className={cn(
+        "flex items-center gap-1 pointer-events-auto",
+        !toolbarPortal &&
+          "absolute top-12 left-2 z-[50] flex-col rounded-lg border-2 border-primary/40 bg-[#1a2035] p-1.5 shadow-xl",
+      )}
+      data-testid="chart-drawing-toolbar"
+    >
+      <span className="text-[10px] font-semibold text-primary whitespace-nowrap px-1 hidden sm:inline">
+        Draw
+      </span>
+      <div className="flex items-center gap-0.5 flex-wrap">
+        {tools.map((t) => (
           <Button
+            key={t.id}
             type="button"
-            variant="ghost"
+            variant={tool === t.id ? "secondary" : "ghost"}
             size="icon"
-            className="h-7 w-7"
-            title="Undo last"
-            disabled={drawings.length === 0}
-            onClick={() => setDrawings((prev) => prev.slice(0, -1))}
-          >
-            <Undo2 className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-red-400"
-            title="Clear all drawings"
-            disabled={drawings.length === 0}
+            className={cn("h-7 w-7 shrink-0", tool === t.id && "ring-1 ring-primary")}
+            title={t.title}
             onClick={() => {
-              setDrawings([]);
+              setTool(t.id);
               setDraftPoints([]);
             }}
+            data-testid={`draw-tool-${t.id}`}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            {t.icon}
           </Button>
-        </div>
-        {guideText ? (
-          <p className="text-[9px] text-amber-200/90 px-1.5 pb-0.5 leading-snug">{guideText}</p>
-        ) : null}
-        {drawings.length > 0 ? (
-          <p className="text-[8px] text-[#6b7a99] px-1.5 pb-0.5">
-            {drawings.length} saved · {coin} {interval}
-          </p>
-        ) : null}
+        ))}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0"
+          title="Undo last"
+          disabled={drawings.length === 0}
+          onClick={() => setDrawings((prev) => prev.slice(0, -1))}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-red-400"
+          title="Clear all"
+          disabled={drawings.length === 0}
+          onClick={() => {
+            setDrawings([]);
+            setDraftPoints([]);
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </div>
+      {guideText ? (
+        <span className="text-[9px] text-amber-300 max-w-[140px] leading-tight hidden lg:inline">
+          {guideText}
+        </span>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+      {toolbarPortal ? createPortal(toolbar, toolbarPortal) : toolbar}
 
       <svg
         className={cn(

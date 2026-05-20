@@ -16,7 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { useToast } from "@/hooks/use-toast";
 import { useSubscription } from "@/hooks/use-subscription";
 import { usePaywall } from "@/lib/paywall-context";
-import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2 } from "lucide-react";
+import { Settings, BookOpen, Brain, ArrowUpDown, Maximize2, Minimize2, Lock, Loader2, Pencil } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
@@ -84,6 +84,7 @@ export default function Trading({ visible = true }: TradingProps) {
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isResolvingCoin, setIsResolvingCoin] = useState(false);
+  const [drawToolbarHost, setDrawToolbarHost] = useState<HTMLDivElement | null>(null);
   const { toast } = useToast();
   const { updatePrices, refreshAccount, connected: tradingConnected } = useTrading();
   const { openPaywall } = usePaywall();
@@ -218,6 +219,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
   // Spot markets use @N identifiers
   const isSpot = coin.startsWith("@");
+  const chartDrawingEnabled = chartEngine === "hyperliquid" && !isSpot;
 
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
@@ -518,6 +520,15 @@ export default function Trading({ visible = true }: TradingProps) {
               </div>
               {chartEngine === "hyperliquid" && (
                 <>
+                  {chartDrawingEnabled && (
+                    <div
+                      className="flex items-center gap-1 shrink-0 border-l border-border pl-2 ml-0.5 min-h-8"
+                      data-testid="chart-draw-toolbar-host-wrap"
+                    >
+                      <Pencil className="h-3 w-3 text-primary shrink-0 hidden sm:block" aria-hidden />
+                      <div ref={setDrawToolbarHost} className="flex items-center min-w-0" />
+                    </div>
+                  )}
                 <div className="flex items-center gap-1.5">
                     <Switch 
                       checked={showAIChart} 
@@ -531,7 +542,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       onClick={() => !canUseAIPatterns && openPaywall("AI Pattern Recognition")}
                     >
                       <Brain className="h-3 w-3" />
-                      AI Chart
+                      AI patterns
                       {!canUseAIPatterns && <Lock className="h-3 w-3 text-muted-foreground/60" />}
                     </label>
                   </div>
@@ -579,7 +590,8 @@ export default function Trading({ visible = true }: TradingProps) {
                       interval={chartInterval}
                       currentPrice={price}
                       patternScanEnabled={canUseAIPatterns && !isSpot}
-                      drawingEnabled={showAIChart && !isSpot}
+                      drawingEnabled={chartDrawingEnabled}
+                      drawingToolbarPortal={drawToolbarHost}
                       hideIndicators={!showIndicators}
                       lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                       className="absolute inset-0" 
@@ -615,7 +627,8 @@ export default function Trading({ visible = true }: TradingProps) {
                   interval={chartInterval}
                   currentPrice={price}
                   patternScanEnabled={canUseAIPatterns && !isSpot}
-                  drawingEnabled={showAIChart && !isSpot}
+                  drawingEnabled={chartDrawingEnabled}
+                  drawingToolbarPortal={drawToolbarHost}
                   hideIndicators={!showIndicators}
                   lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                   className="h-full" 

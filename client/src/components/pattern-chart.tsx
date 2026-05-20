@@ -58,6 +58,8 @@ interface PatternChartProps {
   patternScanEnabled?: boolean;
   /** When true, shows drawing toolbar + persisted pattern sketches (bull flag, lines, zones). */
   drawingEnabled?: boolean;
+  /** Mount drawing toolbar into this element (trading page header). */
+  drawingToolbarPortal?: HTMLElement | null;
   hideIndicators?: boolean;
   /** Blur RSI/Stoch stack with Pro CTA (non-subscribers can still use the main candle pane). */
   lockPremiumIndicatorStack?: boolean;
@@ -241,6 +243,7 @@ function PatternChartComponent({
   currentPrice = 0,
   patternScanEnabled = false,
   drawingEnabled = false,
+  drawingToolbarPortal = null,
   hideIndicators = false,
   lockPremiumIndicatorStack = false,
 }: PatternChartProps) {
@@ -999,6 +1002,7 @@ function PatternChartComponent({
           seriesRef={candleSeriesRef}
           paneRef={mainContainerRef}
           layoutTick={chartLayoutTick}
+          toolbarPortal={drawingToolbarPortal}
         />
 
         {/* Loading overlay — only on first fetch for this coin, not on periodic refetch */}
