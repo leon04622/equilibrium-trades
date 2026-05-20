@@ -48,10 +48,16 @@ async function initStripe() {
 
   try {
     log('Initializing Stripe schema...', 'stripe');
-    await runMigrations({ 
-      databaseUrl
-    });
-    log('Stripe schema ready', 'stripe');
+    const migrationPromise = runMigrations({ databaseUrl });
+    const timeoutPromise = new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error('runMigrations timed out after 5 s')), 5000)
+    );
+    try {
+      await Promise.race([migrationPromise, timeoutPromise]);
+      log('Stripe schema ready', 'stripe');
+    } catch (migrationError: any) {
+      log(`Stripe schema init skipped (non-fatal): ${migrationError.message}`, 'stripe');
+    }
 
     const stripeSync = await getStripeSync();
 
