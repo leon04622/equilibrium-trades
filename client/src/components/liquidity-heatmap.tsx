@@ -27,6 +27,22 @@ interface HeatmapData {
   time: number;
   bidVolume: number;
   askVolume: number;
+  totalVolume?: number;
+}
+
+interface HeatmapGridMeta {
+  midPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  binSize: number;
+  priceBins: number;
+}
+
+interface HeatmapTrade {
+  price: number;
+  size: number;
+  side: "bid" | "ask";
+  timestamp: number;
 }
 
 interface LargeOrder {
@@ -41,10 +57,40 @@ interface HeatmapMessage {
   coin: string;
   data: {
     heatmap: HeatmapData[][];
+    meta: HeatmapGridMeta | null;
     largeOrders: LargeOrder[];
+    recentTrades?: HeatmapTrade[];
     currentPrice: number;
     timestamp: number;
   };
+}
+
+const PLOT_PAD_LEFT = 52;
+const PLOT_PAD_RIGHT = 4;
+const PLOT_PAD_TOP = 8;
+const PLOT_PAD_BOTTOM = 22;
+
+/** Zoom slider 20–100 → ~0.5%–2.5% price window each side of mid. */
+function zoomToRange(zoom: number): number {
+  return 0.005 + ((zoom - 20) / 80) * 0.02;
+}
+
+function priceToY(price: number, meta: HeatmapGridMeta, height: number): number {
+  const plotH = height - PLOT_PAD_TOP - PLOT_PAD_BOTTOM;
+  const ratio = (price - meta.minPrice) / (meta.maxPrice - meta.minPrice);
+  return PLOT_PAD_TOP + plotH * (1 - Math.max(0, Math.min(1, ratio)));
+}
+
+function timeToX(
+  time: number,
+  minTime: number,
+  maxTime: number,
+  width: number,
+): number {
+  if (maxTime <= minTime) return width - PLOT_PAD_RIGHT;
+  const plotW = width - PLOT_PAD_LEFT - PLOT_PAD_RIGHT;
+  const ratio = (time - minTime) / (maxTime - minTime);
+  return PLOT_PAD_LEFT + ratio * plotW;
 }
 
 interface OrderBookLevel {
@@ -64,7 +110,9 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
   const [wsConnected, setWsConnected] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [heatmapData, setHeatmapData] = useState<HeatmapData[][]>([]);
+  const [gridMeta, setGridMeta] = useState<HeatmapGridMeta | null>(null);
   const [largeOrders, setLargeOrders] = useState<LargeOrder[]>([]);
+  const [recentTrades, setRecentTrades] = useState<HeatmapTrade[]>([]);
   const [currentPrice, setCurrentPrice] = useState(0);
   const [zoom, setZoom] = useState([50]);
   const [showCrosshair, setShowCrosshair] = useState(true);
@@ -114,7 +162,9 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
     ws.onopen = () => {
       setWsConnected(true);
-      ws.send(JSON.stringify({ type: "subscribe", coin }));
+      ws.send(
+        JSON.stringify({ type: "subscribe", coin, rangePct: zoomToRange(zoom[0]) }),
+      );
     };
 
     ws.onmessage = (event) => {
@@ -124,7 +174,9 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
         const message: HeatmapMessage = JSON.parse(event.data);
         if (message.type === "heatmap" && message.coin === coin) {
           setHeatmapData(message.data.heatmap);
+          setGridMeta(message.data.meta);
           setLargeOrders(message.data.largeOrders);
+          setRecentTrades(message.data.recentTrades || []);
           setCurrentPrice(message.data.currentPrice);
           // Always store history frames for scrolling
           setHistoryFrames((prev: HeatmapData[][][]) => {
@@ -151,16 +203,32 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
     return () => {
       ws.close();
     };
-  }, [coin, isPaused, locked]);
+  }, [coin, isPaused, locked, zoom]);
 
   // Update subscription when coin changes
   useEffect(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && !locked) {
-      wsRef.current.send(JSON.stringify({ type: "subscribe", coin }));
+    if (locked) return;
+    setHeatmapData([]);
+    setGridMeta(null);
+    setHistoryFrames([]);
+    setScrollPosition(100);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({ type: "subscribe", coin, rangePct: zoomToRange(zoom[0]) }),
+      );
     }
   }, [coin, locked]);
 
-  // Draw heatmap on canvas - Bookmap style
+  // Bookmap-style price zoom → server grid range
+  useEffect(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && !locked) {
+      wsRef.current.send(
+        JSON.stringify({ type: "config", rangePct: zoomToRange(zoom[0]) }),
+      );
+    }
+  }, [zoom, locked]);
+
+  // Draw heatmap on canvas — Bookmap: time → X, price → Y, liquidity = heat
   const drawHeatmap = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -170,186 +238,177 @@ export function LiquidityHeatmap({ coin, locked = false, className }: LiquidityH
 
     const width = canvas.width;
     const height = canvas.height;
+    const meta = gridMeta;
 
-    // Dark background like Bookmap
-    ctx.fillStyle = "#0d0d0d";
+    ctx.fillStyle = "#0a0a0f";
     ctx.fillRect(0, 0, width, height);
 
-    if (displayHeatmap.length === 0) {
-      // Draw placeholder gradient
+    if (displayHeatmap.length === 0 || !meta) {
       const gradient = ctx.createLinearGradient(0, 0, 0, height);
-      gradient.addColorStop(0, "rgba(239, 68, 68, 0.1)");
-      gradient.addColorStop(0.5, "rgba(100, 100, 100, 0.05)");
-      gradient.addColorStop(1, "rgba(34, 197, 94, 0.1)");
+      gradient.addColorStop(0, "rgba(239, 68, 68, 0.08)");
+      gradient.addColorStop(0.5, "rgba(80, 80, 100, 0.04)");
+      gradient.addColorStop(1, "rgba(34, 197, 94, 0.08)");
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(PLOT_PAD_LEFT, 0, width - PLOT_PAD_LEFT, height);
       return;
     }
 
     const columns = displayHeatmap.length;
     const rows = displayHeatmap[0]?.length || 0;
-
     if (rows === 0 || columns === 0) return;
 
-    const cellWidth = width / columns;
-    const cellHeight = height / rows;
+    const times = displayHeatmap.map((col) => col[0]?.time ?? 0);
+    const minTime = times[0] ?? 0;
+    const maxTime = times[times.length - 1] ?? minTime;
+    const plotW = width - PLOT_PAD_LEFT - PLOT_PAD_RIGHT;
 
-    // Find max volume for color scaling
     let maxVolume = 0;
     for (const column of displayHeatmap) {
       for (const cell of column) {
-        maxVolume = Math.max(maxVolume, cell.bidVolume, cell.askVolume);
+        maxVolume = Math.max(
+          maxVolume,
+          cell.totalVolume ?? cell.bidVolume + cell.askVolume,
+        );
       }
     }
 
-    // Bookmap-style color scheme: blue -> yellow -> red for intensity
-    const getBookmapColor = (intensity: number, side: "bid" | "ask") => {
-      if (intensity < 0.1) return null;
-      
-      // Scale intensity for visual effect
-      const scaledIntensity = Math.pow(intensity, 0.7);
-      
+    const liquidityColor = (intensity: number, side: "bid" | "ask") => {
+      if (intensity < 0.04) return null;
+      const t = Math.pow(Math.min(1, intensity), 0.55);
       if (side === "bid") {
-        // Green gradient for bids
-        if (scaledIntensity < 0.3) {
-          return `rgba(0, 100, 50, ${scaledIntensity * 2})`;
-        } else if (scaledIntensity < 0.6) {
-          return `rgba(34, 197, 94, ${scaledIntensity * 1.5})`;
-        } else {
-          return `rgba(74, 222, 128, ${Math.min(1, scaledIntensity * 1.2)})`;
-        }
-      } else {
-        // Red gradient for asks
-        if (scaledIntensity < 0.3) {
-          return `rgba(100, 30, 30, ${scaledIntensity * 2})`;
-        } else if (scaledIntensity < 0.6) {
-          return `rgba(239, 68, 68, ${scaledIntensity * 1.5})`;
-        } else {
-          return `rgba(248, 113, 113, ${Math.min(1, scaledIntensity * 1.2)})`;
-        }
+        if (t < 0.35) return `rgba(0, 120, 70, ${t * 1.8})`;
+        if (t < 0.7) return `rgba(0, 200, 83, ${0.35 + t * 0.9})`;
+        return `rgba(100, 255, 150, ${0.55 + t * 0.45})`;
       }
+      if (t < 0.35) return `rgba(140, 30, 30, ${t * 1.8})`;
+      if (t < 0.7) return `rgba(255, 82, 82, ${0.35 + t * 0.9})`;
+      return `rgba(255, 150, 120, ${0.55 + t * 0.45})`;
     };
 
-    // Draw heatmap cells
     for (let col = 0; col < columns; col++) {
+      const t0 = displayHeatmap[col][0]?.time ?? minTime;
+      const t1 =
+        col < columns - 1
+          ? displayHeatmap[col + 1][0]?.time ?? t0 + 1
+          : maxTime + 1;
+      const x0 = timeToX(t0, minTime, maxTime, width);
+      const x1 = timeToX(t1, minTime, maxTime, width);
+      const cellW = Math.max(1, x1 - x0);
+
       for (let row = 0; row < rows; row++) {
         const cell = displayHeatmap[col][row];
-        const x = col * cellWidth;
-        const y = (rows - row - 1) * cellHeight;
+        const yTop = priceToY(
+          cell.priceLevel + meta.binSize / 2,
+          meta,
+          height,
+        );
+        const yBot = priceToY(
+          cell.priceLevel - meta.binSize / 2,
+          meta,
+          height,
+        );
+        const cellH = Math.max(1, yBot - yTop);
 
-        const bidIntensity = maxVolume > 0 ? cell.bidVolume / maxVolume : 0;
-        const askIntensity = maxVolume > 0 ? cell.askVolume / maxVolume : 0;
-
-        if (bidIntensity > askIntensity) {
-          const color = getBookmapColor(bidIntensity, "bid");
-          if (color) {
-            ctx.fillStyle = color;
-            ctx.fillRect(x, y, cellWidth + 1, cellHeight + 1);
-          }
-        } else if (askIntensity > bidIntensity) {
-          const color = getBookmapColor(askIntensity, "ask");
-          if (color) {
-            ctx.fillStyle = color;
-            ctx.fillRect(x, y, cellWidth + 1, cellHeight + 1);
-          }
+        const isBidSide = cell.priceLevel <= meta.midPrice;
+        const vol = isBidSide ? cell.bidVolume : cell.askVolume;
+        const intensity = maxVolume > 0 ? vol / maxVolume : 0;
+        const color = liquidityColor(intensity, isBidSide ? "bid" : "ask");
+        if (color) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x0, yTop, cellW + 0.5, cellH + 0.5);
         }
       }
     }
 
-    // Draw volume bubbles (dots) for recent trades - Bookmap style (only show when live)
+    // Executed trades as bubbles (Bookmap volume dots)
     if (isLive) {
-    for (const order of largeOrders) {
-      if (displayHeatmap[0]) {
-        const priceLevels = displayHeatmap[0].map((d) => d.priceLevel);
-        const minPrice = Math.min(...priceLevels);
-        const maxPrice = Math.max(...priceLevels);
+      const bubbleSource = recentTrades.length > 0 ? recentTrades : largeOrders;
+      for (const item of bubbleSource) {
+        if (item.price < meta.minPrice || item.price > meta.maxPrice) continue;
+        const orderY = priceToY(item.price, meta, height);
+        const orderX = timeToX(item.timestamp, minTime, maxTime, width);
+        if (orderX < PLOT_PAD_LEFT || orderX > width - PLOT_PAD_RIGHT) continue;
 
-        if (order.price >= minPrice && order.price <= maxPrice) {
-          const orderY = height - ((order.price - minPrice) / (maxPrice - minPrice)) * height;
-          const timeFraction = (Date.now() - order.timestamp) / 60000; // Last minute
-          const orderX = width - (timeFraction * width * 0.8);
-
-          if (orderX > 0 && orderX < width) {
-            // Size based on order size
-            const bubbleSize = Math.min(20, Math.max(4, Math.sqrt(order.size) * 3));
-            
-            ctx.globalAlpha = 0.8;
-            ctx.fillStyle = order.side === "bid" ? "#22c55e" : "#ef4444";
-            ctx.beginPath();
-            ctx.arc(orderX, orderY, bubbleSize, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // White border
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
-        }
-      }
-    }
-    } // end if isLive
-
-    // Draw BBO (Best Bid/Offer) lines
-    const displayPrice = currentPrice || tickerPrice;
-    if (displayPrice > 0 && displayHeatmap[0]) {
-      const priceLevels = displayHeatmap[0].map((d) => d.priceLevel);
-      const minPrice = Math.min(...priceLevels);
-      const maxPrice = Math.max(...priceLevels);
-
-      if (displayPrice >= minPrice && displayPrice <= maxPrice) {
-        const priceY = height - ((displayPrice - minPrice) / (maxPrice - minPrice)) * height;
-
-        // Current price line (yellow like Bookmap)
-        ctx.strokeStyle = "#fbbf24";
-        ctx.lineWidth = 2;
+        const bubbleSize = Math.min(14, Math.max(3, Math.sqrt(item.size) * 2.5));
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = item.side === "bid" ? "#00c853" : "#ff5252";
         ctx.beginPath();
-        ctx.moveTo(0, priceY);
-        ctx.lineTo(width, priceY);
+        ctx.arc(orderX, orderY, bubbleSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.45)";
+        ctx.lineWidth = 1;
         ctx.stroke();
-
-        // Price label box
-        ctx.fillStyle = "#fbbf24";
-        ctx.fillRect(width - 80, priceY - 10, 80, 20);
-        ctx.fillStyle = "#000";
-        ctx.font = "bold 11px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(`$${formatPrice(displayPrice)}`, width - 40, priceY + 4);
+        ctx.globalAlpha = 1;
       }
     }
 
-    // Draw crosshair on hover
-    if (showCrosshair && mousePos && mousePos.x > 0 && mousePos.y > 0) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      
-      // Horizontal line
+    const displayPrice = currentPrice || tickerPrice;
+    if (displayPrice >= meta.minPrice && displayPrice <= meta.maxPrice) {
+      const priceY = priceToY(displayPrice, meta, height);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(0, mousePos.y);
-      ctx.lineTo(width, mousePos.y);
+      ctx.moveTo(PLOT_PAD_LEFT, priceY);
+      ctx.lineTo(width - PLOT_PAD_RIGHT, priceY);
       ctx.stroke();
-      
-      // Vertical line
-      ctx.beginPath();
-      ctx.moveTo(mousePos.x, 0);
-      ctx.lineTo(mousePos.x, height);
-      ctx.stroke();
-      
-      ctx.setLineDash([]);
+
+      ctx.fillStyle = "#fbbf24";
+      ctx.fillRect(PLOT_PAD_LEFT, priceY - 9, 50, 18);
+      ctx.fillStyle = "#000";
+      ctx.font = "bold 10px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(formatPrice(displayPrice), PLOT_PAD_LEFT + 4, priceY + 4);
     }
 
-    // Draw subtle grid
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 10; i++) {
-      const y = (height / 10) * i;
+    // Price axis labels (left)
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.font = "9px monospace";
+    ctx.textAlign = "right";
+    for (let i = 0; i <= 8; i++) {
+      const p = meta.minPrice + ((meta.maxPrice - meta.minPrice) * i) / 8;
+      const y = priceToY(p, meta, height);
+      ctx.fillText(formatPrice(p), PLOT_PAD_LEFT - 4, y + 3);
+      ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.beginPath();
-      ctx.moveTo(0, y);
+      ctx.moveTo(PLOT_PAD_LEFT, y);
       ctx.lineTo(width, y);
       ctx.stroke();
     }
-  }, [displayHeatmap, largeOrders, currentPrice, tickerPrice, showCrosshair, mousePos, isLive]);
+
+    // Time axis (bottom)
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    for (let i = 0; i <= 4; i++) {
+      const t = minTime + ((maxTime - minTime) * i) / 4;
+      const x = timeToX(t, minTime, maxTime, width);
+      ctx.fillText(formatTime(t), x, height - 6);
+    }
+
+    if (showCrosshair && mousePos && mousePos.x > PLOT_PAD_LEFT) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(PLOT_PAD_LEFT, mousePos.y);
+      ctx.lineTo(width, mousePos.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(mousePos.x, 0);
+      ctx.lineTo(mousePos.x, height - PLOT_PAD_BOTTOM);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }, [
+    displayHeatmap,
+    gridMeta,
+    largeOrders,
+    recentTrades,
+    currentPrice,
+    tickerPrice,
+    showCrosshair,
+    mousePos,
+    isLive,
+  ]);
 
   // Redraw when data changes
   useEffect(() => {

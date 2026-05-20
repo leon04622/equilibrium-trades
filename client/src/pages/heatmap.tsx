@@ -114,15 +114,15 @@ function HeatmapContent() {
               <div className="flex items-start gap-2">
                 <div className="h-4 w-4 rounded-sm bg-bullish/60 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium">Green = Buy Orders</p>
-                  <p className="text-muted-foreground">Brighter = more volume waiting</p>
+                  <p className="font-medium">Green = Bid liquidity</p>
+                  <p className="text-muted-foreground">Below mid price; brighter = thicker book</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
                 <div className="h-4 w-4 rounded-sm bg-bearish/60 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium">Red = Sell Orders</p>
-                  <p className="text-muted-foreground">Brighter = more resistance</p>
+                  <p className="font-medium">Red = Ask liquidity</p>
+                  <p className="text-muted-foreground">Above mid price; scroll timeline to replay</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
