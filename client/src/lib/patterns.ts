@@ -60,8 +60,9 @@ export const tradingPatterns: PatternDefinition[] = [
     id: "pennant",
     name: "Pennant",
     type: "continuation",
-    direction: "bullish",
-    description: "Similar to a flag but with converging trendlines forming a small symmetrical triangle after a strong move.",
+    direction: "neutral",
+    description:
+      "Similar to a flag but with converging trendlines forming a small symmetrical triangle after a strong move. Continuation is in the direction of the pole (prior trend), not an inherent bull/bear label.",
     howToIdentify: [
       "Strong directional move (pole)",
       "Small symmetrical triangle consolidation",

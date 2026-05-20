@@ -75,6 +75,7 @@ const GRID = "#1e2535";
 const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
 const HANDLE_PX = 6;
+const DEFAULT_VISIBLE_BARS = 120;
 const CHART_HISTORY_LIMITS: Record<string, number> = {
   "1m": 2500,
   "3m": 3000,
@@ -140,6 +141,15 @@ function fmtVol(v: number): string {
   if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
   if (v >= 1e3) return (v / 1e3).toFixed(2) + "K";
   return v.toFixed(2);
+}
+
+function normalizeCandlesByTime(candles: CandleData[]): CandleData[] {
+  const latestByTime = new Map<number, CandleData>();
+  for (const candle of candles) {
+    if (!Number.isFinite(candle.t)) continue;
+    latestByTime.set(candle.t, candle);
+  }
+  return [...latestByTime.values()].sort((a, b) => a.t - b.t);
 }
 
 function rankPatternStatus(status: EducationalPatternSignal["patternStatus"]): number {
@@ -248,6 +258,7 @@ function PatternChartComponent({
   const stochKSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const stochDSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const isSyncingRef = useRef(false);
+  const preferredVisibleBarsRef = useRef<number | null>(null);
   const smaCardRunRef = useRef(0);
   const chartSmmaRunRef = useRef(0);
 
@@ -582,7 +593,15 @@ function PatternChartComponent({
     const cleanups: (() => void)[] = [];
 
     syncVisiblePriceRange();
-    const onTimeScaleChange = () => syncVisiblePriceRange();
+    const onTimeScaleChange = () => {
+      syncVisiblePriceRange();
+      const logicalRange = mainChart.timeScale().getVisibleLogicalRange();
+      if (!logicalRange) return;
+      const visibleBars = Math.round(logicalRange.to - logicalRange.from);
+      if (Number.isFinite(visibleBars) && visibleBars >= 20) {
+        preferredVisibleBarsRef.current = visibleBars;
+      }
+    };
     mainChart.timeScale().subscribeVisibleLogicalRangeChange(onTimeScaleChange);
     mainChart.timeScale().subscribeVisibleTimeRangeChange(onTimeScaleChange);
     cleanups.push(() => {
@@ -724,7 +743,8 @@ function PatternChartComponent({
     if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
     if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
-    const sorted = [...candles].sort((a, b) => a.t - b.t);
+    const sorted = normalizeCandlesByTime(candles);
+    if (sorted.length === 0) return;
     const closes = sorted.map((c) => parsePrice(c.c));
     const times = sorted.map((c) => (c.t / 1000) as Time);
     const vols = sorted.map((c) => parsePrice(c.v));
@@ -792,7 +812,15 @@ function PatternChartComponent({
             }
           }
 
-          mainChartRef.current.timeScale().fitContent();
+          const visibleBars = Math.max(
+            20,
+            Math.min(sorted.length, preferredVisibleBarsRef.current ?? DEFAULT_VISIBLE_BARS),
+          );
+          const rightEdge = sorted.length - 1 + 5;
+          mainChartRef.current.timeScale().setVisibleLogicalRange({
+            from: Math.max(-0.5, rightEdge - visibleBars),
+            to: rightEdge,
+          });
         } catch (e) {
           console.warn("[chart] setData error:", e);
           return;
@@ -859,8 +887,8 @@ function PatternChartComponent({
           });
           setLastVol(parsePrice(lastCandle.v));
 
-          if (sorted.length >= 21 && sm.last21) sma21SeriesRef.current.update(sm.last21);
-          if (sorted.length >= 200 && sm.last200) sma200SeriesRef.current.update(sm.last200);
+          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
+          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
           if (vols.length >= 20) {
             const vs = calcSMA(vols, times, 20);
             if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]!);

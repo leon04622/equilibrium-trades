@@ -59,8 +59,8 @@ Focus on these patterns (use EXACTLY these pattern IDs):
 - triple-top (Triple Top)
 - triple-bottom (Triple Bottom)
 - diamond (Diamond Pattern)
-- rising-wedge (Rising Wedge)
-- falling-wedge (Falling Wedge)
+- rising-wedge (Rising Wedge — bearish resolution bias: both boundaries slope up; break usually down)
+- falling-wedge (Falling Wedge — bullish resolution bias: both boundaries slope down; break usually up)
 - rounding-bottom (Rounding Bottom)
 - bullish-engulfing (Bullish Engulfing)
 - bearish-engulfing (Bearish Engulfing)
@@ -69,7 +69,7 @@ For each pattern detected, provide:
 1. Pattern ID (MUST be one of the exact IDs listed above like "bull-flag", "ascending-triangle")
 2. Pattern name
 3. Type (continuation or reversal)
-4. Direction (bullish, bearish, or neutral)
+4. Direction (bullish, bearish, or neutral) — MUST match the canonical bias for each pattern ID (e.g. falling-wedge = bullish, rising-wedge = bearish, bull-flag = bullish, bear-flag = bearish, symmetrical-triangle = neutral)
 5. Confidence score (0-100)
 6. Entry price suggestion (if applicable)
 7. Stop loss suggestion (if applicable)
@@ -77,6 +77,36 @@ For each pattern detected, provide:
 9. Brief description of why this pattern was identified
 
 Respond with a JSON array of detected patterns. If no patterns are found, return an empty array.`;
+
+/** Canonical resolution bias for classic chart patterns (overrides model drift). */
+function canonicalDirectionForPatternId(patternId: string): "bullish" | "bearish" | "neutral" {
+  switch (patternId) {
+    case "bull-flag":
+    case "ascending-triangle":
+    case "cup-and-handle":
+    case "inverse-head-and-shoulders":
+    case "double-bottom":
+    case "triple-bottom":
+    case "rounding-bottom":
+    case "bullish-engulfing":
+    case "falling-wedge":
+      return "bullish";
+    case "bear-flag":
+    case "descending-triangle":
+    case "head-and-shoulders":
+    case "double-top":
+    case "triple-top":
+    case "bearish-engulfing":
+    case "rising-wedge":
+      return "bearish";
+    case "symmetrical-triangle":
+    case "pennant":
+    case "diamond":
+      return "neutral";
+    default:
+      return "neutral";
+  }
+}
 
 export async function analyzePatterns(
   symbol: string,
@@ -147,7 +177,7 @@ Identify any patterns forming or confirmed in this data.`
             patternId,
             patternName: p.patternName || p.pattern_name || "Unknown Pattern",
             type: p.type || "continuation",
-            direction: p.direction || "neutral",
+            direction: canonicalDirectionForPatternId(patternId),
             confidence: Math.min(100, Math.max(0, p.confidence || 50)),
             entryPrice: p.entryPrice || p.entry_price,
             stopLoss: p.stopLoss || p.stop_loss,

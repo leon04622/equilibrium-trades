@@ -689,7 +689,7 @@ function detectDoublePattern(candles: HyperliquidCandle[], isBullish: boolean, t
 // so the lines are squeezing together. The breakout is AGAINST the wedge direction.
 function detectWedgePatternInWindow(
   recentCandles: HyperliquidCandle[],
-  isBullish: boolean,
+  mode: "rising" | "falling",
   timeframe: string,
 ): DetectedPattern | null {
   if (recentCandles.length < 40) return null;
@@ -731,10 +731,10 @@ function detectWedgePatternInWindow(
   // Both trendlines slope UP, but lower rises faster → lines converge from below
   // highSlope > 0, lowSlope > 0, lowSlope > highSlope (lower rising faster)
   if (
+    mode === "rising" &&
     highSlope > minSlopeMag &&
     lowSlope  > minSlopeMag &&
-    lowSlope  > highSlope &&          // lower trendline rises faster → convergence
-    !isBullish
+    lowSlope  > highSlope // lower trendline rises faster → convergence
   ) {
     // Measure convergence: difference in slopes must be at least 0.01%/candle
     if (lowSlope - highSlope < minSlopeMag) return null;
@@ -769,10 +769,10 @@ function detectWedgePatternInWindow(
   // Both trendlines slope DOWN, but upper falls faster → lines converge from above
   // highSlope < 0, lowSlope < 0, highSlope < lowSlope (upper falling faster = more negative)
   if (
+    mode === "falling" &&
     highSlope < -minSlopeMag &&
     lowSlope  < -minSlopeMag &&
-    highSlope <  lowSlope &&           // upper falls faster → convergence
-    isBullish
+    highSlope < lowSlope // upper falls faster → convergence
   ) {
     // Measure convergence
     if (lowSlope - highSlope < minSlopeMag) return null;
@@ -806,10 +806,14 @@ function detectWedgePatternInWindow(
   return null;
 }
 
-function detectWedgePattern(candles: HyperliquidCandle[], isBullish: boolean, timeframe: string): DetectedPattern[] {
-  return scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
-    detectWedgePatternInWindow(window, isBullish, timeframe),
+function detectWedgePattern(candles: HyperliquidCandle[], timeframe: string): DetectedPattern[] {
+  const rising = scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
+    detectWedgePatternInWindow(window, "rising", timeframe),
   );
+  const falling = scanPatternWindows(candles, [40, 48, 56, 64, 72], 36, 3, (window) =>
+    detectWedgePatternInWindow(window, "falling", timeframe),
+  );
+  return [...rising, ...falling];
 }
 
 /** Pattern direction from structure only — used after OHLC detection (not from MA alignment). */
@@ -828,6 +832,7 @@ export function getPatternStructuralBias(p: DetectedPattern): "bullish" | "beari
     case "ascending_triangle":
     case "bull_flag":
     case "bullish_pennant":
+    case "cup_and_handle":
       return "bullish";
     case "symmetrical_triangle":
     default:
@@ -858,8 +863,7 @@ export function collectPatternCandidates(
   addAll(detectTrianglePattern(candles, false, timeframe));
   addAll(detectDoublePattern(candles, true, timeframe));
   addAll(detectDoublePattern(candles, false, timeframe));
-  addAll(detectWedgePattern(candles, true, timeframe));
-  addAll(detectWedgePattern(candles, false, timeframe));
+  addAll(detectWedgePattern(candles, timeframe));
   return candidates;
 }
 

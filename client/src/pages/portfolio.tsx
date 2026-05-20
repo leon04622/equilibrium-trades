@@ -43,6 +43,7 @@ import { useWallet } from "@/lib/wallet-context";
 import {
   getSpotBalances,
   transferUsdcBetweenAccounts,
+  ensureUnifiedAccountModeBeforeSpotToPerpTransfer,
   withdrawUsdcToWallet,
   depositUsdcToHyperliquid,
   getArbitrumUsdcBalance,
@@ -223,7 +224,35 @@ export default function Portfolio() {
       return;
     }
 
-    // Step 3: Execute transfer
+    // Step 3: Spot → Perp — align with Hyperliquid unified USDC (official app default) once per wallet
+    if (transferToPerp) {
+      setTransferring(true);
+      setTransferStep("One-time Hyperliquid setup: enabling unified USDC balance (same as app.hyperliquid)…");
+      const prep = await ensureUnifiedAccountModeBeforeSpotToPerpTransfer(activeSigner);
+      if (!prep.ok) {
+        setTransferring(false);
+        setTransferStep("");
+        if (prep.userRejected) {
+          const msg = prep.error || "Setup was cancelled.";
+          setTransferResult({ success: false, error: msg });
+          toast({
+            title: "Setup cancelled",
+            description: msg,
+            variant: "destructive",
+          });
+          return;
+        }
+        toast({
+          title: "Could not auto-apply unified account",
+          description:
+            (prep.error || "Hyperliquid did not confirm the setting change.") +
+            " You can still try the transfer, or adjust account mode on app.hyperliquid.xyz if it fails again.",
+          variant: "destructive",
+        });
+      }
+    }
+
+    // Step 4: Execute transfer
     setTransferring(true);
     setTransferStep("Requesting signature from your wallet — check MetaMask/your wallet app...");
     console.log(`[Transfer] Calling transferUsdcBetweenAccounts: ${amount} USDC, toPerp=${transferToPerp}`);
@@ -924,6 +953,14 @@ export default function Portfolio() {
             <DialogDescription>
               Move USDC between your Spot and Perp accounts. Your funds stay in your wallet — no custody involved.
             </DialogDescription>
+            {transferToPerp && (
+              <p className="text-xs text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2 leading-relaxed">
+                The first time you move <strong className="text-foreground">Spot → Perp</strong> from this device,
+                Equilibrium applies Hyperliquid’s <strong className="text-foreground">unified account</strong>{" "}
+                (recommended by Hyperliquid — single USDC pool for spot and perp margin), so you do not need to change
+                HIP-3 or account mode manually on the HL website.
+              </p>
+            )}
           </DialogHeader>
 
           {!signer && (

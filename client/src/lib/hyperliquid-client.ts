@@ -1414,6 +1414,143 @@ export async function transferUsdcBetweenAccounts(
   }
 }
 
+/** Hyperliquid account abstraction mode (`userSetAbstraction`). @see https://hyperliquid.gitbook.io/hyperliquid-docs/trading/account-abstraction-modes */
+export type HlAccountAbstractionMode = "disabled" | "unifiedAccount" | "portfolioMargin";
+
+const HL_UNIFIED_PREP_LS = "eq_hl_user_set_abstraction_unified_v1";
+
+function hlUnifiedPrepStorageKey(userAddress: string): string {
+  return `${HL_UNIFIED_PREP_LS}_${userAddress.toLowerCase()}`;
+}
+
+/**
+ * Set account abstraction on HyperCore (same mechanism as the official app’s Settings).
+ * Prefer `unifiedAccount` for end users — single USDC balance for spot + validator perps (official UI default).
+ */
+export async function submitUserSetAbstraction(
+  signer: JsonRpcSigner,
+  abstraction: HlAccountAbstractionMode,
+): Promise<{ success: boolean; error?: string; userRejected?: boolean }> {
+  try {
+    await syncServerTime();
+    const nonce = getUniqueNonce();
+    const signatureChainId = "0xa4b1";
+    const userAddr = getAddress(await signer.getAddress());
+
+    const domain = {
+      name: "HyperliquidSignTransaction",
+      version: "1",
+      chainId: parseInt(signatureChainId, 16),
+      verifyingContract: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+    };
+
+    const types = {
+      "HyperliquidTransaction:UserSetAbstraction": [
+        { name: "hyperliquidChain", type: "string" },
+        { name: "user", type: "address" },
+        { name: "abstraction", type: "string" },
+        { name: "nonce", type: "uint64" },
+      ],
+    };
+
+    const message = {
+      hyperliquidChain: "Mainnet",
+      user: userAddr,
+      abstraction,
+      nonce,
+    };
+
+    const signature = await signTypedDataHyperliquid(
+      signer,
+      domain,
+      types,
+      "HyperliquidTransaction:UserSetAbstraction",
+      message,
+    );
+
+    const r = signature.slice(0, 66);
+    const s = "0x" + signature.slice(66, 130);
+    const v = parseInt(signature.slice(130, 132), 16);
+
+    const action = {
+      type: "userSetAbstraction",
+      signatureChainId,
+      hyperliquidChain: "Mainnet",
+      user: userAddr,
+      abstraction,
+      nonce,
+    };
+
+    const payload = {
+      action,
+      signature: { r, s, v },
+      nonce,
+    };
+
+    const response = await fetch(EXCHANGE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+
+    if (result.status === "ok") {
+      return { success: true };
+    }
+
+    const errMsg =
+      typeof result.response === "string"
+        ? result.response
+        : result.response?.data
+          ? JSON.stringify(result.response.data)
+          : result.error
+            ? String(result.error)
+            : JSON.stringify(result);
+
+    return { success: false, error: errMsg };
+  } catch (error: unknown) {
+    if (isUserRejectedWalletError(error)) {
+      return { success: false, error: "Signature cancelled.", userRejected: true };
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("submitUserSetAbstraction error:", error);
+    return { success: false, error: msg || "Account settings update failed" };
+  }
+}
+
+/**
+ * Before the first Spot → Perp transfer from this browser, apply Hyperliquid’s **unified account**
+ * (recommended in HL docs; avoids separate-class / legacy HIP-3 DEX abstraction confusion).
+ * Skips after success once per wallet (localStorage). Idempotent on-chain from HL’s perspective.
+ */
+export async function ensureUnifiedAccountModeBeforeSpotToPerpTransfer(
+  signer: JsonRpcSigner,
+): Promise<{ ok: true; skipped: boolean } | { ok: false; error: string; userRejected?: boolean }> {
+  let addr: string;
+  try {
+    addr = (await signer.getAddress()).toLowerCase();
+  } catch {
+    return { ok: false, error: "Could not read wallet address." };
+  }
+
+  if (typeof localStorage !== "undefined" && localStorage.getItem(hlUnifiedPrepStorageKey(addr)) === "1") {
+    return { ok: true, skipped: true };
+  }
+
+  const res = await submitUserSetAbstraction(signer, "unifiedAccount");
+  if (res.success && typeof localStorage !== "undefined") {
+    localStorage.setItem(hlUnifiedPrepStorageKey(addr), "1");
+    return { ok: true, skipped: false };
+  }
+
+  if (res.userRejected) {
+    return { ok: false, error: res.error || "Signature cancelled.", userRejected: true };
+  }
+
+  return { ok: false, error: res.error || "Could not apply unified account on Hyperliquid." };
+}
+
 // Withdraw USDC from perp account to an Arbitrum wallet address
 // Uses withdraw3 action, signed via EIP-712 with the user's primary wallet
 export async function withdrawUsdcToWallet(

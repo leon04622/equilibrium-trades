@@ -575,7 +575,6 @@ export default function Trading({ visible = true }: TradingProps) {
                 <div className="flex-1 relative" style={{ minHeight: "calc(100dvh - 14rem)" }}>
                   {chartEngine === "hyperliquid" ? (
                     <PatternChart 
-                      key={`lc-${coin}-${chartInterval}`}
                       symbol={coin} 
                       interval={chartInterval}
                       currentPrice={price}
@@ -611,7 +610,6 @@ export default function Trading({ visible = true }: TradingProps) {
             <div className="hidden md:block flex-1 min-w-0 relative">
               {chartEngine === "hyperliquid" ? (
                 <PatternChart 
-                  key={`lc-${coin}-${chartInterval}`}
                   symbol={coin} 
                   interval={chartInterval}
                   currentPrice={price}
