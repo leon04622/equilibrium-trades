@@ -8,7 +8,13 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import type {
+  IChartApi,
+  ISeriesApi,
+  MouseEventParams,
+  Time,
+} from "lightweight-charts";
+import { lightweightTimeToSeconds } from "@/lib/chart-time";
 import { Button } from "@/components/ui/button";
 import {
   MousePointer2,
@@ -69,8 +75,6 @@ type ChartDrawingContextValue = {
   setDrawings: React.Dispatch<React.SetStateAction<ChartDrawing[]>>;
   setDraftPoints: React.Dispatch<React.SetStateAction<ChartDrawingPoint[]>>;
   guideText: string | null;
-  handlePaneClick: (e: React.MouseEvent) => void;
-  handlePaneDoubleClick: (e: React.MouseEvent) => void;
   svgElements: ReactNode;
 };
 
@@ -160,26 +164,6 @@ export function ChartDrawingProvider({
     repaint();
   }, [layoutTick, repaint]);
 
-  const pointerToPoint = useCallback(
-    (clientX: number, clientY: number): ChartDrawingPoint | null => {
-      const pane = paneRef.current;
-      const chart = chartRef.current;
-      const series = seriesRef.current;
-      if (!pane || !chart || !series) return null;
-      const rect = pane.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      const time = chart.timeScale().coordinateToTime(x);
-      const price = series.coordinateToPrice(y);
-      if (time == null || price == null) return null;
-      const t =
-        typeof time === "number" ? time : parseInt(String(time), 10);
-      if (!Number.isFinite(t)) return null;
-      return { time: t, price };
-    },
-    [chartRef, seriesRef, paneRef],
-  );
-
   const commitDrawing = useCallback(
     (type: ChartDrawingType, points: ChartDrawingPoint[], label?: string) => {
       if (points.length === 0) return;
@@ -197,32 +181,38 @@ export function ChartDrawingProvider({
     [],
   );
 
-  const handlePaneClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (!enabled || tool === "select") return;
-      const pt = pointerToPoint(e.clientX, e.clientY);
-      if (!pt) return;
-
+  const applyChartPoint = useCallback(
+    (pt: ChartDrawingPoint, px: number, py: number) => {
       if (tool === "erase") {
-        const pane = paneRef.current;
         const chart = chartRef.current;
         const series = seriesRef.current;
-        if (!pane || !chart || !series) return;
-        const rect = pane.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
+        if (!chart || !series) return;
         const hit = 12;
 
         for (const d of [...drawings].reverse()) {
           const pixels = d.points
             .map((p) => pointToPixel(chart, series, p))
             .filter(Boolean) as { x: number; y: number }[];
-          if (pixels.length < 2) continue;
+          if (pixels.length < 2 && d.type !== "hline") continue;
+
           let near = false;
-          for (let i = 0; i < pixels.length - 1; i++) {
-            if (distToSegment(px, py, pixels[i].x, pixels[i].y, pixels[i + 1].x, pixels[i + 1].y) < hit) {
-              near = true;
-              break;
+          if (d.type === "hline" && pixels[0]) {
+            near = Math.abs(py - pixels[0].y) < hit;
+          } else {
+            for (let i = 0; i < pixels.length - 1; i++) {
+              if (
+                distToSegment(
+                  px,
+                  py,
+                  pixels[i].x,
+                  pixels[i].y,
+                  pixels[i + 1].x,
+                  pixels[i + 1].y,
+                ) < hit
+              ) {
+                near = true;
+                break;
+              }
             }
           }
           if (d.type === "rect" && pixels.length >= 2) {
@@ -231,7 +221,12 @@ export function ChartDrawingProvider({
             const right = Math.max(a.x, b.x);
             const top = Math.min(a.y, b.y);
             const bottom = Math.max(a.y, b.y);
-            if (px >= left - hit && px <= right + hit && py >= top - hit && py <= bottom + hit) {
+            if (
+              px >= left - hit &&
+              px <= right + hit &&
+              py >= top - hit &&
+              py <= bottom + hit
+            ) {
               near = true;
             }
           }
@@ -280,20 +275,87 @@ export function ChartDrawingProvider({
           return;
         }
         commitDrawing("bull_flag", next.slice(0, 4), "Bull Flag");
-        return;
       }
     },
-    [enabled, tool, pointerToPoint, draftPoints, commitDrawing, drawings, chartRef, seriesRef, paneRef],
+    [tool, draftPoints, commitDrawing, drawings, chartRef, seriesRef],
   );
 
-  const handlePaneDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
+  const onChartClick = useCallback(
+    (param: MouseEventParams<Time>) => {
+      if (!enabled || tool === "select") return;
+      if (!param.point || param.time == null) return;
+
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series) return;
+
+      const timeSec = lightweightTimeToSeconds(param.time);
+      const price = series.coordinateToPrice(param.point.y);
+      if (timeSec == null || price == null) return;
+
+      applyChartPoint(
+        { time: timeSec, price },
+        param.point.x,
+        param.point.y,
+      );
+    },
+    [enabled, tool, chartRef, seriesRef, applyChartPoint],
+  );
+
+  const onChartDblClick = useCallback(
+    (param: MouseEventParams<Time>) => {
       if (!enabled || tool !== "polyline" || draftPoints.length < 2) return;
-      e.preventDefault();
+      if (!param.point) return;
       commitDrawing("polyline", draftPoints, "Pattern");
     },
     [enabled, tool, draftPoints, commitDrawing],
   );
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !enabled) return;
+    chart.subscribeClick(onChartClick);
+    chart.subscribeDblClick(onChartDblClick);
+    return () => {
+      try {
+        chart.unsubscribeClick(onChartClick);
+        chart.unsubscribeDblClick(onChartDblClick);
+      } catch {
+        /* disposed */
+      }
+    };
+  }, [chartRef, enabled, onChartClick, onChartDblClick]);
+
+  /** TP/SL drag handles sit above the canvas; disable them while drawing. */
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane || !enabled) return;
+    const bundles = pane.querySelectorAll<SVGElement>("[data-tpsl-kind]");
+    const pe = tool === "select" ? "auto" : "none";
+    bundles.forEach((node) => {
+      node.style.pointerEvents = pe;
+    });
+  }, [paneRef, enabled, tool, layoutTick]);
+
+  /** While a draw tool is active, disable chart pan/zoom so clicks land as drawings. */
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !enabled) return;
+    const pan = tool === "select";
+    chart.applyOptions({
+      handleScroll: {
+        mouseWheel: pan,
+        pressedMouseMove: pan,
+        horzTouchDrag: pan,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        mouseWheel: pan,
+        pinch: pan,
+        axisPressedMouseMove: pan,
+      },
+    });
+  }, [chartRef, enabled, tool]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -484,19 +546,9 @@ export function ChartDrawingProvider({
       setDrawings,
       setDraftPoints,
       guideText,
-      handlePaneClick,
-      handlePaneDoubleClick,
       svgElements,
     }),
-    [
-      enabled,
-      tool,
-      drawings,
-      guideText,
-      handlePaneClick,
-      handlePaneDoubleClick,
-      svgElements,
-    ],
+    [enabled, tool, drawings, guideText, svgElements],
   );
 
   return (
@@ -595,19 +647,16 @@ export function ChartDrawingLeftToolbar() {
 }
 
 export function ChartDrawingCanvas() {
-  const { enabled, tool, handlePaneClick, handlePaneDoubleClick, svgElements } =
-    useChartDrawingCtx();
+  const { enabled, tool, svgElements } = useChartDrawingCtx();
 
   if (!enabled) return null;
 
   return (
     <svg
       className={cn(
-        "absolute inset-0 z-[22] overflow-visible",
-        tool === "select" ? "pointer-events-none" : "pointer-events-auto cursor-crosshair",
+        "absolute inset-0 z-[22] overflow-visible pointer-events-none",
+        tool !== "select" && "cursor-crosshair",
       )}
-      onClick={handlePaneClick}
-      onDoubleClick={handlePaneDoubleClick}
       aria-hidden
     >
       <g>{svgElements}</g>

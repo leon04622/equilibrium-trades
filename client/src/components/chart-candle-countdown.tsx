@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type RefObject } from "react";
-import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import { cn } from "@/lib/utils";
+import { CHART_PRICE_SCALE_GUTTER } from "@/lib/chart-time";
 import {
   formatCandleCountdown,
-  intervalShortLabel,
-  intervalToSeconds,
   msUntilCandleClose,
 } from "@/lib/candle-countdown";
 
@@ -30,6 +29,10 @@ function parseNum(v: number | string): number {
   return typeof v === "number" ? v : parseFloat(String(v));
 }
 
+/**
+ * TradingView "Countdown to bar close" — small label on the right price scale,
+ * vertically aligned with the forming candle's close.
+ */
 export function ChartCandleCountdown({
   interval,
   candles,
@@ -52,68 +55,58 @@ export function ChartCandleCountdown({
     ? msUntilCandleClose(lastCandle.t, interval, now)
     : 0;
 
-  const barPosition = useMemo(() => {
+  const scaleLabel = useMemo(() => {
     void layoutTick;
     if (!lastCandle) return null;
     const chart = chartRef.current;
     const series = seriesRef.current;
-    if (!chart || !series) return null;
+    const pane = paneRef.current;
+    if (!chart || !series || !pane) return null;
 
-    const time = (lastCandle.t / 1000) as Time;
-    const x = chart.timeScale().timeToCoordinate(time);
-    const high = parseNum(lastCandle.h);
-    const y = series.priceToCoordinate(high);
-    if (x == null || y == null) return null;
-    return { x, y };
-  }, [lastCandle, chartRef, seriesRef, layoutTick]);
+    const close = parseNum(lastCandle.c);
+    const y = series.priceToCoordinate(close);
+    if (y == null) return null;
 
-  const progress =
-    lastCandle && intervalToSeconds(interval) > 0
-      ? 1 - msLeft / (intervalToSeconds(interval) * 1000)
-      : 0;
+    let gutter = CHART_PRICE_SCALE_GUTTER;
+    try {
+      const w = chart.priceScale("right").width();
+      if (typeof w === "number" && w > 40) gutter = w;
+    } catch {
+      /* use default */
+    }
 
-  if (!lastCandle) return null;
+    const paneW = pane.clientWidth;
+    return {
+      top: y,
+      left: Math.max(0, paneW - gutter + 2),
+      width: Math.max(48, gutter - 4),
+    };
+  }, [lastCandle, chartRef, seriesRef, paneRef, layoutTick]);
+
+  if (!lastCandle || !scaleLabel) return null;
 
   return (
-    <>
-      {/* TradingView-style clock — top center of chart */}
-      <div
+    <div
+      className={cn(
+        "absolute z-[30] pointer-events-none flex items-center justify-end",
+        className,
+      )}
+      style={{
+        top: scaleLabel.top,
+        left: scaleLabel.left,
+        width: scaleLabel.width,
+        transform: "translateY(-50%)",
+      }}
+      data-testid="candle-countdown-scale"
+    >
+      <span
         className={cn(
-          "absolute top-2 left-1/2 -translate-x-1/2 z-[35] pointer-events-none",
-          "flex items-center gap-2 rounded-md border border-[#363a45] bg-[#131722]/95 px-2.5 py-1 shadow-md",
-          className,
+          "inline-block px-1 py-px text-[11px] font-mono font-normal tabular-nums leading-none",
+          "text-[#787b86] bg-[#131722]/90",
         )}
-        data-testid="candle-countdown-clock"
       >
-        <span className="text-[10px] text-[#787b86] uppercase tracking-wide">
-          {intervalShortLabel(interval)}
-        </span>
-        <span className="text-sm font-mono font-semibold text-[#d1d4dc] tabular-nums">
-          {formatCandleCountdown(msLeft)}
-        </span>
-        <div className="w-16 h-1 rounded-full bg-[#2a2e39] overflow-hidden">
-          <div
-            className="h-full bg-[#2962ff] transition-[width] duration-1000 ease-linear"
-            style={{ width: `${Math.min(100, progress * 100)}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Label on the active (last) candle */}
-      {barPosition ? (
-        <div
-          className="absolute z-[34] pointer-events-none -translate-x-1/2"
-          style={{
-            left: barPosition.x,
-            top: Math.max(4, barPosition.y - 22),
-          }}
-          data-testid="candle-countdown-on-bar"
-        >
-          <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold tabular-nums bg-[#2962ff] text-white shadow">
-            {formatCandleCountdown(msLeft)}
-          </span>
-        </div>
-      ) : null}
-    </>
+        {formatCandleCountdown(msLeft)}
+      </span>
+    </div>
   );
 }
