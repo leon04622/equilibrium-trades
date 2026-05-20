@@ -20,6 +20,10 @@ export type PremiumFeature =
 
 const PAID_SUB_TIER_LABELS = new Set(["pro", "mentor", "mentoring", "elite"]);
 
+function isPaidTier(tier: SubscriptionStatus["tier"] | undefined): boolean {
+  return tier === "pro" || tier === "mentoring" || tier === "elite";
+}
+
 export function useSubscription() {
   const { address, isConnected } = useWallet();
   const userSync = useUserSync();
@@ -49,14 +53,9 @@ export function useSubscription() {
   const subNorm = String(sync?.subscription?.subTier ?? "")
     .trim()
     .toLowerCase();
-  const paidByMongoSubTier = PAID_SUB_TIER_LABELS.has(subNorm);
   const expRaw = sync?.subscription?.expiresAt;
   const expMs = expRaw ? new Date(expRaw).getTime() : NaN;
   const subscriptionExpOk = !Number.isFinite(expMs) || expMs > Date.now();
-
-  /** Backup if `tier`/`active` lag but CRM `subTier` already shows Pro/Mentor. */
-  const mongoSubTierUnlock =
-    subscriptionHydrated && paidByMongoSubTier && subscriptionExpOk;
 
   const mentorLabel =
     subscription?.tier === "mentoring" ||
@@ -68,13 +67,13 @@ export function useSubscription() {
   const mentorResolved =
     subscriptionHydrated &&
     mentorLabel &&
-    (manualProUnlock || mongoSubTierUnlock || !!subscription?.active);
+    (manualProUnlock || (!!subscription?.active && subscriptionExpOk));
 
   const proResolved =
     subscriptionHydrated &&
     (manualProUnlock ||
-      mongoSubTierUnlock ||
       (!!subscription?.active &&
+        subscriptionExpOk &&
         (subscription.tier === "pro" ||
           subscription.tier === "mentoring" ||
           subscription.tier === "elite")));
@@ -133,8 +132,8 @@ export function useSubscription() {
     /** @deprecated use isMentoring */
     isElite: isMentoring,
     isFree,
-    /** True only when subscription tier is known and user has Pro/Mentor access (never true while `isPro === null`). */
-    isSubscribed: isPro === true,
+    /** True only when subscription tier is known, active, and not expired. */
+    isSubscribed: subscriptionHydrated && !!subscription?.active && subscriptionExpOk && isPaidTier(subscription?.tier),
     tier:
       masterBypass
         ? "mentoring"

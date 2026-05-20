@@ -505,10 +505,8 @@ export async function fetchMongoCrmSubscriptionSnapshot(walletAddress: string): 
     doc.subTier != null && String(doc.subTier).trim() !== ""
       ? String(doc.subTier)
       : crmDisplayTier(tierRaw);
-  /** CRM `subTier` + inferred tier are authoritative: do not mark paid users inactive because a boolean lagged. */
-  const paidByTier = tierRaw !== "free" || isPaidSubTierLabel(subTier);
   let active = Boolean(doc.subscriptionActive);
-  if (paidByTier && expOk) active = true;
+  if (!expOk) active = false;
   return {
     subscriptionTier: tierRaw,
     subscriptionActive: active,

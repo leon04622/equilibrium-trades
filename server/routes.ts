@@ -367,8 +367,7 @@ function mongoSubscriptionSnapshotToPayload(
     if (subNorm === "pro") tier = "pro";
     else tier = "mentoring";
   }
-  const active =
-    tier !== "free" && expOk && (mongo.subscriptionActive || crmLabelPaid);
+  const active = tier !== "free" && expOk && mongo.subscriptionActive;
   return {
     tier,
     active,
@@ -383,14 +382,23 @@ function tierRank(t: WalletSubscriptionPayload["tier"]): number {
   return 1;
 }
 
+function isPaidTier(tier: WalletSubscriptionPayload["tier"]): boolean {
+  return tier === "pro" || tier === "mentoring" || tier === "elite";
+}
+
+function isPayloadEntitled(payload: WalletSubscriptionPayload | null | undefined): payload is WalletSubscriptionPayload {
+  if (!payload) return false;
+  if (!payload.active || !isPaidTier(payload.tier)) return false;
+  if (!payload.expiresAt) return true;
+  const expMs = new Date(payload.expiresAt).getTime();
+  return !Number.isNaN(expMs) && expMs > Date.now();
+}
+
 /** Prefer highest paid tier among Stripe, Postgres, and Mongo CRM (admin grants must not be ignored). */
 function pickBestPaidSubscriptionPayload(
   candidates: (WalletSubscriptionPayload | null | undefined)[],
 ): WalletSubscriptionPayload | null {
-  const paid = candidates.filter(
-    (c): c is WalletSubscriptionPayload =>
-      !!c && c.active && tierRank(c.tier) >= 2,
-  );
+  const paid = candidates.filter(isPayloadEntitled);
   if (paid.length === 0) return null;
   paid.sort((a, b) => tierRank(b.tier) - tierRank(a.tier));
   return paid[0];
