@@ -264,6 +264,8 @@ export async function depositUsdcToHyperliquid(
   },
 ): Promise<{ success: boolean; txHash?: string; error?: string; messageHash?: string }> {
   const wallet = (await signer.getAddress()).toLowerCase();
+  const resume = options?.resumeFrom;
+  const hasResumeState = Boolean(resume?.cctpMessageHex && resume?.messageHash);
   let cfg: CctpDepositConfig;
   try {
     cfg = options?.depositConfig ?? (await fetchCctpDepositConfig());
@@ -273,7 +275,7 @@ export async function depositUsdcToHyperliquid(
     return { success: false, error: msg };
   }
 
-  if (!Number.isFinite(amount) || amount < cfg.minDepositUsdc) {
+  if (!hasResumeState && (!Number.isFinite(amount) || amount < cfg.minDepositUsdc)) {
     return { success: false, error: `Minimum deposit is ${cfg.minDepositUsdc} USDC.` };
   }
 
@@ -284,7 +286,6 @@ export async function depositUsdcToHyperliquid(
     return { success: false, error: "Invalid HyperCore recipient address." };
   }
 
-  const resume = options?.resumeFrom;
   let messageHex: string | null = resume?.cctpMessageHex ?? null;
   let messageHash: string | null = resume?.messageHash ?? null;
   let attestationHex: string | null = resume?.attestationHex ?? null;

@@ -32,6 +32,7 @@ import { queryClient } from "@/lib/queryClient";
 import { StatePanel } from "@/components/state-panel";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 import { cn } from "@/lib/utils";
+import { useUserSync } from "@/context/AuthContext";
 
 type FundingTab = "deposit" | "withdraw";
 
@@ -48,6 +49,7 @@ export default function Funding() {
   const { toast } = useToast();
   const { address, signer, provider, chainId, connect, switchToArbitrum } = useWallet();
   const { connected, withdrawable, refreshAccount } = useTrading();
+  const { data: userSync } = useUserSync();
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawDest, setWithdrawDest] = useState("");
@@ -68,6 +70,13 @@ export default function Funding() {
 
   const withdrawablePerp = withdrawable || 0;
   const isOnArbitrum = chainId === 42161;
+  const cctpResumeStage = userSync?.cctpBridgeProgress?.stage;
+  const hasResumableDeposit =
+    !!userSync?.cctpBridgeProgress &&
+    cctpResumeStage !== "done" &&
+    cctpResumeStage !== "completed" &&
+    !String(cctpResumeStage).startsWith("failed") &&
+    !String(cctpResumeStage).startsWith("error");
 
   const setTab = (tab: FundingTab) => {
     const next = new URLSearchParams(searchParams);
@@ -302,6 +311,7 @@ export default function Funding() {
       const result = await depositUsdcToHyperliquid(activeSigner, amount, {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
+        resumeFrom: hasResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
         onStep: (step: CctpDepositStep, detail?: string) => {
           if (step === "approve") setDepositStep("Sign USDC authorization for Circle CCTP extension...");
           else if (step === "burn") {
@@ -478,6 +488,35 @@ export default function Funding() {
                   </div>
                 </div>
               </div>
+
+              {hasResumableDeposit && userSync?.cctpBridgeProgress ? (
+                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3 text-sm">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="space-y-1">
+                    <p>
+                      <strong className="text-foreground">Resume available:</strong> saved bridge step{" "}
+                      <span className="font-mono">{userSync.cctpBridgeProgress.stage}</span>
+                      {userSync.cctpBridgeProgress.txHash ? (
+                        <>
+                          {" "}
+                          · tx{" "}
+                          <a
+                            className="text-primary underline"
+                            href={`https://arbiscan.io/tx/${userSync.cctpBridgeProgress.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {userSync.cctpBridgeProgress.txHash.slice(0, 10)}...
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Press Deposit USDC to continue the saved deposit without leaving the platform.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
 
               {depositCfgLoadError && (
                 <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">

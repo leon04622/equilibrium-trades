@@ -1320,6 +1320,19 @@ export async function transferUsdcBetweenAccounts(
   toPerp: boolean
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    try {
+      const nw = await signer.provider?.getNetwork();
+      if (nw != null && Number(nw.chainId) !== 42161) {
+        return {
+          success: false,
+          error:
+            "Switch to Arbitrum One (chain 42161) in your wallet before moving funds between Spot and Perp.",
+        };
+      }
+    } catch {
+      /* ignore network read failures */
+    }
+
     await syncServerTime();
     const nonce = getUniqueNonce();
     const signatureChainId = "0xa4b1"; // Arbitrum One
@@ -1559,6 +1572,19 @@ export async function withdrawUsdcToWallet(
   destination: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    try {
+      const nw = await signer.provider?.getNetwork();
+      if (nw != null && Number(nw.chainId) !== 42161) {
+        return {
+          success: false,
+          error:
+            "Switch to Arbitrum One (chain 42161) in your wallet before submitting a withdrawal.",
+        };
+      }
+    } catch {
+      /* ignore network read failures */
+    }
+
     await syncServerTime();
     const nonce = getUniqueNonce();
     const signatureChainId = "0xa4b1"; // Arbitrum One

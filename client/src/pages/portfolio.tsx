@@ -232,23 +232,14 @@ export default function Portfolio() {
       if (!prep.ok) {
         setTransferring(false);
         setTransferStep("");
-        if (prep.userRejected) {
-          const msg = prep.error || "Setup was cancelled.";
-          setTransferResult({ success: false, error: msg });
-          toast({
-            title: "Setup cancelled",
-            description: msg,
-            variant: "destructive",
-          });
-          return;
-        }
+        const msg = prep.error || "Unified account setup did not complete.";
+        setTransferResult({ success: false, error: msg });
         toast({
-          title: "Could not auto-apply unified account",
-          description:
-            (prep.error || "Hyperliquid did not confirm the setting change.") +
-            " You can still try the transfer, or adjust account mode on app.hyperliquid.xyz if it fails again.",
+          title: prep.userRejected ? "Setup cancelled" : "Unified account setup failed",
+          description: msg,
           variant: "destructive",
         });
+        return;
       }
     }
 
@@ -476,9 +467,17 @@ export default function Portfolio() {
     setDepositStep("Fetching Circle CCTP forward fee quote…");
 
     try {
+      const resumeStage = userSync?.cctpBridgeProgress?.stage;
+      const isResumableDeposit =
+        !!userSync?.cctpBridgeProgress &&
+        resumeStage !== "done" &&
+        resumeStage !== "completed" &&
+        !String(resumeStage).startsWith("failed") &&
+        !String(resumeStage).startsWith("error");
       const result = await depositUsdcToHyperliquid(activeSigner, amount, {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
+        resumeFrom: isResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
         onStep: (step: CctpDepositStep, detail?: string) => {
           if (step === "approve") setDepositStep("Sign USDC authorization for Circle CCTP extension…");
           else if (step === "burn") {
@@ -1154,7 +1153,7 @@ export default function Portfolio() {
                       </a>
                     </>
                   ) : null}
-                  . Progress syncs to your account on refresh.
+                  . Press Deposit USDC to resume from the saved bridge step.
                 </span>
               </div>
             )}
