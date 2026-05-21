@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { calcTpslPnlUsd, describeTpslPnlUsd } from "@/lib/tpsl-pnl";
 import { X, Pencil, ChevronUp, ChevronDown } from "lucide-react";
 
 interface BottomTradingPanelProps {
@@ -427,7 +428,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
           
           <div className="space-y-3">
             {/* Position summary */}
-            <div className="bg-muted/40 rounded-lg px-3 py-2 grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-muted/40 rounded-lg px-3 py-2 grid grid-cols-4 gap-2 text-xs">
               <div className="text-center">
                 <div className="text-muted-foreground mb-0.5">Coin</div>
                 <div className="font-medium">{tpslDialog.coin}</div>
@@ -437,6 +438,10 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
                 <div className={cn("font-medium capitalize", tpslDialog.side === "long" ? "text-bullish" : "text-bearish")}>
                   {tpslDialog.side}
                 </div>
+              </div>
+              <div className="text-center">
+                <div className="text-muted-foreground mb-0.5">Size</div>
+                <div className="font-mono font-medium">{formatSize(tpslDialog.size)}</div>
               </div>
               <div className="text-center">
                 <div className="text-muted-foreground mb-0.5">Entry</div>
@@ -476,11 +481,32 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
                 data-testid="input-tp-price"
               />
               {tpPrice && tpslDialog.entryPrice > 0 && (() => {
-                const pct = (parseFloat(tpPrice) - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100;
+                const trigger = parseFloat(tpPrice);
+                if (!Number.isFinite(trigger)) return null;
+                const pct = (trigger - tpslDialog.entryPrice) / tpslDialog.entryPrice * 100;
                 const isValid = tpslDialog.side === "long" ? pct > 0 : pct < 0;
+                const pnl = calcTpslPnlUsd(
+                  tpslDialog.side,
+                  tpslDialog.size,
+                  tpslDialog.entryPrice,
+                  trigger,
+                );
                 return (
-                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-bullish" : "text-destructive"}`}>
-                    {pct.toFixed(2)}% from entry{!isValid && " ⚠ must be " + (tpslDialog.side === "long" ? "above" : "below") + " entry"}
+                  <div
+                    className={cn(
+                      "text-[10px] font-mono pl-1 space-y-0.5",
+                      isValid ? "text-bullish" : "text-destructive",
+                    )}
+                  >
+                    <div>
+                      {pct > 0 ? "+" : ""}
+                      {pct.toFixed(2)}% from entry
+                      {!isValid &&
+                        ` ⚠ must be ${tpslDialog.side === "long" ? "above" : "below"} entry`}
+                    </div>
+                    <div className={pnl >= 0 ? "text-bullish" : "text-bearish"}>
+                      {describeTpslPnlUsd(pnl, "tp")}
+                    </div>
                   </div>
                 );
               })()}
@@ -527,6 +553,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
               />
               {slPrice && tpslDialog.markPrice > 0 && (() => {
                 const sl = parseFloat(slPrice);
+                if (!Number.isFinite(sl)) return null;
                 const mark = tpslDialog.markPrice;
                 const entry = tpslDialog.entryPrice;
                 const isLong = tpslDialog.side === "long";
@@ -534,14 +561,23 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
                 const pctFromEntry = entry > 0 ? ((sl - entry) / entry * 100) : 0;
                 const atBreakeven = entry > 0 && Math.abs(sl - entry) < 0.01 * entry;
                 const lockingProfit = isLong ? (sl > entry && sl < mark) : (sl < entry && sl > mark);
-                const label = atBreakeven
+                const pnl = calcTpslPnlUsd(tpslDialog.side, tpslDialog.size, entry, sl);
+                const pctLabel = atBreakeven
                   ? "breakeven stop ✓"
                   : lockingProfit
                     ? `locking ${Math.abs(pctFromEntry).toFixed(2)}% profit ✓`
                     : `${pctFromEntry > 0 ? "+" : ""}${pctFromEntry.toFixed(2)}% from entry`;
                 return (
-                  <div className={`text-[10px] font-mono pl-1 ${isValid ? "text-muted-foreground" : "text-destructive"}`}>
-                    {isValid ? label : `⚠ must be ${isLong ? "below" : "above"} current price ($${formatPrice(mark)})`}
+                  <div
+                    className={cn(
+                      "text-[10px] font-mono pl-1 space-y-0.5",
+                      isValid ? "text-muted-foreground" : "text-destructive",
+                    )}
+                  >
+                    <div>{isValid ? pctLabel : `⚠ must be ${isLong ? "below" : "above"} current price ($${formatPrice(mark)})`}</div>
+                    <div className={pnl >= 0 ? "text-bullish" : "text-bearish"}>
+                      {describeTpslPnlUsd(pnl, "sl")}
+                    </div>
                   </div>
                 );
               })()}

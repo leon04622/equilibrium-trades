@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { calcTpslPnlUsd, describeTpslPnlUsd, formatTpslPnlUsd } from "@/lib/tpsl-pnl";
 import { TrendingUp, TrendingDown, X, Check, Plus, Minus } from "lucide-react";
 
 interface ActivePositionPanelProps {
@@ -26,12 +27,7 @@ function fmtSize(s: number): string {
   return s.toFixed(3);
 }
 
-function fmtPnl(pnl: number): string {
-  const abs = Math.abs(pnl);
-  const sign = pnl >= 0 ? "+" : "-";
-  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(2)}K`;
-  return `${sign}$${abs.toFixed(2)}`;
-}
+const fmtPnl = formatTpslPnlUsd;
 
 export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelProps) {
   const { positions, openOrders, placeTPSL, cancelHLOrder } = useTrading();
@@ -288,7 +284,8 @@ function OrderLevelRow({
   onQuickSet, onStartEdit, onConfirm, onCancelEdit, onCancelOrder,
   isSubmitting
 }: OrderLevelRowProps) {
-  const calcPnl = (p: number) => isLong ? size * (p - entry) : size * (entry - p);
+  const calcPnl = (p: number) =>
+    calcTpslPnlUsd(isLong ? "long" : "short", size, entry, p);
   const pnlAtPrice = price ? calcPnl(price) : null;
   const pnlAtInput = inputValue && !isNaN(parseFloat(inputValue)) ? calcPnl(parseFloat(inputValue)) : null;
 
@@ -406,7 +403,7 @@ function OrderLevelRow({
           "text-[10px] font-mono",
           pnlAtInput >= 0 ? "text-bullish" : "text-bearish"
         )}>
-          Expected: {fmtPnl(pnlAtInput)}
+          {describeTpslPnlUsd(pnlAtInput, color === "green" ? "tp" : "sl")}
         </p>
       )}
     </div>

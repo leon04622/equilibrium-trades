@@ -6,77 +6,78 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw } from "lucide-react";
-import {
-  buildTradingViewSignInReturnUrl,
-  buildTradingViewSignInUrl,
-  markTradingViewSignInStarted,
-} from "@/lib/tradingview-chart-url";
+import { RefreshCw } from "lucide-react";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRefreshChart: () => void;
+  onSwitchToAiChart?: () => void;
 };
 
 /**
- * TradingView blocks iframe login and often opens chart in a new window after OAuth.
- * We never use window.open — only an optional same-tab link the user taps explicitly.
+ * Free TradingView embed cannot attach a TV account to Equilibrium.
+ * We do not link to tradingview.com — that always leaves the platform (market summary, chart, etc.).
  */
-export function TradingViewConnectHelp({ open, onOpenChange, onRefreshChart }: Props) {
-  const signInHref = buildTradingViewSignInUrl(buildTradingViewSignInReturnUrl());
-
-  const handleRefreshOnly = () => {
-    onRefreshChart();
-    onOpenChange(false);
-  };
-
-  const handleSameTabSignIn = () => {
-    markTradingViewSignInStarted();
-    onOpenChange(false);
-  };
+export function TradingViewConnectHelp({ open, onOpenChange, onRefreshChart, onSwitchToAiChart }: Props) {
+  const close = () => onOpenChange(false);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>TradingView account</DialogTitle>
+          <DialogTitle>TradingView chart on Equilibrium</DialogTitle>
           <DialogDescription className="text-sm leading-relaxed">
-            The chart on Equilibrium is TradingView&apos;s free embed. It cannot log you in inside the page —
-            and Google/social sign-in often opens a separate TradingView window.
+            This is TradingView&apos;s <strong className="text-foreground">free embedded chart</strong>. It
+            stays on this page and works without a TradingView account.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-sm text-muted-foreground">
+        <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <p>
-            <strong className="text-foreground">Easiest:</strong> use the chart without linking an account.
-            Tap <strong className="text-foreground">Refresh chart</strong> anytime.
+            <strong className="text-foreground">There is no account login on Equilibrium.</strong> TradingView
+            does not allow third-party sites to sign you in or sync your TV profile in this embed. Any link
+            inside the chart (logo, menus) opens <strong className="text-foreground">tradingview.com</strong>{" "}
+            — that is expected, but it is not part of Equilibrium trading.
           </p>
           <p>
-            <strong className="text-foreground">To link an account:</strong>
+            <strong className="text-foreground">What works here:</strong> live prices, timeframes, drawing tools,
+            and indicators on the embedded chart. Use <strong className="text-foreground">Refresh chart</strong> if
+            the frame looks stale.
           </p>
-          <ol className="list-decimal list-inside space-y-1.5 pl-0.5">
-            <li>Tap &quot;Sign in on TradingView (this tab)&quot; below — not the chart logo inside the graph.</li>
-            <li>Sign in with email/password if possible (avoids extra pop-up windows).</li>
-            <li>When done, return to Equilibrium and tap Refresh chart.</li>
-          </ol>
+          <p>
+            <strong className="text-foreground">For full platform trading</strong> (orders, TP/SL, AI patterns),
+            switch to the <strong className="text-foreground">AI</strong> chart toggle above this panel.
+          </p>
         </div>
 
         <div className="flex flex-col gap-2 pt-2">
-          <Button type="button" className="w-full" onClick={handleRefreshOnly}>
+          <Button
+            type="button"
+            className="w-full"
+            onClick={() => {
+              onRefreshChart();
+              close();
+            }}
+          >
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh chart
           </Button>
-          <Button variant="outline" className="w-full" asChild>
-            <a
-              href={signInHref}
-              target="_self"
-              rel="noopener noreferrer"
-              onClick={handleSameTabSignIn}
+          {onSwitchToAiChart && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                onSwitchToAiChart();
+                close();
+              }}
             >
-              <ExternalLink className="mr-2 h-4 w-4" />
-              Sign in on TradingView (this tab)
-            </a>
+              Switch to AI chart
+            </Button>
+          )}
+          <Button type="button" variant="ghost" className="w-full" onClick={close}>
+            Close
           </Button>
         </div>
       </DialogContent>

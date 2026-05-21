@@ -83,6 +83,7 @@ interface TradingViewChartProps {
   currentPrice?: number;
   hideVolume?: boolean;
   onUnavailable?: () => void;
+  onSwitchToAiChart?: () => void;
 }
 
 function TradingViewChartComponent({
@@ -92,6 +93,7 @@ function TradingViewChartComponent({
   currentPrice: _currentPrice = 0,
   hideVolume = false,
   onUnavailable,
+  onSwitchToAiChart,
 }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -268,7 +270,12 @@ function TradingViewChartComponent({
 
   return (
     <div className={`tradingview-widget-container relative flex flex-col min-h-0 ${className}`}>
-      <TradingViewAccountBar symbol={symbol} interval={interval} onChartRefresh={refreshEmbed} />
+      <TradingViewAccountBar
+        symbol={symbol}
+        interval={interval}
+        onChartRefresh={refreshEmbed}
+        onSwitchToAiChart={onSwitchToAiChart}
+      />
       <div
         ref={containerRef}
         style={{ height: "100%", width: "100%" }}

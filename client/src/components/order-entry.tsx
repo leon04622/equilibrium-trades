@@ -15,6 +15,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useTradeHandshake } from "@/components/trade-handshake-context";
 import { saveTradeToJournal } from "@/lib/TradeExecution";
+import { calcTpslPnlUsd, describeTpslPnlUsd } from "@/lib/tpsl-pnl";
 import type { TradeJournalPatternStatus } from "@shared/schema";
 
 export type OrderSubmitPayload = {
@@ -52,6 +53,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
   const [leverage, setLeverage_] = useState(10);
   const [maxLev, setMaxLev] = useState(50);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [previewSide, setPreviewSide] = useState<"long" | "short">("long");
   const isSpot = isSpotCoin(coin);
 
   const { balance, refreshAccount, placeTPSL } = useTrading();
@@ -389,32 +391,56 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       )}
 
       {/* TP / SL */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <span className="text-[11px] text-bullish font-medium">Take Profit</span>
-          <Input
-            type="number"
-            min="0"
-            placeholder={fmt(currentPrice * 1.05)}
-            value={takeProfit}
-            onChange={e => setTakeProfit(e.target.value)}
-            className="h-9 font-mono text-right text-bullish placeholder:text-muted-foreground"
-            data-testid="input-take-profit"
-          />
+      {!isSpot && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <span className="text-[11px] text-bullish font-medium">Take Profit</span>
+            <Input
+              type="number"
+              min="0"
+              placeholder={fmt(currentPrice * 1.05)}
+              value={takeProfit}
+              onChange={e => setTakeProfit(e.target.value)}
+              className="h-9 font-mono text-right text-bullish placeholder:text-muted-foreground"
+              data-testid="input-take-profit"
+            />
+            {getSizeNum() > 0 && takeProfit && (() => {
+              const trigger = parseFloat(takeProfit);
+              if (!Number.isFinite(trigger)) return null;
+              const entry = getExecPrice();
+              const pnl = calcTpslPnlUsd(previewSide, getSizeNum(), entry, trigger);
+              return (
+                <p className={cn("text-[10px] font-mono", pnl >= 0 ? "text-bullish" : "text-bearish")}>
+                  {describeTpslPnlUsd(pnl, "tp")} ({previewSide})
+                </p>
+              );
+            })()}
+          </div>
+          <div className="space-y-1">
+            <span className="text-[11px] text-bearish font-medium">Stop Loss</span>
+            <Input
+              type="number"
+              min="0"
+              placeholder={fmt(currentPrice * 0.95)}
+              value={stopLoss}
+              onChange={e => setStopLoss(e.target.value)}
+              className="h-9 font-mono text-right text-bearish placeholder:text-muted-foreground"
+              data-testid="input-stop-loss"
+            />
+            {getSizeNum() > 0 && stopLoss && (() => {
+              const trigger = parseFloat(stopLoss);
+              if (!Number.isFinite(trigger)) return null;
+              const entry = getExecPrice();
+              const pnl = calcTpslPnlUsd(previewSide, getSizeNum(), entry, trigger);
+              return (
+                <p className={cn("text-[10px] font-mono", pnl >= 0 ? "text-bullish" : "text-bearish")}>
+                  {describeTpslPnlUsd(pnl, "sl")} ({previewSide})
+                </p>
+              );
+            })()}
+          </div>
         </div>
-        <div className="space-y-1">
-          <span className="text-[11px] text-bearish font-medium">Stop Loss</span>
-          <Input
-            type="number"
-            min="0"
-            placeholder={fmt(currentPrice * 0.95)}
-            value={stopLoss}
-            onChange={e => setStopLoss(e.target.value)}
-            className="h-9 font-mono text-right text-bearish placeholder:text-muted-foreground"
-            data-testid="input-stop-loss"
-          />
-        </div>
-      </div>
+      )}
 
       {/* Order summary */}
       {getSizeNum() > 0 && (
@@ -438,6 +464,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       <div className="grid grid-cols-2 gap-2 pt-1">
         <Button
           className="h-11 rounded-xl font-semibold bg-bullish hover:bg-bullish/90 text-white shadow-lg shadow-emerald-500/10"
+          onMouseEnter={() => setPreviewSide("long")}
+          onFocus={() => setPreviewSide("long")}
           onClick={() => handleSubmit(true)}
           disabled={isSubmitting}
           data-testid="button-buy-long"
@@ -446,6 +474,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
         </Button>
         <Button
           className="h-11 rounded-xl font-semibold bg-bearish hover:bg-bearish/90 text-white shadow-lg shadow-rose-500/10"
+          onMouseEnter={() => setPreviewSide("short")}
+          onFocus={() => setPreviewSide("short")}
           onClick={() => handleSubmit(false)}
           disabled={isSubmitting}
           data-testid="button-sell-short"

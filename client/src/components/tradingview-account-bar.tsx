@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { HelpCircle, RefreshCw } from "lucide-react";
+import { Info, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { TradingViewConnectHelp } from "@/components/tradingview-connect-help";
 import {
   consumeTradingViewSignInReturn,
-  consumeTradingViewSignInStartedReminder,
   persistTradingViewWorkspace,
 } from "@/lib/tradingview-chart-url";
 
@@ -13,17 +12,16 @@ type TradingViewAccountBarProps = {
   symbol: string;
   interval: string;
   onChartRefresh: () => void;
+  onSwitchToAiChart?: () => void;
   className?: string;
 };
 
-/**
- * Free TV embed cannot log in inside the chart. We never window.open TradingView —
- * optional same-tab sign-in is only via an explicit link in the help dialog.
- */
+/** Embedded TV chart — no outbound links; help dialog stays on Equilibrium. */
 export function TradingViewAccountBar({
   symbol,
   interval,
   onChartRefresh,
+  onSwitchToAiChart,
   className,
 }: TradingViewAccountBarProps) {
   const { toast } = useToast();
@@ -36,20 +34,10 @@ export function TradingViewAccountBar({
     handledReturnRef.current = true;
     onChartRefresh();
     toast({
-      title: "TradingView linked",
-      description: "Your chart was refreshed with your TradingView session.",
+      title: "Chart refreshed",
+      description: "You are back on Equilibrium. The TV embed cannot sync a TradingView website account.",
     });
   }, [onChartRefresh, toast]);
-
-  useEffect(() => {
-    if (!consumeTradingViewSignInStartedReminder()) return;
-    toast({
-      title: "Back on Equilibrium?",
-      description:
-        "If TradingView opened in another window, close it and tap Refresh chart. Do not use the logo inside the chart to sign in.",
-      duration: 12_000,
-    });
-  }, [toast]);
 
   const openHelp = () => {
     persistTradingViewWorkspace(symbol, interval);
@@ -66,8 +54,9 @@ export function TradingViewAccountBar({
         data-testid="tradingview-account-bar"
       >
         <p className="text-[10px] md:text-xs text-muted-foreground leading-snug max-w-xl">
-          <strong className="text-foreground font-medium">Chart stays on Equilibrium.</strong> No account
-          required. Optional TV login uses the help button — not a pop-up from the chart itself.
+          <strong className="text-foreground font-medium">Chart stays on Equilibrium.</strong> Embedded
+          TradingView — no account login here. Tap <strong className="text-foreground">About this chart</strong>{" "}
+          if you were sent to tradingview.com by mistake.
         </p>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           <Button
@@ -78,8 +67,8 @@ export function TradingViewAccountBar({
             onClick={openHelp}
             data-testid="button-tradingview-sign-in"
           >
-            <HelpCircle className="h-3 w-3 mr-1" />
-            TV account help
+            <Info className="h-3 w-3 mr-1" />
+            About this chart
           </Button>
           <Button
             type="button"
@@ -99,6 +88,7 @@ export function TradingViewAccountBar({
         open={helpOpen}
         onOpenChange={setHelpOpen}
         onRefreshChart={onChartRefresh}
+        onSwitchToAiChart={onSwitchToAiChart}
       />
     </>
   );

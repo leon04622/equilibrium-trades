@@ -185,16 +185,22 @@ export default function Trading({ visible = true }: TradingProps) {
     setShowAIChart(checked);
   };
 
+  const switchToAiChart = useCallback(() => {
+    setChartEngine("hyperliquid");
+    try {
+      localStorage.setItem(LS_CHART_ENGINE, "hyperliquid");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const handleTradingViewUnavailable = useCallback(() => {
-    setChartEngine((prev) => {
-      if (prev !== "tradingview") return prev;
-      return "hyperliquid";
-    });
+    switchToAiChart();
     toast({
       title: "Switched to AI chart",
       description: "TradingView was unavailable for this market or browser, so the native chart was opened instead.",
     });
-  }, [toast]);
+  }, [toast, switchToAiChart]);
 
   const { data: tickers = [], dataUpdatedAt, isFetching } = useQuery<any[]>({
     queryKey: ["/api/hyperliquid/tickers"],
@@ -498,7 +504,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {chartEngine === "tradingview" && (
               <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[280px] leading-tight shrink-0">
-                TV chart stays here — use <strong className="text-foreground">TV account help</strong> above the chart (not the logo inside the graph).
+                TV embed stays here — no TV account login. Avoid clicking links inside the chart (they open tradingview.com).
               </span>
             )}
 
@@ -620,6 +626,7 @@ export default function Trading({ visible = true }: TradingProps) {
                       interval={timeframe}
                       className="absolute inset-0"
                       onUnavailable={handleTradingViewUnavailable}
+                      onSwitchToAiChart={switchToAiChart}
                     />
                   )}
                 </div>
@@ -654,7 +661,8 @@ export default function Trading({ visible = true }: TradingProps) {
                   symbol={tradingViewSymbol}
                   interval={timeframe}
                   className="h-full"
-                      onUnavailable={handleTradingViewUnavailable}
+                  onUnavailable={handleTradingViewUnavailable}
+                  onSwitchToAiChart={switchToAiChart}
                 />
               )}
             </div>
