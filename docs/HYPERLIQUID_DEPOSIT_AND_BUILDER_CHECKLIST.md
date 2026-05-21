@@ -53,7 +53,7 @@ Builder fees are separate from deposits. They apply to routed orders only.
 Required builder:
 
 - Builder address: `0xad9be64fd7a35d99a138b87cb212baefbcdcf045`
-- Max fee approval used by Equilibrium: `0.0003`
+- Max fee approval used by Equilibrium: `0.03%` (HL percent string, not decimal `0.0003`)
 - Order wire fee `f`: `3` tenths of a basis point = `0.03%`
 
 Correct Hyperliquid behavior:

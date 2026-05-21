@@ -9,6 +9,22 @@ import {
   HL_REFERRAL_CODE as PLATFORM_REFERRAL_CODE,
   isBuilderFeeConfigured,
 } from "@/lib/hyperliquid-platform-config";
+
+function formatHlExchangeError(result: unknown): string {
+  if (result == null) return "Exchange returned an empty response.";
+  const r = result as {
+    status?: string;
+    response?: string | { data?: unknown; type?: string };
+    error?: string;
+  };
+  if (typeof r.response === "string" && r.response.trim()) return r.response.trim();
+  if (r.response && typeof r.response === "object" && r.response.data != null) {
+    const d = r.response.data;
+    return typeof d === "string" ? d : JSON.stringify(d);
+  }
+  if (r.error && String(r.error).trim()) return String(r.error).trim();
+  return JSON.stringify(result);
+}
 import { isUserRejectedWalletError } from "@/lib/wallet-errors";
 import { signTypedDataHyperliquid } from "@/lib/eip712-typed-data";
 import { fetchApexHlOnboardingSnapshot } from "@/lib/hyperliquid-onboarding";
@@ -257,9 +273,9 @@ export async function ensureHyperliquidTradingSession(
       }
       if (!localStorage.getItem(feeKey)) {
         const feeResult = await approveBuilderFee(signer);
-        if (feeResult === "ok") {
+        if (feeResult.status === "ok") {
           localStorage.setItem(feeKey, "1");
-        } else if (feeResult === "user_cancelled") {
+        } else if (feeResult.status === "user_cancelled") {
           if (opts?.requireBuilderFee) {
             return {
               success: false,
@@ -272,10 +288,12 @@ export async function ensureHyperliquidTradingSession(
           );
         } else {
           if (opts?.requireBuilderFee) {
+            const detail = feeResult.detail?.trim();
             return {
               success: false,
-              error:
-                "Could not complete builder fee approval (approveBuilderFee). Check your connection and try again.",
+              error: detail
+                ? `Builder fee approval failed: ${detail}`
+                : "Could not complete builder fee approval (approveBuilderFee). Check your connection and try again.",
             };
           }
           console.warn(
@@ -400,16 +418,19 @@ async function authorizeAgent(
   }
 }
 
+type HlWalletAuthResult = { status: HlWalletAuthStep; detail?: string };
+
 // Submit approveBuilderFee so the platform earns a fee on the user's trades
-async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthStep> {
+async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthResult> {
   if (!isBuilderFeeConfigured()) {
     console.warn("[Exchange] Builder address invalid — skipping builder fee approval");
-    return "failed";
+    return { status: "failed", detail: "Platform builder address is not configured." };
   }
 
   await syncServerTime();
   const nonce = getSyncedTimestamp();
   const signatureChainId = "0xa4b1"; // Arbitrum One
+  const builderChecksummed = getAddress(BUILDER_ADDRESS);
 
   const domain = {
     name: "HyperliquidSignTransaction",
@@ -427,16 +448,15 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthSte
     ],
   };
 
-  // maxFeeRate of "0.0003" = 0.03% = 3 basis points (the platform earns this from each trade)
   const message = {
     hyperliquidChain: "Mainnet",
-    builder: BUILDER_ADDRESS,
+    builder: builderChecksummed,
     maxFeeRate: HL_BUILDER_MAX_FEE_RATE,
     nonce,
   };
 
   try {
-    console.log("Requesting builder fee approval signature...");
+    console.log("Requesting builder fee approval signature...", { maxFeeRate: HL_BUILDER_MAX_FEE_RATE });
     const signature = await signTypedDataHyperliquid(
       signer,
       domain,
@@ -453,8 +473,8 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthSte
       type: "approveBuilderFee",
       signatureChainId,
       hyperliquidChain: "Mainnet",
-      builder: BUILDER_ADDRESS,
-      maxFeeRate: "0.0003",
+      builder: builderChecksummed,
+      maxFeeRate: HL_BUILDER_MAX_FEE_RATE,
       nonce,
     };
 
@@ -466,11 +486,13 @@ async function approveBuilderFee(signer: JsonRpcSigner): Promise<HlWalletAuthSte
 
     const result = await response.json();
     console.log("approveBuilderFee response:", result);
-    return result.status === "ok" ? "ok" : "failed";
+    if (result.status === "ok") return { status: "ok" };
+    return { status: "failed", detail: formatHlExchangeError(result) };
   } catch (error) {
     console.error("approveBuilderFee error:", error);
-    if (isUserRejectedWalletError(error)) return "user_cancelled";
-    return "failed";
+    if (isUserRejectedWalletError(error)) return { status: "user_cancelled" };
+    const msg = error instanceof Error ? error.message : String(error);
+    return { status: "failed", detail: msg };
   }
 }
 

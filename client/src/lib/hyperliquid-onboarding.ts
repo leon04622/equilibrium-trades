@@ -6,7 +6,7 @@ import { HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { getAddress } from "ethers";
 import {
   HL_BUILDER_ADDRESS,
-  HL_BUILDER_MAX_FEE_RATE,
+  hlMaxFeeRateAsDecimal,
   isBuilderFeeConfigured,
 } from "@/lib/hyperliquid-platform-config";
 
@@ -35,7 +35,7 @@ export async function fetchApexHlOnboardingSnapshot(
     const builder = getAddress(HL_BUILDER_ADDRESS) as `0x${string}`;
     const max = await info.maxBuilderFee({ user, builder });
     maxBuilderFeeApproved = typeof max === "number" && Number.isFinite(max) ? max : null;
-    const need = parseFloat(HL_BUILDER_MAX_FEE_RATE) || 0.0003;
+    const need = hlMaxFeeRateAsDecimal();
     builderFeeOk = maxBuilderFeeApproved != null && maxBuilderFeeApproved >= need * 0.95;
   }
 
