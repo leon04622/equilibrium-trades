@@ -216,7 +216,10 @@ function isLikelyMintReplayError(msg: string): boolean {
   return (
     (m.includes("nonce") && (m.includes("used") || m.includes("already"))) ||
     m.includes("already received") ||
-    m.includes("message already")
+    m.includes("message already") ||
+    m.includes("not attester") ||
+    m.includes("invalid signature") ||
+    m.includes("message hash already used")
   );
 }
 

@@ -23,6 +23,7 @@ import { useWallet } from "@/lib/wallet-context";
 import {
   CLIENT_CCTP_DEPOSIT_DEFAULTS,
   fetchHyperliquidDepositConfig,
+  isCctpPostBurnResumeEligible,
 } from "@/lib/cctp-deposit";
 import { ExternalDepositHelp } from "@/components/external-deposit-help";
 import { UnifiedBalanceCard } from "@/components/unified-balance-card";
@@ -87,13 +88,7 @@ export default function Funding() {
 
   const withdrawablePerp = withdrawable || 0;
   const isOnArbitrum = chainId === 42161;
-  const cctpResumeStage = userSync?.cctpBridgeProgress?.stage;
-  const hasResumableDeposit =
-    !!userSync?.cctpBridgeProgress &&
-    cctpResumeStage !== "done" &&
-    cctpResumeStage !== "completed" &&
-    !String(cctpResumeStage).startsWith("failed") &&
-    !String(cctpResumeStage).startsWith("error");
+  const hasResumableDeposit = isCctpPostBurnResumeEligible(userSync?.cctpBridgeProgress);
 
   const setTab = (tab: FundingTab) => {
     const next = new URLSearchParams(searchParams);

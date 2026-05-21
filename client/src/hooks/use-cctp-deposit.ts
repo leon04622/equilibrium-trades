@@ -11,8 +11,11 @@ import {
 } from "@/lib/hyperliquid-client";
 import {
   CLIENT_CCTP_DEPOSIT_DEFAULTS,
+  clearCctpBridgeProgress,
   fetchHyperliquidDepositConfig,
   humanizeCctpDepositError,
+  isCctpPostBurnResumeEligible,
+  isLikelyMintConsumedError,
 } from "@/lib/cctp-deposit";
 
 export function useCctpDeposit() {
@@ -35,14 +38,11 @@ export function useCctpDeposit() {
   const [preparing, setPreparing] = useState(false);
   const cctpAttestationCelebratedRef = useRef(false);
   const depositAbortRef = useRef<AbortController | null>(null);
+  const autoResumeAttemptedRef = useRef(false);
 
-  const cctpResumeStage = userSync?.cctpBridgeProgress?.stage;
-  const hasResumableDeposit =
-    !!userSync?.cctpBridgeProgress &&
-    cctpResumeStage !== "done" &&
-    cctpResumeStage !== "completed" &&
-    !String(cctpResumeStage).startsWith("failed") &&
-    !String(cctpResumeStage).startsWith("error");
+  const bridgeProgress = userSync?.cctpBridgeProgress ?? null;
+  const hasResumableDeposit = isCctpPostBurnResumeEligible(bridgeProgress);
+  const isResumeOnly = hasResumableDeposit;
 
   const prepareDeposit = useCallback(async () => {
     if (!address) return;
@@ -57,7 +57,12 @@ export function useCctpDeposit() {
         }),
       ]);
       const safeMax = Math.floor(bal.native * 100) / 100;
-      setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+      const resumeAmt = bridgeProgress?.amountUsdc;
+      if (hasResumableDeposit && resumeAmt != null && resumeAmt > 0) {
+        setDepositAmount(resumeAmt.toFixed(2));
+      } else {
+        setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+      }
       void refreshAccount({ silent: true });
     } catch (e: unknown) {
       setDepositCfg(CLIENT_CCTP_DEPOSIT_DEFAULTS);
@@ -66,7 +71,7 @@ export function useCctpDeposit() {
     } finally {
       setPreparing(false);
     }
-  }, [address, refreshWalletUsdc, refreshAccount]);
+  }, [address, bridgeProgress?.amountUsdc, hasResumableDeposit, refreshWalletUsdc, refreshAccount]);
 
   const resetDepositState = useCallback(() => {
     depositAbortRef.current?.abort();
@@ -75,7 +80,19 @@ export function useCctpDeposit() {
     setDepositStep("");
     setDepositAwaitingChain(false);
     cctpAttestationCelebratedRef.current = false;
+    autoResumeAttemptedRef.current = false;
   }, []);
+
+  const dismissStuckDeposit = useCallback(async () => {
+    if (!address) return;
+    await clearCctpBridgeProgress(address);
+    void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
+    resetDepositState();
+    toast({
+      title: "Deposit state cleared",
+      description: "You can start a new deposit. Your trading balance was not changed by this action.",
+    });
+  }, [address, resetDepositState, toast]);
 
   const cancelDeposit = useCallback(() => {
     depositAbortRef.current?.abort();
@@ -158,12 +175,12 @@ export function useCctpDeposit() {
     }
 
     const amount = parseFloat(depositAmount);
-    if (isNaN(amount) || amount <= 0) {
+    if (!isResumeOnly && (isNaN(amount) || amount <= 0)) {
       setDepositStep("");
       setDepositResult({ success: false, error: "Enter a valid amount greater than 0." });
       return;
     }
-    if (amount < cfg.minDepositUsdc) {
+    if (!isResumeOnly && amount < cfg.minDepositUsdc) {
       setDepositStep("");
       setDepositResult({
         success: false,
@@ -172,7 +189,7 @@ export function useCctpDeposit() {
       return;
     }
     const maxDeposit = walletUsdcArbitrum ?? 0;
-    if (amount > maxDeposit + 0.001) {
+    if (!isResumeOnly && amount > maxDeposit + 0.001) {
       setDepositStep("");
       setDepositResult({
         success: false,
@@ -187,13 +204,18 @@ export function useCctpDeposit() {
 
     setDepositing(true);
     setDepositAwaitingChain(false);
-    setDepositStep("Fetching Circle CCTP forward fee quote...");
+    setDepositStep(
+      isResumeOnly
+        ? "Finishing your deposit (no new Arbitrum sign)…"
+        : "Fetching Circle CCTP forward fee quote...",
+    );
 
     try {
-      const result = await depositUsdcToHyperliquid(activeSigner, amount, {
+      const depositAmountArg = isResumeOnly ? bridgeProgress?.amountUsdc ?? amount : amount;
+      const result = await depositUsdcToHyperliquid(activeSigner, depositAmountArg, {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
-        resumeFrom: hasResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
+        resumeFrom: hasResumableDeposit ? bridgeProgress : null,
         signal: abort.signal,
         onStep: (step: CctpDepositStep, detail?: string) => {
           if (step === "authorize" || step === "approve") {
@@ -236,29 +258,34 @@ export function useCctpDeposit() {
 
       setDepositAwaitingChain(false);
       setDepositStep("");
-      setDepositResult(
-        result.success
-          ? result
-          : { ...result, error: result.error ? humanizeCctpDepositError(result.error) : result.error },
-      );
 
-      if (result.success) {
+      let success = result.success;
+      let displayError = result.error ? humanizeCctpDepositError(result.error) : undefined;
+      if (!success && result.error && isLikelyMintConsumedError(result.error)) {
+        success = true;
+        displayError = undefined;
+      }
+      setDepositResult(success ? { success: true, txHash: result.txHash } : { ...result, error: displayError });
+
+      if (success) {
+        autoResumeAttemptedRef.current = false;
+        if (address) await clearCctpBridgeProgress(address);
         window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
         void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
-        if (!cctpAttestationCelebratedRef.current) {
-          toast({
-            title: "Deposit submitted",
-            description: `${amount} USDC should appear on your trading account shortly.`,
-          });
-        }
+        toast({
+          title: isResumeOnly ? "Deposit complete" : "Added to trading",
+          description: isResumeOnly
+            ? "USDC is on your Hyperliquid balance — no further wallet steps."
+            : `${depositAmountArg} USDC is on the way to your trading account.`,
+        });
         void refreshAccount({ silent: true });
         void refreshWalletUsdc({ silent: true });
         setTimeout(() => void refreshAccount({ silent: true }), 5_000);
         setTimeout(() => void refreshAccount({ silent: true }), 15_000);
       } else {
         toast({
-          title: "Deposit Failed",
-          description: result.error || "Deposit failed",
+          title: hasResumableDeposit ? "Still finishing deposit" : "Deposit needs attention",
+          description: displayError || "Deposit failed",
           variant: "destructive",
         });
       }
@@ -284,8 +311,9 @@ export function useCctpDeposit() {
     depositCfg,
     depositAmount,
     walletUsdcArbitrum,
+    bridgeProgress,
     hasResumableDeposit,
-    userSync?.cctpBridgeProgress,
+    isResumeOnly,
     refreshAccount,
     refreshWalletUsdc,
     toast,
@@ -303,8 +331,10 @@ export function useCctpDeposit() {
     preparing,
     walletUsdcArbitrum,
     hasResumableDeposit,
+    isResumeOnly,
     prepareDeposit,
     resetDepositState,
+    dismissStuckDeposit,
     cancelDeposit,
     runDeposit,
   };

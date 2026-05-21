@@ -13,6 +13,7 @@ import {
 } from "lightweight-charts";
 import { useTheme } from "@/lib/theme";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useWallet } from "@/lib/wallet-context";
 import { useTrading } from "@/lib/trading-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -211,6 +212,22 @@ function buildLiveSmmaReason(
   return "Live chart context is neutral: use the 21/200 SMMA and higher timeframe for direction.";
 }
 
+function normalizePatternCoinKey(value: string): string {
+  return value
+    .replace(/^@/, "")
+    .replace(/^BINANCE:/i, "")
+    .replace(/USDT$/i, "")
+    .replace(/-PERP$/i, "")
+    .trim()
+    .toUpperCase();
+}
+
+function patternScanAuthHeaders(wallet: string | null | undefined): HeadersInit {
+  if (!wallet?.trim()) return {};
+  const w = wallet.trim();
+  return { "x-wallet-address": w, Authorization: `Bearer ${w}` };
+}
+
 function selectBestSignal(
   signals: EducationalPatternSignal[] | undefined,
   coin: string,
@@ -218,7 +235,12 @@ function selectBestSignal(
 ): EducationalPatternSignal | null {
   if (!signals?.length) return null;
 
-  const matches = signals.filter((signal) => signal.coin === coin && signal.timeframe === interval);
+  const coinKey = normalizePatternCoinKey(coin);
+  const intervalKey = interval.trim();
+  const matches = signals.filter(
+    (signal) =>
+      normalizePatternCoinKey(signal.coin) === coinKey && signal.timeframe === intervalKey,
+  );
   if (matches.length === 0) return null;
 
   return [...matches].sort((a, b) => {
@@ -305,6 +327,7 @@ function PatternChartComponent({
   const [noDataRetryCounts, setNoDataRetryCounts] = useState<Record<string, number>>({});
 
   const { theme } = useTheme();
+  const { address } = useWallet();
   const { positions, openOrders } = useTrading();
   const queryClient = useQueryClient();
   const coin = symbol.replace("USDT", "").replace("BINANCE:", "");
@@ -427,17 +450,31 @@ function PatternChartComponent({
     refetchCandles,
   ]);
 
-  const { data: signals } = useQuery<EducationalPatternSignal[]>({
-    queryKey: ["/api/signals/patterns", coin, interval],
-    refetchInterval: 45_000,
-    enabled: patternScanEnabled,
+  const walletForPatterns = address?.trim() ?? "";
+  const {
+    data: signals,
+    isFetching: patternsFetching,
+    isError: patternsError,
+    error: patternsErrorDetail,
+    refetch: refetchPatterns,
+  } = useQuery<EducationalPatternSignal[]>({
+    queryKey: ["trade-journal-patterns", coin, interval, walletForPatterns],
+    refetchInterval: patternScanEnabled && walletForPatterns ? 45_000 : false,
+    enabled: patternScanEnabled && Boolean(walletForPatterns),
     queryFn: async () => {
       const u = new URL("/api/signals/patterns", window.location.origin);
       u.searchParams.set("coins", coin);
       u.searchParams.set("timeframes", interval);
       u.searchParams.set("nocache", "1");
-      const res = await fetch(u.toString(), { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load chart patterns");
+      const res = await fetch(u.toString(), {
+        credentials: "include",
+        headers: patternScanAuthHeaders(walletForPatterns),
+      });
+      if (!res.ok) {
+        const err = new Error("Failed to load chart patterns") as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
       return (await res.json()) as EducationalPatternSignal[];
     },
   });
@@ -968,6 +1005,12 @@ function PatternChartComponent({
   }, []);
 
   const isBullish = smaStatus?.isBullish ?? true;
+  const patternOverlayLeft = drawingEnabled ? "left-12" : "left-2";
+  const patternAuthStatus =
+    patternsErrorDetail && typeof patternsErrorDetail === "object" && "status" in patternsErrorDetail
+      ? (patternsErrorDetail as Error & { status?: number }).status
+      : undefined;
+  const patternsScanComplete = signals !== undefined && !patternsFetching;
 
   // ── Render ──
   return (
@@ -1143,13 +1186,14 @@ function PatternChartComponent({
           </span>
         </div>
 
-        {/* Pattern alert — top-left; independent of “AI Chart” drawing toggle */}
+        {/* Pattern readout — top-left on the price pane */}
         {patternScanEnabled && activeSignal ? (
           <Card
             className={cn(
-              "absolute top-2 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-primary/30 shadow-xl max-w-[min(92vw,280px)] z-30 pointer-events-auto",
-              drawingEnabled ? "left-12" : "left-2",
+              "absolute top-2 p-3 bg-[#1a2035]/95 backdrop-blur-sm border border-primary/30 shadow-xl max-w-[min(92vw,280px)] z-40 pointer-events-auto",
+              patternOverlayLeft,
             )}
+            data-testid="chart-pattern-insight"
           >
             {/* Header */}
             <div className="flex items-center gap-1.5 mb-2">
@@ -1210,8 +1254,68 @@ function PatternChartComponent({
               ) : null}
             </div>
           </Card>
+        ) : patternScanEnabled && patternsFetching && !activeSignal ? (
+          <Card
+            className={cn(
+              "absolute top-2 p-2.5 bg-[#1a2035]/95 backdrop-blur-sm border border-[#2a3249] shadow-lg max-w-[min(92vw,240px)] z-40 pointer-events-none",
+              patternOverlayLeft,
+            )}
+            data-testid="chart-pattern-scanning"
+          >
+            <p className="text-[10px] font-medium text-[#b2b5be]">Scanning patterns…</p>
+            <p className="text-[9px] text-[#6b7a99] mt-1">
+              {coin} · {interval}
+            </p>
+          </Card>
+        ) : patternScanEnabled && patternsError ? (
+          <Card
+            className={cn(
+              "absolute top-2 p-2.5 bg-[#1a2035]/95 backdrop-blur-sm border border-orange-700/40 shadow-lg max-w-[min(92vw,260px)] z-40 pointer-events-auto",
+              patternOverlayLeft,
+            )}
+            data-testid="chart-pattern-error"
+          >
+            <p className="text-[10px] font-semibold text-orange-300">
+              {patternAuthStatus === 403 ? "Pro required for AI patterns" : "Pattern scan unavailable"}
+            </p>
+            <p className="text-[9px] text-[#6b7a99] mt-1 leading-relaxed">
+              {patternAuthStatus === 401
+                ? "Connect your wallet to load pattern readouts."
+                : patternAuthStatus === 403
+                  ? "Upgrade to Pro to see forming pattern names on the chart."
+                  : "Could not reach the pattern scanner. Try again."}
+            </p>
+            {patternAuthStatus !== 403 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 text-[10px] border-[#2a3249] bg-[#1b2035] text-[#b2b5be]"
+                onClick={() => void refetchPatterns()}
+              >
+                Retry scan
+              </Button>
+            ) : null}
+          </Card>
+        ) : patternScanEnabled && patternsScanComplete && !activeSignal ? (
+          <Card
+            className={cn(
+              "absolute top-2 p-2.5 bg-[#1a2035]/90 backdrop-blur-sm border border-[#2a3249] shadow-lg max-w-[min(92vw,240px)] z-40 pointer-events-none",
+              patternOverlayLeft,
+            )}
+            data-testid="chart-pattern-none"
+          >
+            <p className="text-[10px] font-medium text-[#b2b5be]">No pattern detected</p>
+            <p className="text-[9px] text-[#6b7a99] mt-1">
+              {coin} · {interval} — geometry scan is clear for now.
+            </p>
+          </Card>
         ) : smaStatus ? (
-          <div className="absolute top-2 left-2 z-10 pointer-events-none max-w-[min(90vw,220px)]">
+          <div
+            className={cn(
+              "absolute top-2 z-30 pointer-events-none max-w-[min(90vw,220px)]",
+              patternOverlayLeft,
+            )}
+          >
             <div className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${isBullish ? "text-green-400" : "text-red-400"}`}
               style={{ background: "rgba(19,23,34,0.7)" }}>
               {isBullish ? "21 > 200 · Bullish bias" : "21 < 200 · Bearish bias"}

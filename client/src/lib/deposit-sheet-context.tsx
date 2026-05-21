@@ -2,6 +2,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -50,6 +52,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
   const { walletUsdcArbitrum, isLoadingWalletUsdc } = useTrading();
   const [open, setOpen] = useState(false);
   const deposit = useCctpDeposit();
+  const autoResumeRanRef = useRef(false);
 
   const { prepareDeposit, resetDepositState } = deposit;
 
@@ -58,10 +61,28 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
       navigate("/funding?tab=deposit");
       return;
     }
+    autoResumeRanRef.current = false;
     resetDepositState();
     setOpen(true);
     void prepareDeposit();
   }, [address, navigate, prepareDeposit, resetDepositState]);
+
+  useEffect(() => {
+    if (!open) {
+      autoResumeRanRef.current = false;
+      return;
+    }
+    if (
+      deposit.hasResumableDeposit &&
+      !deposit.depositing &&
+      !deposit.depositResult &&
+      !autoResumeRanRef.current
+    ) {
+      autoResumeRanRef.current = true;
+      const id = window.setTimeout(() => void deposit.runDeposit(), 500);
+      return () => window.clearTimeout(id);
+    }
+  }, [open, deposit.hasResumableDeposit, deposit.depositing, deposit.depositResult, deposit.runDeposit]);
 
   const openTransfer = useCallback(() => {
     navigate("/portfolio?transfer=1");
@@ -89,8 +110,8 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               Add to trading
             </SheetTitle>
             <SheetDescription>
-              Move USDC from Arbitrum into your trading balance. A new deposit is two Arbitrum confirmations (sign +
-              send) — not repeated when you trade.
+              Move USDC from Arbitrum into your trading balance. Each new amount needs one Arbitrum sign + one send —
+              finishing steps after that are automatic and do not repeat when you trade.
             </SheetDescription>
           </SheetHeader>
 
@@ -133,9 +154,20 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             </div>
 
             {deposit.hasResumableDeposit && !deposit.depositing && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-primary">
-                Deposit in progress — tap Resume once. If you see a red error but Arbitrum USDC already left your
-                wallet, wait 2 minutes and Resume again (do not start a second full deposit).
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-primary space-y-2">
+                <p>
+                  Finishing a deposit already started — <strong>no new Arbitrum sign</strong>. We complete Circle +
+                  HyperEVM automatically.
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[10px] text-muted-foreground"
+                  onClick={() => void deposit.dismissStuckDeposit()}
+                >
+                  Clear stuck state (start fresh)
+                </Button>
               </div>
             )}
 
@@ -214,9 +246,9 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
                     Processing…
                   </>
                 ) : deposit.hasResumableDeposit ? (
-                  "Resume deposit"
+                  "Finish deposit (no new sign)"
                 ) : (
-                  "Confirm — add to trading"
+                  "Add to trading"
                 )}
               </Button>
               {deposit.depositing && (

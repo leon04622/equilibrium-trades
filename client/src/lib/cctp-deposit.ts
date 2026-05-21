@@ -1,7 +1,10 @@
 import type { JsonRpcSigner } from "ethers";
 import { getAddress, getBytes, hexlify, keccak256, Interface, Signature, randomBytes } from "ethers";
 import type { CctpBridgeProgressSync } from "@/context/AuthContext";
+import { isLikelyMintConsumedError } from "./cctp-bridge-progress";
 import { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
+
+export { isCctpPostBurnResumeEligible, isLikelyMintConsumedError } from "./cctp-bridge-progress";
 
 export { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
 
@@ -165,9 +168,13 @@ async function relayMintViaServer(
     };
     if (r.status === 501) return { ok: false, useWallet: true };
     if (!r.ok) {
-      return { ok: false, useWallet: true, error: j.error || `Relay mint failed (${r.status})` };
+      const errText = j.error || `Relay mint failed (${r.status})`;
+      if (isLikelyMintConsumedError(errText)) {
+        return { ok: true, txHash: burnTxHash || "" };
+      }
+      return { ok: false, useWallet: true, error: errText };
     }
-    if (j.success) {
+    if (j.success || j.alreadyDone) {
       return { ok: true, txHash: j.txHash || burnTxHash || "" };
     }
     return { ok: false, useWallet: true, error: j.error };
@@ -234,6 +241,20 @@ function randomBytes32(): `0x${string}` {
   return hexlify(randomBytes(32)) as `0x${string}`;
 }
 
+export async function clearCctpBridgeProgress(wallet: string): Promise<void> {
+  await postBridgeProgress(wallet, {
+    stage: "completed",
+    txHash: null,
+    burnTxHash: null,
+    messageHash: null,
+    cctpMessageHex: null,
+    attestationHex: null,
+    amountUsdc: null,
+    forwardFeeMax: null,
+    error: null,
+  });
+}
+
 async function postBridgeProgress(
   wallet: string,
   payload: Record<string, string | number | null | undefined>,
@@ -276,12 +297,8 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
 /** Shorter errors for wallet revert blobs (e.g. estimateGas "not attester"). */
 export function humanizeCctpDepositError(raw: string): string {
   const m = raw.toLowerCase();
-  if (m.includes("not attester") || m.includes("invalid signature")) {
-    return (
-      "Mint step rejected the saved Circle proof (often stale or already used). " +
-      "Your Arbitrum burn may already have succeeded — check trading balance, wait 2 minutes, tap Resume once, " +
-      "or clear the stuck deposit from Funding and start fresh if balance did not change."
-    );
+  if (isLikelyMintConsumedError(raw)) {
+    return "This deposit was already credited on Hyperliquid. Refresh your trading balance — no further wallet steps.";
   }
   if (m.includes("nonce") && (m.includes("used") || m.includes("already"))) {
     return (
@@ -315,15 +332,6 @@ async function fetchAttestationOnce(
     /* ignore */
   }
   return null;
-}
-
-function isLikelyMintReplayError(msg: string): boolean {
-  const m = msg.toLowerCase();
-  return (
-    (m.includes("nonce") && (m.includes("used") || m.includes("already"))) ||
-    m.includes("already received") ||
-    m.includes("message already")
-  );
 }
 
 function formatAttestationWaitMessage(
@@ -529,55 +537,9 @@ export async function depositUsdcToHyperliquid(
     msgHash: string,
     attestHex: string,
   ): Promise<{ mintTxHash: string; messageHash: string }> {
-    if (cfg.relayMintEnabled) {
-      onStep("mint", "Finishing deposit on HyperEVM (no wallet prompt)…");
-      await postBridgeProgress(wallet, {
-        stage: "mint",
-        burnTxHash,
-        txHash: burnTxHash,
-        messageHash: msgHash,
-        cctpMessageHex: msgHex,
-        attestationHex: attestHex,
-        amountUsdc: amtForLog,
-      });
-      const relayed = await relayMintViaServer(wallet, msgHex, msgHash, attestHex, burnTxHash);
-      if (relayed.ok) {
-        await postBridgeProgress(wallet, {
-          stage: "done",
-          burnTxHash,
-          txHash: burnTxHash,
-          messageHash: msgHash,
-          cctpMessageHex: msgHex,
-          attestationHex: attestHex,
-          amountUsdc: amtForLog,
-        });
-        onStep("done");
-        return { mintTxHash: relayed.txHash, messageHash: msgHash };
-      }
-      console.warn("[CCTP] relay mint unavailable, falling back to wallet:", relayed.error);
-    }
-
-    onStep("mint", "Last step: switch to HyperEVM (999) and confirm mint in your wallet");
-    await postBridgeProgress(wallet, {
-      stage: "mint",
-      burnTxHash,
-      txHash: burnTxHash,
-      messageHash: msgHash,
-      cctpMessageHex: msgHex,
-      attestationHex: attestHex,
-      amountUsdc: amtForLog,
-    });
-    const eth = (globalThis as unknown as { ethereum?: { request: (x: unknown) => Promise<unknown> } }).ethereum;
-    if (!eth?.request) throw new Error("Wallet cannot switch networks — add HyperEVM (chain 999), then tap Resume.");
-    await ensureHyperEvmInWallet(eth, cfg.hyperevmChainId);
-    const { BrowserProvider, Contract: C } = await import("ethers");
-    const hp = new BrowserProvider(eth);
-    const hSigner = await hp.getSigner();
-    const mt = new C(cfg.messageTransmitterHyperEvm, MESSAGE_TRANSMITTER_ABI, hSigner);
-
     let attestationToUse = attestHex;
     const freshAttestation = await fetchAttestationOnce(msgHash, burnTxHash);
-    if (freshAttestation && freshAttestation.toLowerCase() !== attestationToUse.toLowerCase()) {
+    if (freshAttestation) {
       attestationToUse = freshAttestation;
       await postBridgeProgress(wallet, {
         stage: "attestation_complete",
@@ -589,6 +551,65 @@ export async function depositUsdcToHyperliquid(
       });
     }
 
+    if (cfg.relayMintEnabled) {
+      onStep("mint", "Finishing deposit on HyperEVM (no wallet prompt)…");
+      await postBridgeProgress(wallet, {
+        stage: "mint",
+        burnTxHash,
+        txHash: burnTxHash,
+        messageHash: msgHash,
+        cctpMessageHex: msgHex,
+        attestationHex: attestationToUse,
+        amountUsdc: amtForLog,
+      });
+      const relayed = await relayMintViaServer(wallet, msgHex, msgHash, attestationToUse, burnTxHash);
+      if (relayed.ok) {
+        await postBridgeProgress(wallet, {
+          stage: "done",
+          burnTxHash,
+          txHash: burnTxHash,
+          messageHash: msgHash,
+          cctpMessageHex: msgHex,
+          attestationHex: attestationToUse,
+          amountUsdc: amtForLog,
+        });
+        onStep("done");
+        return { mintTxHash: relayed.txHash, messageHash: msgHash };
+      }
+      if (relayed.error && isLikelyMintConsumedError(relayed.error)) {
+        await postBridgeProgress(wallet, {
+          stage: "done",
+          burnTxHash,
+          txHash: burnTxHash,
+          messageHash: msgHash,
+          cctpMessageHex: msgHex,
+          attestationHex: attestationToUse,
+          amountUsdc: amtForLog,
+        });
+        onStep("done");
+        return { mintTxHash: burnTxHash ?? "", messageHash: msgHash };
+      }
+      console.warn("[CCTP] relay mint unavailable, falling back to wallet:", relayed.error);
+    }
+
+    onStep("mint", "Last step: switch to HyperEVM (999) and confirm mint in your wallet");
+    await postBridgeProgress(wallet, {
+      stage: "mint",
+      burnTxHash,
+      txHash: burnTxHash,
+      messageHash: msgHash,
+      cctpMessageHex: msgHex,
+      attestationHex: attestationToUse,
+      amountUsdc: amtForLog,
+    });
+    const eth = (globalThis as unknown as { ethereum?: { request: (x: unknown) => Promise<unknown> } }).ethereum;
+    if (!eth?.request) throw new Error("Wallet cannot switch networks — add HyperEVM (chain 999), then tap Resume.");
+    await ensureHyperEvmInWallet(eth, cfg.hyperevmChainId);
+    const { BrowserProvider, Contract: C } = await import("ethers");
+    const hp = new BrowserProvider(eth);
+    const hSigner = await hp.getSigner();
+    const mt = new C(cfg.messageTransmitterHyperEvm, MESSAGE_TRANSMITTER_ABI, hSigner);
+
     try {
       await mt.receiveMessage.staticCall(msgHex, attestationToUse);
     } catch (simErr: unknown) {
@@ -598,7 +619,7 @@ export async function depositUsdcToHyperliquid(
           : typeof simErr === "string"
             ? simErr
             : "Mint simulation failed";
-      if (isLikelyMintReplayError(simMsg)) {
+      if (isLikelyMintConsumedError(simMsg)) {
         await postBridgeProgress(wallet, {
           stage: "done",
           burnTxHash,
@@ -638,6 +659,7 @@ export async function depositUsdcToHyperliquid(
         messageHash,
         attestationHex,
       );
+      await clearCctpBridgeProgress(wallet);
       return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
     }
 
@@ -673,6 +695,7 @@ export async function depositUsdcToHyperliquid(
         messageHash,
         attestationHex,
       );
+      await clearCctpBridgeProgress(wallet);
       return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
     }
 
@@ -809,13 +832,25 @@ export async function depositUsdcToHyperliquid(
     });
 
     const out = await executeMintOnHyperEvm(receipt.hash, messageHex, messageHash, attestationHex);
+    await clearCctpBridgeProgress(wallet);
     return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
   } catch (error: unknown) {
     const raw =
       error instanceof Error ? error.message : typeof error === "string" ? error : "CCTP deposit failed";
+    if (isLikelyMintConsumedError(raw) && messageHash) {
+      await postBridgeProgress(wallet, {
+        stage: "done",
+        messageHash,
+        cctpMessageHex: messageHex,
+        amountUsdc: amtForLog,
+      });
+      await clearCctpBridgeProgress(wallet);
+      return { success: true, messageHash, txHash: resume?.burnTxHash ?? resume?.txHash ?? undefined };
+    }
     const msg = humanizeCctpDepositError(raw);
     console.error("[CCTP] deposit error:", error);
-    await postBridgeProgress(wallet, { stage: "error", error: msg });
+    const errStage = messageHex && messageHash ? "error_mint" : "error";
+    await postBridgeProgress(wallet, { stage: errStage, error: msg, messageHash, cctpMessageHex: messageHex });
     return { success: false, error: msg, messageHash: messageHash ?? undefined };
   }
 }
