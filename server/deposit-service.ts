@@ -180,6 +180,27 @@ export async function fetchCctpBurnForwardFeeMax(cfg: ProfessionalDepositServerC
   };
 }
 
+const IRIS_FETCH_MS = 15_000;
+
+async function irisFetch(url: string): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), IRIS_FETCH_MS);
+  try {
+    return await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeIrisAttestation(att: unknown): string | null {
+  if (typeof att !== "string" || !att.startsWith("0x") || att.length < 10) return null;
+  if (att.toUpperCase() === "PENDING") return null;
+  return att;
+}
+
 /** Circle Iris v1 — `messageHash` = keccak256(message bytes from `MessageSent`). */
 export async function fetchCircleAttestation(
   messageHash: string,
@@ -190,9 +211,7 @@ export async function fetchCircleAttestation(
     throw new Error("Invalid messageHash");
   }
   const base = irisBase.replace(/\/$/, "");
-  const res = await fetch(`${base}/v1/attestations/${mh}`, {
-    headers: { Accept: "application/json" },
-  });
+  const res = await irisFetch(`${base}/v1/attestations/${mh}`);
   if (res.status === 404) {
     return { status: "not_found", attestation: null };
   }
@@ -200,8 +219,84 @@ export async function fetchCircleAttestation(
     throw new Error(`Iris attestation HTTP ${res.status}`);
   }
   const j = (await res.json()) as { status?: string; attestation?: string | null };
+  const attestation = normalizeIrisAttestation(j.attestation);
   return {
     status: j.status || "unknown",
-    attestation: j.attestation ?? null,
+    attestation,
   };
+}
+
+/**
+ * Iris v2 — lookup by Arbitrum burn tx (more reliable for CctpExtension burns than v1 hash alone).
+ */
+export async function fetchCircleAttestationV2ByTx(
+  transactionHash: string,
+  sourceDomainId: number,
+  irisBase: string,
+): Promise<{
+  status: string;
+  attestation: string | null;
+  messageHex?: string;
+}> {
+  const tx = transactionHash.trim();
+  if (!/^0x[a-fA-F0-9]{64}$/.test(tx)) {
+    throw new Error("Invalid transactionHash");
+  }
+  const base = irisBase.replace(/\/$/, "");
+  const url = `${base}/v2/messages/${sourceDomainId}?transactionHash=${encodeURIComponent(tx)}`;
+  const res = await irisFetch(url);
+  if (res.status === 404) {
+    return { status: "not_found", attestation: null };
+  }
+  if (!res.ok) {
+    throw new Error(`Iris v2 messages HTTP ${res.status}`);
+  }
+  const j = (await res.json()) as {
+    messages?: Array<{
+      message?: string;
+      attestation?: string | null;
+      status?: string;
+    }>;
+  };
+  const row = j.messages?.[0];
+  if (!row) return { status: "not_found", attestation: null };
+  const attestation = normalizeIrisAttestation(row.attestation);
+  const status = row.status || (attestation ? "complete" : "pending_confirmations");
+  return {
+    status,
+    attestation: status === "complete" ? attestation : null,
+    messageHex: typeof row.message === "string" && row.message.startsWith("0x") ? row.message : undefined,
+  };
+}
+
+/** v1 by message hash, then v2 by burn tx when provided. */
+export async function fetchCircleAttestationResolved(
+  messageHash: string,
+  irisBase: string,
+  sourceDomainId: number,
+  burnTxHash?: string | null,
+): Promise<{ status: string; attestation: string | null }> {
+  let out = await fetchCircleAttestation(messageHash, irisBase);
+  if (out.status === "complete" && out.attestation) return out;
+
+  const tx = burnTxHash?.trim();
+  if (!tx || !/^0x[a-fA-F0-9]{64}$/.test(tx)) {
+    return out;
+  }
+
+  try {
+    const v2 = await fetchCircleAttestationV2ByTx(tx, sourceDomainId, irisBase);
+    if (v2.status === "complete" && v2.attestation) {
+      return { status: "complete", attestation: v2.attestation };
+    }
+    if (v2.status !== "not_found" && out.status === "not_found") {
+      return { status: v2.status, attestation: null };
+    }
+    if (v2.status === "pending_confirmations" && out.status !== "complete") {
+      return { status: "pending_confirmations", attestation: null };
+    }
+  } catch (e) {
+    console.warn("[CCTP] Iris v2 fallback failed:", e);
+  }
+  return out;
 }

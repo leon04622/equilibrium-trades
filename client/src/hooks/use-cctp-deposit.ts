@@ -33,6 +33,7 @@ export function useCctpDeposit() {
   const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const cctpAttestationCelebratedRef = useRef(false);
+  const depositAbortRef = useRef<AbortController | null>(null);
 
   const cctpResumeStage = userSync?.cctpBridgeProgress?.stage;
   const hasResumableDeposit =
@@ -67,10 +68,25 @@ export function useCctpDeposit() {
   }, [address, refreshWalletUsdc, refreshAccount]);
 
   const resetDepositState = useCallback(() => {
+    depositAbortRef.current?.abort();
+    depositAbortRef.current = null;
     setDepositResult(null);
     setDepositStep("");
     setDepositAwaitingChain(false);
     cctpAttestationCelebratedRef.current = false;
+  }, []);
+
+  const cancelDeposit = useCallback(() => {
+    depositAbortRef.current?.abort();
+    depositAbortRef.current = null;
+    setDepositing(false);
+    setDepositAwaitingChain(false);
+    setDepositStep("");
+    setDepositResult({
+      success: false,
+      error:
+        "Paused. If you already signed the burn, wait 2–5 minutes and tap Add to trading again to finish (your USDC is safe).",
+    });
   }, []);
 
   const runDeposit = useCallback(async () => {
@@ -164,6 +180,10 @@ export function useCctpDeposit() {
       return;
     }
 
+    depositAbortRef.current?.abort();
+    const abort = new AbortController();
+    depositAbortRef.current = abort;
+
     setDepositing(true);
     setDepositAwaitingChain(false);
     setDepositStep("Fetching Circle CCTP forward fee quote...");
@@ -173,6 +193,7 @@ export function useCctpDeposit() {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
         resumeFrom: hasResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
+        signal: abort.signal,
         onStep: (step: CctpDepositStep, detail?: string) => {
           if (step === "approve") {
             setDepositStep("Sign USDC authorization in your wallet...");
@@ -236,6 +257,7 @@ export function useCctpDeposit() {
       setDepositResult({ success: false, error: errMsg });
       toast({ title: "Deposit Failed", description: errMsg, variant: "destructive" });
     } finally {
+      depositAbortRef.current = null;
       setDepositing(false);
       setDepositAwaitingChain(false);
     }
@@ -269,6 +291,7 @@ export function useCctpDeposit() {
     hasResumableDeposit,
     prepareDeposit,
     resetDepositState,
+    cancelDeposit,
     runDeposit,
   };
 }

@@ -55,8 +55,14 @@ export type CctpDepositProgressStage = CctpDepositStep;
 let depositConfigCache: { config: CctpDepositConfig; at: number } | null = null;
 const DEPOSIT_CONFIG_TTL_MS = 10 * 60 * 1000;
 const DEPOSIT_CONFIG_FETCH_MS = 12_000;
-const ATTEST_POLL_MS = 3000;
+const ATTEST_POLL_MS = 2000;
 const ATTEST_MAX_MS = 20 * 60 * 1000;
+const ATTEST_MAX_CONSECUTIVE_ERRORS = 8;
+
+export type CctpAttestationPollProgress = {
+  elapsedSec: number;
+  irisStatus: string;
+};
 
 /** Circle mainnet defaults — matches server `deposit-service.ts` so UI works if `/api/cctp/deposit-config` is slow or down. */
 export const CLIENT_CCTP_DEPOSIT_DEFAULTS: CctpDepositConfig = {
@@ -221,23 +227,99 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
   }
 }
 
-async function pollAttestationViaServer(messageHash: string): Promise<string> {
+function formatAttestationWaitMessage(
+  messageHash: string,
+  progress: CctpAttestationPollProgress,
+): string {
+  const short = `${messageHash.slice(0, 10)}…`;
+  const status =
+    progress.irisStatus === "pending_confirmations"
+      ? "confirming on Arbitrum"
+      : progress.irisStatus === "not_found"
+        ? "waiting for Circle to index burn"
+        : progress.irisStatus;
+  return `Waiting for Circle attestation (${progress.elapsedSec}s) — ${status} — ${short}`;
+}
+
+async function pollAttestationViaServer(
+  messageHash: string,
+  options?: {
+    burnTxHash?: string | null;
+    onProgress?: (progress: CctpAttestationPollProgress) => void;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  const started = Date.now();
+  let consecutiveErrors = 0;
   const deadline = Date.now() + ATTEST_MAX_MS;
+
   while (Date.now() < deadline) {
-    const r = await fetch(`/api/cctp/attestation/${encodeURIComponent(messageHash)}`, {
-      credentials: "include",
-    });
-    if (!r.ok) {
-      await new Promise((r2) => setTimeout(r2, ATTEST_POLL_MS));
-      continue;
+    if (options?.signal?.aborted) {
+      throw new Error(
+        "Deposit paused. Your burn is safe — close this dialog and tap Add to trading again to resume the mint step.",
+      );
     }
-    const j = (await r.json()) as { status?: string; attestation?: string | null };
-    if (j.status === "complete" && j.attestation && j.attestation.startsWith("0x")) {
-      return j.attestation;
+
+    const elapsedSec = Math.floor((Date.now() - started) / 1000);
+    const qs = options?.burnTxHash
+      ? `?txHash=${encodeURIComponent(options.burnTxHash)}`
+      : "";
+
+    try {
+      const r = await fetch(`/api/cctp/attestation/${encodeURIComponent(messageHash)}${qs}`, {
+        credentials: "include",
+        signal: options?.signal,
+      });
+      const text = await r.text();
+      if (!r.ok) {
+        consecutiveErrors += 1;
+        let errMsg = text || `Attestation check failed (${r.status})`;
+        try {
+          const j = JSON.parse(text) as { error?: string };
+          if (typeof j.error === "string") errMsg = j.error;
+        } catch {
+          /* keep */
+        }
+        options?.onProgress?.({ elapsedSec, irisStatus: `error: ${errMsg.slice(0, 40)}` });
+        if (consecutiveErrors >= ATTEST_MAX_CONSECUTIVE_ERRORS) {
+          throw new Error(
+            `${errMsg} — your burn is still safe. Wait 2–5 minutes, then open Funding and deposit again to resume.`,
+          );
+        }
+        await new Promise((r2) => setTimeout(r2, ATTEST_POLL_MS));
+        continue;
+      }
+
+      consecutiveErrors = 0;
+      const j = JSON.parse(text) as { status?: string; attestation?: string | null; error?: string };
+      const irisStatus = j.status || "unknown";
+      options?.onProgress?.({ elapsedSec, irisStatus });
+
+      if (j.status === "complete" && j.attestation && j.attestation.startsWith("0x")) {
+        return j.attestation;
+      }
+    } catch (e: unknown) {
+      if (options?.signal?.aborted) {
+        throw new Error(
+          "Deposit paused. Your burn is safe — resume from Funding when Circle attestation is ready.",
+        );
+      }
+      consecutiveErrors += 1;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      options?.onProgress?.({ elapsedSec, irisStatus: `retry (${errMsg.slice(0, 32)})` });
+      if (consecutiveErrors >= ATTEST_MAX_CONSECUTIVE_ERRORS) {
+        throw e instanceof Error
+          ? e
+          : new Error("Could not reach Circle attestation service. Try again in a few minutes.");
+      }
     }
+
     await new Promise((r2) => setTimeout(r2, ATTEST_POLL_MS));
   }
-  throw new Error("Circle attestation timed out — your burn is still safe; open Portfolio later to retry mint.");
+
+  throw new Error(
+    "Circle attestation is taking longer than usual (20+ min). Your burn is safe — open Funding, wait a few minutes, then tap Add to trading again to finish the mint.",
+  );
 }
 
 function extractMessageFromBurnReceipt(
@@ -307,6 +389,8 @@ export async function depositUsdcToHyperliquid(
     onStep?: (step: CctpDepositStep, detail?: string) => void;
     /** Fires once Circle Iris returns a complete attestation (before HyperEVM mint). */
     onAttestationConfirmed?: () => void;
+    onAttestationProgress?: (progress: CctpAttestationPollProgress) => void;
+    signal?: AbortSignal;
   },
 ): Promise<{ success: boolean; txHash?: string; error?: string; messageHash?: string }> {
   const wallet = (await signer.getAddress()).toLowerCase();
@@ -392,14 +476,22 @@ export async function depositUsdcToHyperliquid(
 
     /* ── Resume: wait for attestation, then mint ── */
     if (messageHex && messageHash && !attestationHex) {
-      onStep("attestation", messageHash);
+      const mh = messageHash;
+      onStep("attestation", mh);
       await postBridgeProgress(wallet, {
         stage: "attestation",
-        messageHash,
+        messageHash: mh,
         cctpMessageHex: messageHex,
         amountUsdc: amtForLog,
       });
-      attestationHex = await pollAttestationViaServer(messageHash);
+      attestationHex = await pollAttestationViaServer(mh, {
+        burnTxHash: resume?.burnTxHash ?? resume?.txHash ?? null,
+        signal: options?.signal,
+        onProgress: (p) => {
+          options?.onAttestationProgress?.(p);
+          onStep("attestation", formatAttestationWaitMessage(mh, p));
+        },
+      });
       onAttestationConfirmed?.();
       await postBridgeProgress(wallet, {
         stage: "attestation_complete",
@@ -518,19 +610,27 @@ export async function depositUsdcToHyperliquid(
     if (!receipt) throw new Error("Burn receipt missing");
 
     messageHex = extractMessageFromBurnReceipt(receipt, cfg.messageTransmitterArbitrum);
-    messageHash = keccak256(getBytes(messageHex));
+    const mh = keccak256(getBytes(messageHex));
+    messageHash = mh;
 
     await postBridgeProgress(wallet, {
       stage: "wait_attestation",
       burnTxHash: receipt.hash,
       txHash: receipt.hash,
-      messageHash,
+      messageHash: mh,
       cctpMessageHex: messageHex,
       amountUsdc: amount,
     });
 
-    onStep("attestation", messageHash);
-    attestationHex = await pollAttestationViaServer(messageHash);
+    onStep("attestation", mh);
+    attestationHex = await pollAttestationViaServer(mh, {
+      burnTxHash: receipt.hash,
+      signal: options?.signal,
+      onProgress: (p) => {
+        options?.onAttestationProgress?.(p);
+        onStep("attestation", formatAttestationWaitMessage(mh, p));
+      },
+    });
     onAttestationConfirmed?.();
     await postBridgeProgress(wallet, {
       stage: "attestation_complete",

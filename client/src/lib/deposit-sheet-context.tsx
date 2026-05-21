@@ -114,6 +114,12 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               </div>
             )}
 
+            {deposit.hasResumableDeposit && !deposit.depositing && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-primary">
+                You have a deposit in progress. Tap confirm below to resume (attestation or mint).
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="sheet-deposit-amount">Amount (USDC)</Label>
               <div className="flex gap-2">
@@ -176,21 +182,41 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            <Button
-              className="w-full"
-              disabled={!canSubmit}
-              onClick={() => void deposit.runDeposit()}
-              data-testid="button-sheet-deposit-confirm"
-            >
-              {deposit.depositing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing…
-                </>
-              ) : (
-                "Confirm — add to trading"
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full"
+                disabled={deposit.depositing || !canSubmit}
+                onClick={() => void deposit.runDeposit()}
+                data-testid="button-sheet-deposit-confirm"
+              >
+                {deposit.depositing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing…
+                  </>
+                ) : deposit.hasResumableDeposit ? (
+                  "Resume deposit"
+                ) : (
+                  "Confirm — add to trading"
+                )}
+              </Button>
+              {deposit.depositing && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full text-xs"
+                  onClick={() => deposit.cancelDeposit()}
+                  data-testid="button-sheet-deposit-cancel"
+                >
+                  Cancel (safe to close — resume later)
+                </Button>
               )}
-            </Button>
+            </div>
+
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              After the burn, Circle attestation usually takes 1–5 minutes. You can close this panel and resume from
+              Funding when ready.
+            </p>
 
             <Button
               variant="ghost"

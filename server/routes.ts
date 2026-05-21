@@ -1246,7 +1246,17 @@ export async function registerRoutes(
   app.get("/api/cctp/attestation/:messageHash", async (req: Request, res: Response) => {
     try {
       const cfg = loadProfessionalDepositConfig();
-      const out = await fetchCircleAttestation(req.params.messageHash, cfg.irisApiBase);
+      const txHash =
+        typeof req.query.txHash === "string" && /^0x[a-fA-F0-9]{64}$/.test(req.query.txHash.trim())
+          ? req.query.txHash.trim()
+          : null;
+      const { fetchCircleAttestationResolved } = await import("./deposit-service");
+      const out = await fetchCircleAttestationResolved(
+        req.params.messageHash,
+        cfg.irisApiBase,
+        cfg.sourceDomain,
+        txHash,
+      );
       res.json(out);
     } catch (e) {
       console.error("GET /api/cctp/attestation:", e);
