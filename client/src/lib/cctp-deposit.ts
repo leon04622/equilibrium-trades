@@ -227,6 +227,59 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
   }
 }
 
+/** Shorter errors for wallet revert blobs (e.g. estimateGas "not attester"). */
+export function humanizeCctpDepositError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes("not attester") || m.includes("invalid signature")) {
+    return (
+      "Mint step rejected the saved Circle proof (often stale or already used). " +
+      "Your Arbitrum burn may already have succeeded — check trading balance, wait 2 minutes, tap Resume once, " +
+      "or clear the stuck deposit from Funding and start fresh if balance did not change."
+    );
+  }
+  if (m.includes("nonce") && (m.includes("used") || m.includes("already"))) {
+    return (
+      "This deposit was already minted on HyperEVM. Refresh your trading balance — no second confirmation needed."
+    );
+  }
+  if (m.includes("user rejected") || m.includes("user denied")) {
+    return "Transaction cancelled in your wallet.";
+  }
+  if (raw.length > 280) {
+    return `${raw.slice(0, 200)}…`;
+  }
+  return raw;
+}
+
+async function fetchAttestationOnce(
+  messageHash: string,
+  burnTxHash?: string | null,
+): Promise<string | null> {
+  const qs = burnTxHash ? `?txHash=${encodeURIComponent(burnTxHash)}` : "";
+  try {
+    const r = await fetch(`/api/cctp/attestation/${encodeURIComponent(messageHash)}${qs}`, {
+      credentials: "include",
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { status?: string; attestation?: string | null };
+    if (j.status === "complete" && j.attestation && j.attestation.startsWith("0x")) {
+      return j.attestation;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function isLikelyMintReplayError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    (m.includes("nonce") && (m.includes("used") || m.includes("already"))) ||
+    m.includes("already received") ||
+    m.includes("message already")
+  );
+}
+
 function formatAttestationWaitMessage(
   messageHash: string,
   progress: CctpAttestationPollProgress,
@@ -430,7 +483,7 @@ export async function depositUsdcToHyperliquid(
     msgHash: string,
     attestHex: string,
   ): Promise<{ mintTxHash: string; messageHash: string }> {
-    onStep("mint", "Switch to HyperEVM and confirm mint");
+    onStep("mint", "Switch to HyperEVM (999) and confirm mint in your wallet");
     await postBridgeProgress(wallet, {
       stage: "mint",
       burnTxHash,
@@ -447,7 +500,47 @@ export async function depositUsdcToHyperliquid(
     const hp = new BrowserProvider(eth);
     const hSigner = await hp.getSigner();
     const mt = new C(cfg.messageTransmitterHyperEvm, MESSAGE_TRANSMITTER_ABI, hSigner);
-    const mintTx = await mt.receiveMessage(msgHex, attestHex);
+
+    let attestationToUse = attestHex;
+    const freshAttestation = await fetchAttestationOnce(msgHash, burnTxHash);
+    if (freshAttestation && freshAttestation.toLowerCase() !== attestationToUse.toLowerCase()) {
+      attestationToUse = freshAttestation;
+      await postBridgeProgress(wallet, {
+        stage: "attestation_complete",
+        burnTxHash,
+        messageHash: msgHash,
+        cctpMessageHex: msgHex,
+        attestationHex: attestationToUse,
+        amountUsdc: amtForLog,
+      });
+    }
+
+    try {
+      await mt.receiveMessage.staticCall(msgHex, attestationToUse);
+    } catch (simErr: unknown) {
+      const simMsg =
+        simErr instanceof Error
+          ? simErr.message
+          : typeof simErr === "string"
+            ? simErr
+            : "Mint simulation failed";
+      if (isLikelyMintReplayError(simMsg)) {
+        await postBridgeProgress(wallet, {
+          stage: "done",
+          burnTxHash,
+          txHash: burnTxHash,
+          messageHash: msgHash,
+          cctpMessageHex: msgHex,
+          attestationHex: attestationToUse,
+          amountUsdc: amtForLog,
+        });
+        onStep("done");
+        return { mintTxHash: burnTxHash ?? "", messageHash: msgHash };
+      }
+      throw new Error(humanizeCctpDepositError(simMsg));
+    }
+
+    const mintTx = await mt.receiveMessage(msgHex, attestationToUse);
     const mintReceipt = await mintTx.wait();
     await postBridgeProgress(wallet, {
       stage: "done",
@@ -455,7 +548,7 @@ export async function depositUsdcToHyperliquid(
       txHash: burnTxHash,
       messageHash: msgHash,
       cctpMessageHex: msgHex,
-      attestationHex: attestHex,
+      attestationHex: attestationToUse,
       amountUsdc: amtForLog,
     });
     onStep("done");
@@ -644,8 +737,9 @@ export async function depositUsdcToHyperliquid(
     const out = await executeMintOnHyperEvm(receipt.hash, messageHex, messageHash, attestationHex);
     return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
   } catch (error: unknown) {
-    const msg =
+    const raw =
       error instanceof Error ? error.message : typeof error === "string" ? error : "CCTP deposit failed";
+    const msg = humanizeCctpDepositError(raw);
     console.error("[CCTP] deposit error:", error);
     await postBridgeProgress(wallet, { stage: "error", error: msg });
     return { success: false, error: msg, messageHash: messageHash ?? undefined };

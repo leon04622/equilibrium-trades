@@ -12,6 +12,7 @@ import {
 import {
   CLIENT_CCTP_DEPOSIT_DEFAULTS,
   fetchHyperliquidDepositConfig,
+  humanizeCctpDepositError,
 } from "@/lib/cctp-deposit";
 
 export function useCctpDeposit() {
@@ -228,7 +229,11 @@ export function useCctpDeposit() {
 
       setDepositAwaitingChain(false);
       setDepositStep("");
-      setDepositResult(result);
+      setDepositResult(
+        result.success
+          ? result
+          : { ...result, error: result.error ? humanizeCctpDepositError(result.error) : result.error },
+      );
 
       if (result.success) {
         window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
@@ -251,7 +256,9 @@ export function useCctpDeposit() {
         });
       }
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err) || "Deposit failed";
+      const errMsg = humanizeCctpDepositError(
+        err instanceof Error ? err.message : String(err) || "Deposit failed",
+      );
       setDepositAwaitingChain(false);
       setDepositStep("");
       setDepositResult({ success: false, error: errMsg });

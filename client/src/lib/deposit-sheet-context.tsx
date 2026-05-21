@@ -89,7 +89,8 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               Add to trading
             </SheetTitle>
             <SheetDescription>
-              Move USDC from your Arbitrum wallet into your Hyperliquid trading account (Circle CCTP).
+              Move USDC from your Arbitrum wallet into Hyperliquid. Each new deposit needs a few wallet steps (not
+              every time you trade).
             </SheetDescription>
           </SheetHeader>
 
@@ -114,9 +115,21 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               </div>
             )}
 
+            <div className="rounded-lg border border-border/80 bg-muted/30 p-3 text-[11px] text-muted-foreground space-y-1.5">
+              <p className="font-medium text-foreground">Wallet confirmations (Circle CCTP)</p>
+              <p>
+                <strong className="text-foreground">New deposit:</strong> sign USDC on Arbitrum → confirm burn → wait
+                1–5 min → confirm <strong className="text-foreground">one mint</strong> on HyperEVM (chain 999).
+              </p>
+              <p>
+                <strong className="text-foreground">Resume:</strong> usually only the HyperEVM mint (one confirmation).
+              </p>
+            </div>
+
             {deposit.hasResumableDeposit && !deposit.depositing && (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-primary">
-                You have a deposit in progress. Tap confirm below to resume (attestation or mint).
+                Deposit in progress — tap Resume once. If you see a red error but Arbitrum USDC already left your
+                wallet, wait 2 minutes and Resume again (do not start a second full deposit).
               </div>
             )}
 
@@ -214,8 +227,8 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             </div>
 
             <p className="text-[10px] text-muted-foreground leading-snug">
-              After the burn, Circle attestation usually takes 1–5 minutes. You can close this panel and resume from
-              Funding when ready.
+              You do not confirm anything to place normal trades — only when moving USDC from your wallet into
+              Hyperliquid.
             </p>
 
             <Button
