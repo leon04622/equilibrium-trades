@@ -8,7 +8,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { calcTpslPnlUsd, describeTpslPnlUsd } from "@/lib/tpsl-pnl";
-import { X, Pencil, ChevronUp, ChevronDown } from "lucide-react";
+import { X, Pencil, ChevronUp, ChevronDown, Share2 } from "lucide-react";
+import {
+  SharePositionDialog,
+  positionToShareSnapshot,
+} from "@/components/share-position-dialog";
+import type { SharePositionSnapshot } from "@/lib/share-position-types";
+import type { Position } from "@/lib/trading-context";
 
 interface BottomTradingPanelProps {
   coin?: string;
@@ -46,6 +52,8 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
   const [tpPrice, setTpPrice] = useState("");
   const [slPrice, setSlPrice] = useState("");
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharePosition, setSharePosition] = useState<SharePositionSnapshot | null>(null);
 
   // Debug: log all positions whenever they change
   useEffect(() => {
@@ -76,6 +84,12 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
       await cancelHLOrder(order.coin, order.oid);
     }
     toast({ title: "All Orders Cancelled" });
+  };
+
+  const openShareDialog = (pos: Position) => {
+    const mark = currentPrices[pos.coin] || pos.markPrice || pos.entryPrice;
+    setSharePosition(positionToShareSnapshot(pos, mark));
+    setShareOpen(true);
   };
 
   const handleClosePosition = async (pos: any) => {
@@ -382,6 +396,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
               getTPSLDisplay={getTPSLDisplay}
               onEditTPSL={openTPSLDialog}
               onClosePosition={handleClosePosition}
+              onSharePosition={openShareDialog}
               isClosingPosition={isClosingPosition}
               closingPositionId={closingPositionId}
               onCoinChange={onCoinChange}
@@ -597,6 +612,12 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
           </div>
         </DialogContent>
       </Dialog>
+
+      <SharePositionDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        position={sharePosition}
+      />
     </>
   );
 }
@@ -609,6 +630,7 @@ function PositionsTable({
   getTPSLDisplay,
   onEditTPSL,
   onClosePosition,
+  onSharePosition,
   isClosingPosition,
   closingPositionId,
   onCoinChange,
@@ -620,6 +642,7 @@ function PositionsTable({
   getTPSLDisplay: (pos: any) => { tp: string; sl: string };
   onEditTPSL: (pos: any) => void;
   onClosePosition: (pos: any) => void;
+  onSharePosition: (pos: Position) => void;
   isClosingPosition: boolean;
   closingPositionId: string | null;
   onCoinChange?: (coin: string) => void;
@@ -687,9 +710,25 @@ function PositionsTable({
               <td className="px-3 py-1.5 text-right font-mono">{formatPrice(markPrice)}</td>
               <td className={cn(
                 "px-3 py-1.5 text-right font-mono",
-                pos.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish"
+                pos.unrealizedPnl >= 0 ? "text-bullish" : "text-bearish",
               )}>
-                {pos.unrealizedPnl >= 0 ? "+" : ""}{formatPrice(pos.unrealizedPnl)} ({roe >= 0 ? "+" : ""}{roe.toFixed(2)}%)
+                <span className="inline-flex items-center justify-end gap-1.5">
+                  <span>
+                    {pos.unrealizedPnl >= 0 ? "+" : ""}
+                    {formatPrice(pos.unrealizedPnl)} ({roe >= 0 ? "+" : ""}
+                    {roe.toFixed(2)}%)
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+                    onClick={() => onSharePosition(pos)}
+                    title="Share position"
+                    aria-label={`Share ${pos.coin} position`}
+                    data-testid={`button-share-position-${pos.coin}`}
+                  >
+                    <Share2 className="h-3 w-3" />
+                  </button>
+                </span>
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-orange-500">
                 {pos.liquidationPrice ? formatPrice(pos.liquidationPrice) : "--"}
