@@ -17,10 +17,20 @@ import { useTradeHandshake } from "@/components/trade-handshake-context";
 import { saveTradeToJournal } from "@/lib/TradeExecution";
 import type { TradeJournalPatternStatus } from "@shared/schema";
 
+export type OrderSubmitPayload = {
+  isBuy: boolean;
+  side: "long" | "short";
+  orderType: "market" | "limit";
+  qty: number;
+  price: number;
+  leverage: number;
+  isSpot: boolean;
+};
+
 interface OrderEntryProps {
   coin: string;
   currentPrice: number;
-  onOrderSubmit?: (order: any) => void;
+  onOrderSubmit?: (order: OrderSubmitPayload) => void;
   /** Display pair for the journal (e.g. BTC/USDT) */
   pairLabel?: string;
   /** Best AI scanner pattern status for this symbol/timeframe — drives entry grade */
@@ -146,12 +156,16 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       }
 
       const fillPrice = result.avgPrice || getExecPrice();
-      toast({
-        title: `${isBuy ? "Buy" : "Sell"} ${result.status === "filled" ? "Filled" : "Placed"}`,
-        description: isSpot
-          ? `${qty} @ $${fmt(fillPrice)}`
-          : `${qty} ${coin} @ $${fmt(fillPrice)} · ${leverage}x`,
-      });
+      const sideWord = isSpot ? (isBuy ? "Buy" : "Sell") : isBuy ? "Long" : "Short";
+      const statusWord = result.status === "filled" ? "Filled" : "Placed";
+      if (!onOrderSubmit) {
+        toast({
+          title: `${sideWord} ${statusWord}`,
+          description: isSpot
+            ? `${qty} @ $${fmt(fillPrice)}`
+            : `${qty} ${coin} @ $${fmt(fillPrice)} · ${leverage}x`,
+        });
+      }
 
       await refreshAccount();
 
@@ -221,7 +235,15 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       setTakeProfit("");
       setStopLoss("");
 
-      onOrderSubmit?.({ isBuy, orderType, qty, price: fillPrice, leverage });
+      onOrderSubmit?.({
+        isBuy,
+        side: isBuy ? "long" : "short",
+        orderType,
+        qty,
+        price: fillPrice,
+        leverage,
+        isSpot,
+      });
     } catch (err: any) {
       toast({ title: "Order Failed", description: err.message || "Transaction failed.", variant: "destructive" });
     } finally {

@@ -6,7 +6,7 @@ import { TradingViewChart } from "@/components/trading-view-chart";
 import { SymbolSelector } from "@/components/symbol-selector";
 import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
-import { OrderEntry } from "@/components/order-entry";
+import { OrderEntry, type OrderSubmitPayload } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
 import { ChartBalanceBar } from "@/components/chart-balance-bar";
 import { BottomTradingPanel } from "@/components/bottom-trading-panel";
@@ -234,12 +234,25 @@ export default function Trading({ visible = true }: TradingProps) {
     persistTradingViewWorkspace(tradingViewSymbol, timeframe);
   }, [chartEngine, tradingViewSymbol, timeframe]);
 
-  const handleOrderSubmit = (order: any) => {
-    toast({
-      title: `${order.side === "buy" ? "Long" : "Short"} Order Submitted`,
-      description: `${order.quantity} ${displaySymbol} at $${order.price?.toLocaleString() || "market"}`,
-    });
-  };
+  const handleOrderSubmit = useCallback(
+    (order: OrderSubmitPayload) => {
+      const isLong = order.isBuy;
+      const sideLabel = order.isSpot
+        ? isLong
+          ? "Buy"
+          : "Sell"
+        : isLong
+          ? "Long"
+          : "Short";
+      toast({
+        title: `${sideLabel} position opened`,
+        description: `${order.qty} ${displaySymbol} @ ${
+          order.price > 0 ? order.price.toLocaleString() : "market"
+        }`,
+      });
+    },
+    [toast, displaySymbol],
+  );
   const price = currentTicker ? parseFloat(currentTicker.markPx) : 0;
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const priceChange = prevPrice > 0 ? price - prevPrice : 0;
