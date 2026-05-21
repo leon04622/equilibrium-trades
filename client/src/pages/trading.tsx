@@ -477,7 +477,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {chartEngine === "tradingview" && (
               <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[280px] leading-tight shrink-0">
-                TV chart stays here — optional <strong className="text-foreground">Connect TradingView</strong> opens sign-in on this page (then refresh).
+                TV chart stays here — <strong className="text-foreground">Connect TradingView</strong> signs you in on TradingView, then returns to this page.
               </span>
             )}
 

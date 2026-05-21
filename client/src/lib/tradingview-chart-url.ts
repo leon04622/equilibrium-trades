@@ -1,4 +1,6 @@
 const LS_TV_WORKSPACE = "eq_tradingview_workspace_v1";
+/** Query param on return from TradingView sign-in (same-tab redirect, not iframe). */
+export const TV_SESSION_RETURN_PARAM = "tv_session";
 
 export type TradingViewWorkspace = {
   symbol: string;
@@ -27,11 +29,14 @@ export function buildTradingViewFullChartUrl(symbol: string, interval?: string):
   return url.toString();
 }
 
-/** Where TradingView sends the user after sign-in (stay on Equilibrium, not tradingview.com/chart). */
+/** Where TradingView sends the user after sign-in (Equilibrium trading page, not tradingview.com/chart). */
 export function buildTradingViewSignInReturnUrl(): string {
-  if (typeof window === "undefined") return "https://www.equilibrium-trading.xyz/trading";
-  const { origin, pathname, search } = window.location;
-  return `${origin}${pathname}${search}`;
+  if (typeof window === "undefined") {
+    return `https://www.equilibrium-trading.xyz/trading?${TV_SESSION_RETURN_PARAM}=1`;
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set(TV_SESSION_RETURN_PARAM, "1");
+  return url.toString();
 }
 
 export function buildTradingViewSignInUrl(returnUrl?: string): string {
@@ -41,6 +46,24 @@ export function buildTradingViewSignInUrl(returnUrl?: string): string {
     returnUrl?.trim() || (typeof window !== "undefined" ? buildTradingViewSignInReturnUrl() : ""),
   );
   return url.toString();
+}
+
+/**
+ * TradingView blocks iframe embed (X-Frame-Options). Sign-in uses this tab only — no popup or new tab.
+ */
+export function redirectToTradingViewSignIn(): void {
+  window.location.assign(buildTradingViewSignInUrl(buildTradingViewSignInReturnUrl()));
+}
+
+/** After TV redirects back with ?tv_session=1, strip the param and refresh the embed. */
+export function consumeTradingViewSignInReturn(): boolean {
+  if (typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get(TV_SESSION_RETURN_PARAM) !== "1") return false;
+  url.searchParams.delete(TV_SESSION_RETURN_PARAM);
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState({}, document.title, next);
+  return true;
 }
 
 export function persistTradingViewWorkspace(symbol: string, interval: string): void {
