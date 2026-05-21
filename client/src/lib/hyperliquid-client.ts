@@ -788,20 +788,51 @@ export async function getOpenOrders(address: string): Promise<OpenOrder[]> {
   }
 }
 
-// Round to 5 significant figures, which is the venue's precision requirement
+// Round to 5 significant figures — for prices / rates, not order sizes (use sizeToWire).
 export function floatToWire(x: number): string {
   if (Math.abs(x) < 1e-8) return "0";
-  
-  // Round to 5 significant figures
+
   const magnitude = Math.floor(Math.log10(Math.abs(x)));
-  const scale = Math.pow(10, 4 - magnitude); // 5 sig figs = 4 - magnitude decimals
+  const scale = Math.pow(10, 4 - magnitude);
   const rounded = Math.round(x * scale) / scale;
-  
+
   let str = rounded.toString();
-  if (str.includes('.')) {
-    str = str.replace(/\.?0+$/, '');
+  if (str.includes(".")) {
+    str = str.replace(/\.?0+$/, "");
   }
   return str;
+}
+
+/** Round a raw size to the asset lot step (HL `szDecimals` from meta). */
+export function roundSizeToSzDecimals(size: number, szDecimals: number): number {
+  if (!Number.isFinite(size) || size <= 0) return 0;
+  const d = Math.max(0, Math.min(8, Math.floor(szDecimals)));
+  const factor = Math.pow(10, d);
+  return Math.round(size * factor) / factor;
+}
+
+/** Wire string for order size `s` — must match venue `szDecimals`, not 5 sig figs. */
+export function sizeToWire(size: number, szDecimals: number): string {
+  const rounded = roundSizeToSzDecimals(size, szDecimals);
+  if (rounded <= 0) return "0";
+  const d = Math.max(0, Math.min(8, Math.floor(szDecimals)));
+  let str = rounded.toFixed(d);
+  if (str.includes(".")) {
+    str = str.replace(/\.?0+$/, "");
+  }
+  return str;
+}
+
+export async function getCoinSzDecimals(coin: string): Promise<number> {
+  if (coin.startsWith("@")) return 2;
+  await refreshAssetCache();
+  return getAssetMeta(coin).szDecimals;
+}
+
+/** UI / margin helpers — round before showing or submitting an order size. */
+export async function roundOrderSizeForCoin(coin: string, size: number): Promise<number> {
+  const d = await getCoinSzDecimals(coin);
+  return roundSizeToSzDecimals(size, d);
 }
 
 // Format price for a specific coin - each coin has a specific tick size
@@ -928,15 +959,24 @@ export async function placeOrder(
       console.log("Market order - midPrice:", midPrice, "limitPrice with slippage:", limitPrice);
     }
 
+    const szDecimals = getAssetMeta(order.coin).szDecimals;
+    const sizeWire = sizeToWire(order.size, szDecimals);
+    if (parseFloat(sizeWire) <= 0) {
+      return {
+        success: false,
+        error: `Order size is too small for ${order.coin} (minimum lot: ${szDecimals} decimal${szDecimals === 1 ? "" : "s"}).`,
+      };
+    }
+
     const orderWire = {
       a: assetIndex,
       b: order.isBuy,
       p: formatPrice(limitPrice, order.coin),
-      s: floatToWire(order.size),
+      s: sizeWire,
       r: order.reduceOnly || false,
       t: orderTypeToWire(order.orderType),
     };
-    console.log("Order wire:", orderWire);
+    console.log("Order wire:", orderWire, { szDecimals, rawSize: order.size });
     
     // Generate nonce right before signing to ensure freshness
     const nonce = getUniqueNonce();
@@ -1146,11 +1186,12 @@ export async function placeTrailingStopMarketOrder(
 
     const nonce = getUniqueNonce();
 
+    const szDecimals = getAssetMeta(order.coin).szDecimals;
     const orderWire: Record<string, unknown> = {
       a: assetIndex,
       b: order.isBuy,
-      p: floatToWire(limitPrice),
-      s: floatToWire(order.size),
+      p: formatPrice(limitPrice, order.coin),
+      s: sizeToWire(order.size, szDecimals),
       r: true,
       t: {
         trailingStopMarket: {
@@ -1236,11 +1277,12 @@ export async function placeTriggerOrder(
         ? order.triggerPrice * (1 + SLIPPAGE)
         : order.triggerPrice * (1 - SLIPPAGE);
     
+    const szDecimals = getAssetMeta(order.coin).szDecimals;
     const orderWire = {
       a: assetIndex,
       b: order.isBuy,
-      p: floatToWire(limitPrice),
-      s: floatToWire(order.size),
+      p: formatPrice(limitPrice, order.coin),
+      s: sizeToWire(order.size, szDecimals),
       r: order.reduceOnly !== false,
       t: {
         trigger: {
@@ -1780,17 +1822,17 @@ export interface TpslModifyOrderSpec {
   tpsl: "tp" | "sl";
 }
 
-function buildTpslModifyOrderWire(spec: TpslModifyOrderSpec, assetIndex: number) {
+function buildTpslModifyOrderWire(spec: TpslModifyOrderSpec, assetIndex: number, szDecimals: number) {
   const triggerPxStr = floatToWire(spec.newPrice);
   const limitGuard = spec.isBuy
     ? spec.newPrice * (1 + TPSL_MODIFY_SLIPPAGE)
     : spec.newPrice * (1 - TPSL_MODIFY_SLIPPAGE);
-  const pStr = floatToWire(limitGuard);
+  const pStr = formatPrice(limitGuard, spec.coin);
   return {
     a: assetIndex,
     b: spec.isBuy,
     p: pStr,
-    s: floatToWire(spec.size),
+    s: sizeToWire(spec.size, szDecimals),
     r: true,
     t: {
       trigger: {
@@ -1824,7 +1866,8 @@ export async function syncOrderToExchange(
     return { ok: false, error: `Unknown asset: ${spec.coin}` };
   }
 
-  const order = buildTpslModifyOrderWire(spec, assetIndex);
+  const szDecimals = getAssetMeta(spec.coin).szDecimals;
+  const order = buildTpslModifyOrderWire(spec, assetIndex, szDecimals);
 
   try {
     const transport = new HttpTransport({ isTestnet: false });
@@ -1868,9 +1911,10 @@ export async function batchSyncOrdersToExchange(
     return { ok: false, error: `Unknown asset: ${coin0}` };
   }
 
+  const szDecimals = getAssetMeta(coin0).szDecimals;
   const modifies = specs.map((spec) => ({
     oid: spec.orderId,
-    order: buildTpslModifyOrderWire(spec, assetIndex),
+    order: buildTpslModifyOrderWire(spec, assetIndex, szDecimals),
   }));
 
   try {

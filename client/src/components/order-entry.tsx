@@ -10,7 +10,9 @@ import {
   placeOrder as placeHyperliquidOrder,
   setLeverage,
   getCoinMaxLeverage,
+  getCoinSzDecimals,
   isSpotCoin,
+  roundOrderSizeForCoin,
 } from "@/lib/hyperliquid-client";
 import { useToast } from "@/hooks/use-toast";
 import { useTradeHandshake } from "@/components/trade-handshake-context";
@@ -87,10 +89,13 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
   };
 
   const setPercent = (pct: number) => {
-    // Spot: can only spend available balance (no leverage); perps: leverage multiplied
-    const effectiveLeverage = isSpot ? 1 : leverage;
-    const maxQty = (balance * effectiveLeverage) / Math.max(currentPrice, 1);
-    setSize((maxQty * pct / 100).toFixed(4));
+    void (async () => {
+      const effectiveLeverage = isSpot ? 1 : leverage;
+      const maxQty = (balance * effectiveLeverage) / Math.max(currentPrice, 1);
+      const rounded = await roundOrderSizeForCoin(coin, (maxQty * pct) / 100);
+      const d = await getCoinSzDecimals(coin);
+      setSize(rounded > 0 ? rounded.toFixed(d) : "");
+    })();
   };
 
   const handleSubmit = async (isBuy: boolean) => {
@@ -117,10 +122,25 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
       return;
     }
 
-    const qty = getSizeNum();
+    let qty = getSizeNum();
     if (qty <= 0) {
       toast({ title: "Invalid size", description: "Enter a position size greater than 0.", variant: "destructive" });
       return;
+    }
+    const qtyRounded = await roundOrderSizeForCoin(coin, qty);
+    if (qtyRounded <= 0) {
+      const d = await getCoinSzDecimals(coin);
+      toast({
+        title: "Invalid size",
+        description: `Size is too small for ${coin}. Use at most ${d} decimal place${d === 1 ? "" : "s"} for this market.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (Math.abs(qtyRounded - qty) > 1e-12) {
+      qty = qtyRounded;
+      const d = await getCoinSzDecimals(coin);
+      setSize(qtyRounded.toFixed(d));
     }
 
     if (orderType === "limit") {
@@ -153,6 +173,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
         let msg = result.error || "Unable to place order";
         if (msg.includes("does not exist")) msg = "Account not found. Please deposit funds via the Portfolio page first.";
         else if (msg.includes("Insufficient")) msg = "Insufficient margin. Please deposit more funds.";
+        else if (/invalid size/i.test(msg))
+          msg = "Order size does not match this market's lot size — use the % buttons or fewer decimals.";
         toast({ title: "Order Failed", description: msg, variant: "destructive" });
         return;
       }
