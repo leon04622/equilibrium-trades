@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, MouseEventParams, Time } from "lightweight-charts";
 import { lightweightTimeToSeconds } from "@/lib/chart-time";
 import { extendTrendlineToWidth } from "@/lib/chart-drawing-geometry";
 import { Button } from "@/components/ui/button";
@@ -79,8 +79,6 @@ type ChartDrawingContextValue = {
   guideText: string | null;
   svgElements: ReactNode;
   isDrawMode: boolean;
-  placeAtClient: (clientX: number, clientY: number) => void;
-  moveCursorAtClient: (clientX: number, clientY: number) => void;
   finishPolyline: () => void;
 };
 
@@ -122,24 +120,17 @@ function distToSegment(
   return Math.hypot(px - lx, py - ly);
 }
 
-/** Map screen coords → chart time/price (same space as lightweight-charts). */
-function clientToChartPoint(
+/** Map lightweight-charts click/crosshair params → stored point + pixel coords. */
+function paramToChartPoint(
   chart: IChartApi,
   series: ISeriesApi<"Candlestick">,
-  clientX: number,
-  clientY: number,
+  param: MouseEventParams,
 ): { pt: ChartDrawingPoint; px: number; py: number } | null {
-  const el = chart.chartElement();
-  const rect = el.getBoundingClientRect();
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
-
-  const rawTime = chart.timeScale().coordinateToTime(x);
-  const price = series.coordinateToPrice(y);
-  const timeSec = rawTime != null ? lightweightTimeToSeconds(rawTime as Time) : null;
+  if (!param.point || param.time === undefined) return null;
+  const timeSec = lightweightTimeToSeconds(param.time as Time);
+  const price = series.coordinateToPrice(param.point.y);
   if (timeSec == null || price == null || !Number.isFinite(price)) return null;
-
-  return { pt: { time: timeSec, price }, px: x, py: y };
+  return { pt: { time: timeSec, price }, px: param.point.x, py: param.point.y };
 }
 
 export function ChartDrawingProvider({
@@ -154,7 +145,7 @@ export function ChartDrawingProvider({
   children,
 }: ChartDrawingProviderProps) {
   const { address } = useWallet();
-  const [tool, setTool] = useState<DrawTool>("trendline");
+  const [tool, setTool] = useState<DrawTool>("select");
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [draftPoints, setDraftPoints] = useState<ChartDrawingPoint[]>([]);
   const [cursorPoint, setCursorPoint] = useState<ChartDrawingPoint | null>(null);
@@ -317,34 +308,50 @@ export function ChartDrawingProvider({
     [tool, draftPoints, commitDrawing, drawings, chartRef, seriesRef],
   );
 
-  const placeAtClient = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!enabled || tool === "select") return;
-      const chart = chartRef.current;
-      const series = seriesRef.current;
-      if (!chart || !series) return;
-      const hit = clientToChartPoint(chart, series, clientX, clientY);
+  /** Native chart clicks — reliable time/price (TradingView-style). */
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series || !enabled || tool === "select") return;
+
+    const onClick = (param: MouseEventParams) => {
+      const hit = paramToChartPoint(chart, series, param);
       if (!hit) return;
       applyChartPoint(hit.pt, hit.px, hit.py);
-    },
-    [enabled, tool, chartRef, seriesRef, applyChartPoint],
-  );
+    };
 
-  const moveCursorAtClient = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!enabled || tool === "select") return;
-      if (clientX < 0 || clientY < 0) {
+    chart.subscribeClick(onClick);
+    return () => chart.unsubscribeClick(onClick);
+  }, [chartRef, seriesRef, enabled, tool, applyChartPoint, chartReadyTick]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series || !enabled || tool === "select") return;
+
+    const onCrosshair = (param: MouseEventParams) => {
+      if (!param.point) {
         setCursorPoint(null);
         return;
       }
-      const chart = chartRef.current;
-      const series = seriesRef.current;
-      if (!chart || !series) return;
-      const hit = clientToChartPoint(chart, series, clientX, clientY);
-      setCursorPoint(hit?.pt ?? null);
-    },
-    [enabled, tool, chartRef, seriesRef],
-  );
+      let timeSec: number | null = null;
+      if (param.time !== undefined) {
+        timeSec = lightweightTimeToSeconds(param.time as Time);
+      } else {
+        const rawTime = chart.timeScale().coordinateToTime(param.point.x);
+        timeSec = rawTime != null ? lightweightTimeToSeconds(rawTime as Time) : null;
+      }
+      const price = series.coordinateToPrice(param.point.y);
+      if (timeSec == null || price == null || !Number.isFinite(price)) {
+        setCursorPoint(null);
+        return;
+      }
+      setCursorPoint({ time: timeSec, price });
+    };
+
+    chart.subscribeCrosshairMove(onCrosshair);
+    return () => chart.unsubscribeCrosshairMove(onCrosshair);
+  }, [chartRef, seriesRef, enabled, tool, chartReadyTick]);
 
   const finishPolyline = useCallback(() => {
     if (tool !== "polyline" || draftPoints.length < 2) return;
@@ -371,7 +378,7 @@ export function ChartDrawingProvider({
     });
   }, [chartRef, enabled, tool, chartReadyTick]);
 
-  /** Block TP/SL and other overlays from stealing clicks while drawing. */
+  /** Block TP/SL / order-line drag handles from stealing clicks while drawing. */
   useEffect(() => {
     const pane = paneRef.current;
     if (!pane || !enabled) return;
@@ -380,7 +387,14 @@ export function ChartDrawingProvider({
       node.style.pointerEvents = block ? "none" : "auto";
     });
     const apex = pane.querySelector<SVGElement>("[data-testid='apex-sovereign-order-layer']");
-    if (apex) apex.style.pointerEvents = "none";
+    if (apex) apex.style.pointerEvents = block ? "none" : "auto";
+    pane.querySelectorAll<HTMLElement>("[data-testid^='drag-handle-']").forEach((node) => {
+      node.style.pointerEvents = block ? "none" : "auto";
+    });
+    const orderLines = pane.querySelector<HTMLElement>("[data-testid='chart-order-lines']");
+    if (orderLines) {
+      orderLines.style.pointerEvents = block ? "none" : "none";
+    }
   }, [paneRef, enabled, tool, layoutTick]);
 
   useEffect(() => {
@@ -409,10 +423,13 @@ export function ChartDrawingProvider({
         setTool("trendline");
         setDraftPoints([]);
       }
+      if (e.key === "Enter" && tool === "polyline") {
+        finishPolyline();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [enabled]);
+  }, [enabled, tool, finishPolyline]);
 
   const svgElements = useMemo(() => {
     void layoutTick;
@@ -654,7 +671,7 @@ export function ChartDrawingProvider({
     }
 
     return paths;
-  }, [drawings, draftPoints, tool, cursorPoint, chartRef, seriesRef, paneRef, layoutTick]);
+  }, [drawings, draftPoints, tool, cursorPoint, chartRef, seriesRef, paneRef, layoutTick, chartReadyTick]);
 
   const guideText =
     tool === "select"
@@ -670,7 +687,7 @@ export function ChartDrawingProvider({
               ? "Click corner"
               : "Click opposite corner"
             : tool === "polyline"
-              ? "Click points · double-click to finish"
+              ? "Click points · Enter to finish"
               : tool === "hline"
                 ? "Click price level"
                 : tool === "erase"
@@ -688,21 +705,9 @@ export function ChartDrawingProvider({
       guideText,
       svgElements,
       isDrawMode,
-      placeAtClient,
-      moveCursorAtClient,
       finishPolyline,
     }),
-    [
-      enabled,
-      tool,
-      drawings,
-      guideText,
-      svgElements,
-      isDrawMode,
-      placeAtClient,
-      moveCursorAtClient,
-      finishPolyline,
-    ],
+    [enabled, tool, drawings, guideText, svgElements, isDrawMode, finishPolyline],
   );
 
   return (
@@ -813,33 +818,15 @@ export function ChartDrawingCanvas() {
   );
 }
 
-/**
- * Full-pane click capture — same model as TradingView / Hyperliquid draw tools.
- * Active whenever a draw tool (not cursor) is selected.
- */
+/** Marks draw mode for tests; clicks go to lightweight-charts subscribeClick. */
 export function ChartDrawingInteractionLayer() {
-  const { enabled, isDrawMode, placeAtClient, moveCursorAtClient, finishPolyline } =
-    useChartDrawingCtx();
-
+  const { enabled, isDrawMode } = useChartDrawingCtx();
   if (!enabled || !isDrawMode) return null;
-
   return (
     <div
-      className="absolute inset-0 z-[70] cursor-crosshair"
-      style={{ touchAction: "none" }}
+      className="absolute inset-0 z-[25] pointer-events-none cursor-crosshair"
       data-testid="chart-drawing-interaction"
-      onPointerMove={(e) => moveCursorAtClient(e.clientX, e.clientY)}
-      onPointerLeave={() => moveCursorAtClient(-1, -1)}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.button !== 0) return;
-        placeAtClient(e.clientX, e.clientY);
-      }}
-      onDoubleClick={(e) => {
-        e.preventDefault();
-        finishPolyline();
-      }}
+      aria-hidden
     />
   );
 }
