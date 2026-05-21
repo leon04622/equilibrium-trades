@@ -89,8 +89,8 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               Add to trading
             </SheetTitle>
             <SheetDescription>
-              Move USDC from your Arbitrum wallet into Hyperliquid. Each new deposit needs a few wallet steps (not
-              every time you trade).
+              Move USDC from Arbitrum into your trading balance. A new deposit is two Arbitrum confirmations (sign +
+              send) — not repeated when you trade.
             </SheetDescription>
           </SheetHeader>
 
@@ -116,13 +116,19 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             )}
 
             <div className="rounded-lg border border-border/80 bg-muted/30 p-3 text-[11px] text-muted-foreground space-y-1.5">
-              <p className="font-medium text-foreground">Wallet confirmations (Circle CCTP)</p>
+              <p className="font-medium text-foreground">What your wallet will ask</p>
               <p>
-                <strong className="text-foreground">New deposit:</strong> sign USDC on Arbitrum → confirm burn → wait
-                1–5 min → confirm <strong className="text-foreground">one mint</strong> on HyperEVM (chain 999).
+                <strong className="text-foreground">Step 1:</strong> Sign typed data (authorizes USDC — no gas).
               </p>
               <p>
-                <strong className="text-foreground">Resume:</strong> usually only the HyperEVM mint (one confirmation).
+                <strong className="text-foreground">Step 2:</strong> Confirm one transaction on Arbitrum (sends USDC
+                via Circle CCTP).
+              </p>
+              <p>
+                Then we wait for Circle (~1–5 min).{" "}
+                {deposit.depositCfg?.relayMintEnabled
+                  ? "We finish the HyperEVM step for you — no third wallet prompt."
+                  : "You may need one last confirm on HyperEVM (chain 999) unless relay is enabled on the server."}
               </p>
             </div>
 

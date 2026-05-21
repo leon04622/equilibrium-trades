@@ -196,11 +196,13 @@ export function useCctpDeposit() {
         resumeFrom: hasResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
         signal: abort.signal,
         onStep: (step: CctpDepositStep, detail?: string) => {
-          if (step === "approve") {
-            setDepositStep("Sign USDC authorization in your wallet...");
+          if (step === "authorize" || step === "approve") {
+            setDepositStep(
+              "Step 1 of 2 — Authorize USDC (signature only, no gas). This is not a separate approval transaction.",
+            );
           } else if (step === "burn") {
             setDepositAwaitingChain(true);
-            setDepositStep("Submitting CCTP burn on Arbitrum...");
+            setDepositStep("Step 2 of 2 — Confirm bridge transfer on Arbitrum (one transaction)…");
           } else if (step === "attestation") {
             setDepositAwaitingChain(true);
             setDepositStep(
@@ -209,9 +211,12 @@ export function useCctpDeposit() {
                 : "Waiting for Circle attestation…",
             );
           } else if (step === "mint") {
-            setDepositAwaitingChain(true);
+            setDepositAwaitingChain(
+              !detail?.includes("no wallet prompt"),
+            );
             setDepositStep(
-              detail ?? "Confirm mint on HyperEVM to credit your trading account…",
+              detail ??
+                "Finishing deposit — confirm on HyperEVM only if your wallet prompts (chain 999)…",
             );
           } else if (step === "done") {
             setDepositAwaitingChain(false);
@@ -222,7 +227,9 @@ export function useCctpDeposit() {
           cctpAttestationCelebratedRef.current = true;
           toast({
             title: "Attestation ready",
-            description: "Confirm the mint in your wallet if prompted.",
+            description: cfg.relayMintEnabled
+              ? "Finishing your deposit automatically…"
+              : "Confirm the final mint in your wallet if prompted (HyperEVM).",
           });
         },
       });

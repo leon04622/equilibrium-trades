@@ -55,6 +55,9 @@ import {
   loadProfessionalDepositConfig,
   fetchCctpBurnForwardFeeMax,
   fetchCircleAttestation,
+  fetchCircleAttestationResolved,
+  isCctpRelayMintConfigured,
+  relayCctpMintOnHyperEvm,
 } from "./deposit-service";
 import { listAllVaultVideos, upsertVaultVideo, deleteVaultVideoById } from "./video-service";
 import {
@@ -1217,6 +1220,7 @@ export async function registerRoutes(
         minFinalityThreshold: cfg.minFinalityThreshold,
         verifiedHyperliquidBridge2Arbitrum: cfg.verifiedHyperliquidBridge2Arbitrum,
         irisAttestationPath: "/v1/attestations/{messageHash}",
+        relayMintEnabled: isCctpRelayMintConfigured(),
       });
     } catch (e) {
       console.error("GET /api/cctp/deposit-config:", e);
@@ -1238,6 +1242,67 @@ export async function registerRoutes(
     } catch (e) {
       console.error("GET /api/cctp/fees:", e);
       const msg = e instanceof Error ? e.message : String(e);
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  /**
+   * Finish CCTP on HyperEVM via server relayer (no wallet mint prompt).
+   * Set `CCTP_MINT_RELAYER_PRIVATE_KEY` (HYPE on chain 999). Body: messageHex, attestationHex, messageHash?.
+   */
+  app.post("/api/cctp/relay-mint", async (req: Request, res: Response) => {
+    try {
+      if (!isCctpRelayMintConfigured()) {
+        return res.status(501).json({ error: "Relay mint not configured", relayMintEnabled: false });
+      }
+      const wallet = resolveWalletAddressFromRequest(req)?.trim().toLowerCase();
+      if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+        return res.status(401).json({ error: "x-wallet-address or Authorization: Bearer <0x…> required" });
+      }
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const messageHex = typeof (body as any).messageHex === "string" ? String((body as any).messageHex).trim() : "";
+      const attestationHex =
+        typeof (body as any).attestationHex === "string" ? String((body as any).attestationHex).trim() : "";
+      const messageHash =
+        typeof (body as any).messageHash === "string" ? String((body as any).messageHash).trim() : "";
+      if (!messageHex || !attestationHex) {
+        return res.status(400).json({ error: "messageHex and attestationHex required" });
+      }
+      const cfg = loadProfessionalDepositConfig();
+      if (messageHash && /^0x[a-fA-F0-9]{64}$/.test(messageHash)) {
+        const iris = await fetchCircleAttestationResolved(
+          messageHash,
+          cfg.irisApiBase,
+          cfg.sourceDomain,
+          typeof (body as any).burnTxHash === "string" ? String((body as any).burnTxHash).trim() : null,
+        );
+        if (iris.status !== "complete" || !iris.attestation) {
+          return res.status(400).json({ error: "Circle attestation not complete" });
+        }
+        if (iris.attestation.toLowerCase() !== attestationHex.toLowerCase()) {
+          return res.status(400).json({ error: "Attestation mismatch" });
+        }
+      }
+      const out = await relayCctpMintOnHyperEvm(cfg, messageHex, attestationHex);
+      await persistCctpBridgeProgress(wallet, {
+        stage: "done",
+        messageHash: messageHash || null,
+        cctpMessageHex: messageHex,
+        attestationHex,
+        burnTxHash: typeof (body as any).burnTxHash === "string" ? String((body as any).burnTxHash).trim() : null,
+      });
+      res.json({
+        success: true,
+        txHash: out.txHash || null,
+        alreadyDone: !!out.alreadyDone,
+        relayMintEnabled: true,
+      });
+    } catch (e) {
+      console.error("POST /api/cctp/relay-mint:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "RELAY_DISABLED") {
+        return res.status(501).json({ error: "Relay mint not configured", relayMintEnabled: false });
+      }
       res.status(502).json({ error: msg });
     }
   });

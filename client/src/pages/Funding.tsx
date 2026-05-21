@@ -362,20 +362,23 @@ export default function Funding() {
         hyperCoreRecipient: address ?? undefined,
         resumeFrom: hasResumableDeposit ? userSync?.cctpBridgeProgress ?? null : null,
         onStep: (step: CctpDepositStep, detail?: string) => {
-          if (step === "approve") setDepositStep("Sign USDC authorization for Circle CCTP extension...");
-          else if (step === "burn") {
+          if (step === "authorize" || step === "approve") {
+            setDepositStep("Step 1 of 2 — Authorize USDC (signature only, no gas)…");
+          } else if (step === "burn") {
             setDepositAwaitingChain(true);
-            setDepositStep("Submit Circle CCTP burn on Arbitrum via CCTP extension...");
+            setDepositStep("Step 2 of 2 — Confirm bridge on Arbitrum (one transaction)…");
           } else if (step === "attestation") {
             setDepositAwaitingChain(true);
             setDepositStep(
               detail
-                ? `Waiting for Circle attestation (Iris)... ${detail.slice(0, 12)}...`
-                : "Waiting for Circle attestation (Iris)...",
+                ? `Waiting for Circle attestation… ${detail.slice(0, 12)}…`
+                : "Waiting for Circle attestation (~1–5 min)…",
             );
           } else if (step === "mint") {
-            setDepositAwaitingChain(true);
-            setDepositStep(detail ?? "Switch to HyperEVM (999) and confirm mint - forwarder credits HyperCore...");
+            setDepositAwaitingChain(!detail?.includes("no wallet prompt"));
+            setDepositStep(
+              detail ?? "Finishing deposit — confirm on HyperEVM only if your wallet prompts…",
+            );
           } else if (step === "done") {
             setDepositAwaitingChain(false);
             setDepositStep("");
@@ -384,9 +387,10 @@ export default function Funding() {
         onAttestationConfirmed: () => {
           cctpAttestationCelebratedRef.current = true;
           toast({
-            title: "Success: Funds are now live in your trading account",
-            description:
-              "Circle attestation is ready. If your wallet asks, confirm the mint on HyperEVM to finalize delivery to HyperCore.",
+            title: "Attestation ready",
+            description: cfg.relayMintEnabled
+              ? "Finishing your deposit automatically…"
+              : "Confirm the final mint in your wallet if prompted (HyperEVM).",
           });
         },
       });

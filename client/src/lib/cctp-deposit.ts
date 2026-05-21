@@ -36,12 +36,15 @@ export type CctpDepositConfig = {
   minDepositUsdc: number;
   minFinalityThreshold: number;
   verifiedHyperliquidBridge2Arbitrum: string;
+  /** When true, server submits HyperEVM mint — user only signs on Arbitrum (2 steps). */
+  relayMintEnabled?: boolean;
 };
 
 export type HyperliquidDepositConfig = CctpDepositConfig;
 
 export type CctpDepositStep =
   | "idle"
+  | "authorize"
   | "approve"
   | "burn"
   | "attestation"
@@ -128,7 +131,50 @@ function parseCctpConfig(data: unknown): CctpDepositConfig {
     minDepositUsdc: o.minDepositUsdc,
     minFinalityThreshold: o.minFinalityThreshold,
     verifiedHyperliquidBridge2Arbitrum: getAddress(o.verifiedHyperliquidBridge2Arbitrum as string),
+    relayMintEnabled: o.relayMintEnabled === true,
   };
+}
+
+async function relayMintViaServer(
+  wallet: string,
+  messageHex: string,
+  messageHash: string,
+  attestationHex: string,
+  burnTxHash: string | null,
+): Promise<{ ok: true; txHash: string } | { ok: false; useWallet: boolean; error?: string }> {
+  try {
+    const r = await fetch("/api/cctp/relay-mint", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-wallet-address": wallet,
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        messageHex,
+        attestationHex,
+        messageHash,
+        burnTxHash,
+      }),
+    });
+    const j = (await r.json().catch(() => ({}))) as {
+      success?: boolean;
+      txHash?: string | null;
+      alreadyDone?: boolean;
+      error?: string;
+    };
+    if (r.status === 501) return { ok: false, useWallet: true };
+    if (!r.ok) {
+      return { ok: false, useWallet: true, error: j.error || `Relay mint failed (${r.status})` };
+    }
+    if (j.success) {
+      return { ok: true, txHash: j.txHash || burnTxHash || "" };
+    }
+    return { ok: false, useWallet: true, error: j.error };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, useWallet: true, error: msg };
+  }
 }
 
 export async function fetchCctpDepositConfig(
@@ -483,7 +529,35 @@ export async function depositUsdcToHyperliquid(
     msgHash: string,
     attestHex: string,
   ): Promise<{ mintTxHash: string; messageHash: string }> {
-    onStep("mint", "Switch to HyperEVM (999) and confirm mint in your wallet");
+    if (cfg.relayMintEnabled) {
+      onStep("mint", "Finishing deposit on HyperEVM (no wallet prompt)…");
+      await postBridgeProgress(wallet, {
+        stage: "mint",
+        burnTxHash,
+        txHash: burnTxHash,
+        messageHash: msgHash,
+        cctpMessageHex: msgHex,
+        attestationHex: attestHex,
+        amountUsdc: amtForLog,
+      });
+      const relayed = await relayMintViaServer(wallet, msgHex, msgHash, attestHex, burnTxHash);
+      if (relayed.ok) {
+        await postBridgeProgress(wallet, {
+          stage: "done",
+          burnTxHash,
+          txHash: burnTxHash,
+          messageHash: msgHash,
+          cctpMessageHex: msgHex,
+          attestationHex: attestHex,
+          amountUsdc: amtForLog,
+        });
+        onStep("done");
+        return { mintTxHash: relayed.txHash, messageHash: msgHash };
+      }
+      console.warn("[CCTP] relay mint unavailable, falling back to wallet:", relayed.error);
+    }
+
+    onStep("mint", "Last step: switch to HyperEVM (999) and confirm mint in your wallet");
     await postBridgeProgress(wallet, {
       stage: "mint",
       burnTxHash,
@@ -630,9 +704,9 @@ export async function depositUsdcToHyperliquid(
 
     if (!signer.provider) throw new Error("Wallet provider unavailable.");
 
-    onStep("approve");
+    onStep("authorize");
     await postBridgeProgress(wallet, {
-      stage: "approve",
+      stage: "authorize",
       amountUsdc: amount,
       forwardFeeMax: Number(maxFee) / 1e6,
     });

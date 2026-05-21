@@ -202,6 +202,72 @@ function normalizeIrisAttestation(att: unknown): string | null {
 }
 
 /** Circle Iris v1 — `messageHash` = keccak256(message bytes from `MessageSent`). */
+const MESSAGE_TRANSMITTER_ABI = [
+  "function receiveMessage(bytes message, bytes attestation) external returns (bool)",
+] as const;
+
+export function isCctpRelayMintConfigured(): boolean {
+  const pk = process.env.CCTP_MINT_RELAYER_PRIVATE_KEY?.trim();
+  return !!pk && /^0x[a-fA-F0-9]{64}$/.test(pk);
+}
+
+function isLikelyMintReplayError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    (m.includes("nonce") && (m.includes("used") || m.includes("already"))) ||
+    m.includes("already received") ||
+    m.includes("message already")
+  );
+}
+
+/**
+ * Submit Circle `receiveMessage` on HyperEVM so the user skips a third wallet confirmation.
+ * Requires `CCTP_MINT_RELAYER_PRIVATE_KEY` funded with HYPE on HyperEVM (chain 999).
+ */
+export async function relayCctpMintOnHyperEvm(
+  cfg: ProfessionalDepositServerConfig,
+  messageHex: string,
+  attestationHex: string,
+): Promise<{ txHash: string; alreadyDone?: boolean }> {
+  const pk = process.env.CCTP_MINT_RELAYER_PRIVATE_KEY?.trim();
+  if (!pk || !/^0x[a-fA-F0-9]{64}$/.test(pk)) {
+    throw new Error("RELAY_DISABLED");
+  }
+  const msg = messageHex.trim();
+  const att = attestationHex.trim();
+  if (!/^0x[0-9a-fA-F]+$/.test(msg) || msg.length < 10) {
+    throw new Error("Invalid message bytes");
+  }
+  if (!/^0x[0-9a-fA-F]+$/.test(att) || att.length < 10) {
+    throw new Error("Invalid attestation");
+  }
+
+  const rpc =
+    process.env.CCTP_HYPEREVM_RPC?.trim() || "https://rpc.hyperliquid.xyz/evm";
+  const { Wallet, JsonRpcProvider, Contract } = await import("ethers");
+  const provider = new JsonRpcProvider(rpc, cfg.hyperevmChainId);
+  const relayer = new Wallet(pk, provider);
+  const mt = new Contract(
+    cfg.messageTransmitterHyperEvm,
+    MESSAGE_TRANSMITTER_ABI,
+    relayer,
+  );
+
+  try {
+    await mt.receiveMessage.staticCall(msg, att);
+  } catch (simErr: unknown) {
+    const simMsg = simErr instanceof Error ? simErr.message : String(simErr);
+    if (isLikelyMintReplayError(simMsg)) {
+      return { txHash: "", alreadyDone: true };
+    }
+    throw new Error(simMsg);
+  }
+
+  const tx = await mt.receiveMessage(msg, att);
+  const receipt = await tx.wait();
+  return { txHash: receipt?.hash ?? tx.hash };
+}
+
 export async function fetchCircleAttestation(
   messageHash: string,
   irisBase: string,
