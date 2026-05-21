@@ -541,7 +541,9 @@ export default function AdminCommandCenter() {
               <div>
                 <CardTitle>Live CRM</CardTitle>
                 <CardDescription>
-                  MongoDB users collection (or Postgres wallet_users) — wallet, email, tier, subscription status.
+                  Builder status: Linked = HL agent + platform builder fee on file; Sign-in only =
+                  Equilibrium wallet sign-in without trading setup; Not linked = neither. USDC
+                  deposits and HL balances are not shown in this column.
                 </CardDescription>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -699,9 +701,14 @@ export default function AdminCommandCenter() {
                             </TableCell>
                             <TableCell className="align-top text-xs">{row.status ?? "—"}</TableCell>
                             <TableCell className="align-top text-xs">
-                              {row.builderStatus === "Linked" ? (
+                              {row.builderStatus === "Linked" ||
+                              (row.builderStatus && row.builderStatus.startsWith("Linked")) ? (
                                 <Badge variant="default" className="text-[10px] bg-emerald-600/90">
-                                  Linked
+                                  {row.builderStatus}
+                                </Badge>
+                              ) : row.builderStatus === "Sign-in only" ? (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  Sign-in only
                                 </Badge>
                               ) : (
                                 <span className="text-muted-foreground">{row.builderStatus ?? "Not linked"}</span>

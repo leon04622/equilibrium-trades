@@ -33,6 +33,7 @@ import {
 } from "./master-admin";
 import { issueCommandCenterWsToken } from "./command-center-ws-token";
 import { pushAdminLog } from "./admin-log-bus";
+import { crmBuilderStatusFromUser } from "./crm-builder-status";
 import {
   tryConnectMongoVault,
   upsertMongoCrmUserFromWallet,
@@ -1894,7 +1895,7 @@ export async function registerRoutes(
             subscriptionExpiresAt: u.subscriptionExpiresAt,
           }),
           manualProOverride: u.manualProOverride ?? false,
-          builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
+          builderStatus: crmBuilderStatusFromUser(u),
         })),
       );
     } catch (e) {
@@ -3123,15 +3124,17 @@ export async function registerRoutes(
       const [hl, allUsers] = await Promise.all([getPerpExchangeAggregates(), storage.getAllWalletUsers()]);
       const handshakeComplete = allUsers.filter((u) => u.instantTradingCompletedAt).length;
       const builderApproved = allUsers.filter((u) => u.builderCodeApproved).length;
+      const builderLinked = allUsers.filter((u) => u.isBuilderLinked).length;
       res.json({
         hyperliquid: hl,
         sovereignCohort: {
           totalWalletRows: allUsers.length,
           instantTradingHandshakeComplete: handshakeComplete,
           builderCodeApproved: builderApproved,
+          builderFeeLinked: builderLinked,
         },
         note:
-          "Exchange totals are venue-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+          "Exchange totals are venue-wide (public API). builderCodeApproved = Equilibrium sign-in only; builderFeeLinked = HL agent + builder fee recorded (admin CRM “Linked”). Deposits are not reflected in builder status.",
       });
     } catch (e) {
       console.error("command-center analytics:", e);
@@ -3283,15 +3286,17 @@ export async function registerRoutes(
       const [hl, allUsers] = await Promise.all([getPerpExchangeAggregates(), storage.getAllWalletUsers()]);
       const handshakeComplete = allUsers.filter((u) => u.instantTradingCompletedAt).length;
       const builderApproved = allUsers.filter((u) => u.builderCodeApproved).length;
+      const builderLinked = allUsers.filter((u) => u.isBuilderLinked).length;
       res.json({
         hyperliquid: hl,
         sovereignCohort: {
           totalWalletRows: allUsers.length,
           instantTradingHandshakeComplete: handshakeComplete,
           builderCodeApproved: builderApproved,
+          builderFeeLinked: builderLinked,
         },
         note:
-          "Exchange totals are venue-wide (public API). Builder-attributed volume is not exposed as a single public aggregate; use sovereign cohort counts for users recorded in Equilibrium.",
+          "Exchange totals are venue-wide (public API). builderCodeApproved = Equilibrium sign-in only; builderFeeLinked = HL agent + builder fee recorded (admin CRM “Linked”). Deposits are not reflected in builder status.",
       });
     } catch (e) {
       console.error("admin-equilibrium analytics:", e);

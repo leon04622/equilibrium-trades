@@ -15,6 +15,7 @@ import { emitSupportMessage } from "./support-events";
 import { deleteVaultVideoById, listAllVaultVideos, upsertVaultVideo, vaultVideoDocToApi } from "./video-service";
 import { deleteLocalUploadedVideoByObjectPath } from "./local-upload-routes";
 import { storage } from "./storage";
+import { crmBuilderStatusFromUser } from "./crm-builder-status";
 const SUPPORT_COLL = process.env.MONGO_SUPPORT_COLLECTION || "support_tickets";
 
 /** Logical `users` / CRM store in MongoDB (`MONGO_USERS_COLLECTION` or `MONGO_CRM_COLLECTION`, default `users`). */
@@ -257,6 +258,7 @@ export async function upsertMongoCrmUserFromWallet(user: WalletUser): Promise<vo
     manualProOverride: user.manualProOverride ?? false,
     status: crmSubscriptionStatusFromWallet(user),
     isBuilderLinked: user.isBuilderLinked ?? false,
+    builderCodeApproved: user.builderCodeApproved ?? false,
   };
   /** Lock CRM **Pro / Mentor** when `manualProOverride` was granted in Mongo but Postgres row still shows `free` (sync lag). */
   if (existing && existing.manualProOverride === true) {
@@ -656,7 +658,18 @@ function mongoDocToCrmRow(u: Document) {
     subTier: displayTier,
     status,
     manualProOverride: Boolean(u.manualProOverride),
-    builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
+    builderStatus: crmBuilderStatusFromUser({
+      isBuilderLinked: Boolean(u.isBuilderLinked),
+      builderCodeApproved: Boolean(u.builderCodeApproved),
+      instantTradingCompletedAt:
+        u.instantTradingCompletedAt instanceof Date
+          ? u.instantTradingCompletedAt
+          : u.instantTradingCompletedAt
+            ? new Date(String(u.instantTradingCompletedAt))
+            : null,
+      referralBuilderStatus:
+        u.referralBuilderStatus != null ? String(u.referralBuilderStatus) : null,
+    }),
   };
 }
 
@@ -793,7 +806,7 @@ function createHandle(db: Db): MongoVaultHandle {
             subTier: crmDisplayTier(u.subscriptionTier),
             status: crmSubscriptionStatusFromWallet(u),
             manualProOverride: Boolean(u.manualProOverride),
-            builderStatus: u.isBuilderLinked ? "Linked" : "Not linked",
+            builderStatus: crmBuilderStatusFromUser(u),
           });
         }
 

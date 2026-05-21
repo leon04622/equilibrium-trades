@@ -7,6 +7,7 @@ import {
   clearHyperliquidTradingSession,
 } from "@/lib/hyperliquid-client";
 import { hasLocalLifetimeHandshakeDone } from "@/lib/TradeExecution";
+import { syncCrmBuilderLinkIfSessionReady } from "@/lib/crm-builder-link-sync";
 import { queryClient } from "@/lib/queryClient";
 import { humanizeWalletConnectError } from "@/lib/wallet-errors";
 
@@ -466,6 +467,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (result.success) {
         setHyperliquidSessionReady(true);
         await trySetReferrer(signer);
+        void syncCrmBuilderLinkIfSessionReady(address);
       } else {
         setHyperliquidSessionReady(isHyperliquidTradingSessionReady(address));
       }
@@ -481,6 +483,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (isHyperliquidTradingSessionReady(address)) {
       setHyperliquidSessionReady(true);
       trySetReferrer(signer).catch(() => {});
+      void syncCrmBuilderLinkIfSessionReady(address);
       return;
     }
     const mayRestore =
@@ -492,6 +495,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (result.success || isHyperliquidTradingSessionReady(address)) {
         setHyperliquidSessionReady(true);
         trySetReferrer(signer).catch(() => {});
+        void syncCrmBuilderLinkIfSessionReady(address);
       }
     });
     return () => {
