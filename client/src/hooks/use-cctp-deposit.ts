@@ -45,13 +45,10 @@ export function useCctpDeposit() {
   const [preparing, setPreparing] = useState(false);
   const cctpAttestationCelebratedRef = useRef(false);
   const depositAbortRef = useRef<AbortController | null>(null);
-  const autoResumeAttemptedRef = useRef(false);
 
   const bridgeProgress = userSync?.cctpBridgeProgress ?? null;
   const hasResumableDeposit = isCctpPostBurnResumeEligible(bridgeProgress);
-  const isResumeOnly = hasResumableDeposit;
-  const hasArbitrumGasForNewDeposit =
-    isResumeOnly || hasEnoughArbitrumGasForBurn(walletEthArbitrum);
+  const hasArbitrumGasForNewDeposit = hasEnoughArbitrumGasForBurn(walletEthArbitrum);
 
   const prepareDeposit = useCallback(async () => {
     if (!address) return;
@@ -89,7 +86,6 @@ export function useCctpDeposit() {
     setDepositStep("");
     setDepositAwaitingChain(false);
     cctpAttestationCelebratedRef.current = false;
-    autoResumeAttemptedRef.current = false;
   }, []);
 
   const dismissStuckDeposit = useCallback(async () => {
@@ -116,9 +112,12 @@ export function useCctpDeposit() {
     });
   }, []);
 
-  const runDeposit = useCallback(async () => {
+  const runDeposit = useCallback(async (options?: { resumePending?: boolean }) => {
+    const resumePending = options?.resumePending === true && hasResumableDeposit;
+    const isResumeOnly = resumePending;
+
     cctpAttestationCelebratedRef.current = false;
-    setDepositStep("Checking wallet...");
+    setDepositStep("Checking wallet and network…");
     setDepositResult(null);
 
     if (!address) {
@@ -239,7 +238,7 @@ export function useCctpDeposit() {
       const result = await depositUsdcToHyperliquid(activeSigner, depositAmountArg, {
         depositConfig: cfg,
         hyperCoreRecipient: address ?? undefined,
-        resumeFrom: hasResumableDeposit ? bridgeProgress : null,
+        resumeFrom: isResumeOnly ? bridgeProgress : null,
         signal: abort.signal,
         onStep: (step: CctpDepositStep, detail?: string) => {
           if (step === "authorize" || step === "approve") {
@@ -266,7 +265,7 @@ export function useCctpDeposit() {
             );
           } else if (step === "done") {
             setDepositAwaitingChain(false);
-            setDepositStep("");
+            setDepositStep("Completing deposit…");
           }
         },
         onAttestationConfirmed: () => {
@@ -292,7 +291,6 @@ export function useCctpDeposit() {
       setDepositResult(success ? { success: true, txHash: result.txHash } : { ...result, error: displayError });
 
       if (success) {
-        autoResumeAttemptedRef.current = false;
         if (address) await clearCctpBridgeProgress(address);
         window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
         void queryClient.invalidateQueries({ queryKey: ["/api/user/sync"] });
@@ -339,7 +337,6 @@ export function useCctpDeposit() {
     walletUsdcReady,
     bridgeProgress,
     hasResumableDeposit,
-    isResumeOnly,
     refreshAccount,
     refreshWalletUsdc,
     toast,
@@ -357,7 +354,6 @@ export function useCctpDeposit() {
     preparing,
     walletUsdcArbitrum,
     hasResumableDeposit,
-    isResumeOnly,
     hasArbitrumGasForNewDeposit,
     walletEthArbitrum,
     walletUsdcReady,

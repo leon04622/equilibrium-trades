@@ -2,8 +2,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -53,7 +51,6 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
   const { walletUsdcArbitrum, walletEthArbitrum, isLoadingWalletUsdc } = useTrading();
   const [open, setOpen] = useState(false);
   const deposit = useCctpDeposit();
-  const autoResumeRanRef = useRef(false);
 
   const { prepareDeposit, resetDepositState } = deposit;
 
@@ -62,28 +59,10 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
       navigate("/funding?tab=deposit");
       return;
     }
-    autoResumeRanRef.current = false;
     resetDepositState();
     setOpen(true);
     void prepareDeposit();
   }, [address, navigate, prepareDeposit, resetDepositState]);
-
-  useEffect(() => {
-    if (!open) {
-      autoResumeRanRef.current = false;
-      return;
-    }
-    if (
-      deposit.hasResumableDeposit &&
-      !deposit.depositing &&
-      !deposit.depositResult &&
-      !autoResumeRanRef.current
-    ) {
-      autoResumeRanRef.current = true;
-      const id = window.setTimeout(() => void deposit.runDeposit(), 500);
-      return () => window.clearTimeout(id);
-    }
-  }, [open, deposit.hasResumableDeposit, deposit.depositing, deposit.depositResult, deposit.runDeposit]);
 
   const openTransfer = useCallback(() => {
     navigate("/portfolio?transfer=1");
@@ -92,11 +71,17 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
   const isOnArbitrum = chainId === 42161;
   const maxBal = walletUsdcArbitrum ?? 0;
   const minDeposit = deposit.depositCfg?.minDepositUsdc ?? 5;
-  const canSubmit =
+  const statusLine =
+    deposit.depositStep ||
+    (deposit.depositing
+      ? "Working… check Rabby or MetaMask for a signature or transaction prompt."
+      : "");
+  const canSubmitNew =
     !deposit.depositing &&
     !isLoadingWalletUsdc &&
     !!deposit.depositCfg &&
     deposit.hasArbitrumGasForNewDeposit &&
+    !deposit.hasResumableDeposit &&
     deposit.depositAmount &&
     parseFloat(deposit.depositAmount) >= minDeposit &&
     parseFloat(deposit.depositAmount) <= maxBal + 0.001;
@@ -142,7 +127,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               walletAddress={address}
               ethBalance={walletEthArbitrum}
               isLoading={isLoadingWalletUsdc}
-              resumeOnly={deposit.isResumeOnly}
+              resumeOnly={false}
               relayMintEnabled={deposit.depositCfg?.relayMintEnabled}
             />
 
@@ -164,20 +149,31 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             </div>
 
             {deposit.hasResumableDeposit && !deposit.depositing && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-primary space-y-2">
-                <p>
-                  Finishing a deposit already started — <strong>no new Arbitrum sign</strong>. We complete Circle +
-                  HyperEVM automatically.
+              <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-100 space-y-2">
+                <p className="font-medium">Previous deposit still finishing</p>
+                <p className="leading-relaxed">
+                  A transfer was already started from this wallet. Choose <strong>Finish pending</strong> to complete
+                  it (no new Arbitrum sign), or <strong>Start fresh</strong> to deposit your current amount as a new
+                  transfer.
                 </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-[10px] text-muted-foreground"
-                  onClick={() => void deposit.dismissStuckDeposit()}
-                >
-                  Clear stuck state (start fresh)
-                </Button>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={deposit.depositing}
+                    onClick={() => void deposit.runDeposit({ resumePending: true })}
+                  >
+                    Finish pending deposit
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void deposit.dismissStuckDeposit()}
+                  >
+                    Start fresh with amount below
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -209,7 +205,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {deposit.depositStep && (
+            {(deposit.depositing || statusLine) && (
               <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-primary">
                 <Loader2
                   className={cn(
@@ -217,7 +213,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
                     (deposit.depositing || deposit.depositAwaitingChain) && "animate-spin",
                   )}
                 />
-                <span>{deposit.depositStep}</span>
+                <span>{statusLine}</span>
               </div>
             )}
 
@@ -246,8 +242,8 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             <div className="flex flex-col gap-2">
               <Button
                 className="w-full"
-                disabled={deposit.depositing || !canSubmit}
-                onClick={() => void deposit.runDeposit()}
+                disabled={deposit.depositing || !canSubmitNew}
+                onClick={() => void deposit.runDeposit({ resumePending: false })}
                 data-testid="button-sheet-deposit-confirm"
               >
                 {deposit.depositing ? (
@@ -255,8 +251,6 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing…
                   </>
-                ) : deposit.hasResumableDeposit ? (
-                  "Finish deposit (no new sign)"
                 ) : (
                   "Add to trading"
                 )}

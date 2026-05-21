@@ -64,6 +64,64 @@ const DEPOSIT_CONFIG_TTL_MS = 10 * 60 * 1000;
 const DEPOSIT_CONFIG_FETCH_MS = 12_000;
 const ATTEST_POLL_MS = 2000;
 const ATTEST_MAX_MS = 20 * 60 * 1000;
+const WALLET_SIGN_TIMEOUT_MS = 120_000;
+const WALLET_TX_TIMEOUT_MS = 180_000;
+const FEES_FETCH_TIMEOUT_MS = 20_000;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `${label} timed out. Open Rabby or MetaMask — approve any pending request, then tap Resume or try again.`,
+              ),
+            ),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function fetchCctpFeesQuote(signal?: AbortSignal): Promise<{ maxFee: bigint; minFinality: number }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FEES_FETCH_TIMEOUT_MS);
+  const onAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onAbort);
+  try {
+    const res = await fetch("/api/cctp/fees", {
+      credentials: "include",
+      signal: ctrl.signal,
+    });
+    const feesText = await res.text();
+    if (!res.ok) {
+      let msg = feesText || "Fee request failed";
+      try {
+        const j = JSON.parse(feesText) as { error?: string };
+        if (typeof j.error === "string") msg = j.error;
+      } catch {
+        /* keep */
+      }
+      throw new Error(msg);
+    }
+    const feesJson = JSON.parse(feesText) as { maxFee?: string; minFinalityThreshold?: number };
+    if (!feesJson.maxFee || !/^\d+$/.test(feesJson.maxFee)) throw new Error("Invalid fee quote");
+    return {
+      maxFee: BigInt(feesJson.maxFee),
+      minFinality: feesJson.minFinalityThreshold ?? CLIENT_CCTP_DEPOSIT_DEFAULTS.minFinalityThreshold,
+    };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
 const ATTEST_MAX_CONSECUTIVE_ERRORS = 8;
 
 export type CctpAttestationPollProgress = {
@@ -707,22 +765,7 @@ export async function depositUsdcToHyperliquid(
       return { success: true, txHash: out.mintTxHash, messageHash: out.messageHash };
     }
 
-    const feesRes = await fetch("/api/cctp/fees", { credentials: "include" });
-    const feesText = await feesRes.text();
-    if (!feesRes.ok) {
-      let msg = feesText || "Fee request failed";
-      try {
-        const j = JSON.parse(feesText) as { error?: string };
-        if (typeof j.error === "string") msg = j.error;
-      } catch {
-        /* keep */
-      }
-      throw new Error(msg);
-    }
-    const feesJson = JSON.parse(feesText) as { maxFee?: string; minFinalityThreshold?: number };
-    if (!feesJson.maxFee || !/^\d+$/.test(feesJson.maxFee)) throw new Error("Invalid fee quote");
-    const maxFee = BigInt(feesJson.maxFee);
-    const minFinality = feesJson.minFinalityThreshold ?? cfg.minFinalityThreshold;
+    const { maxFee, minFinality } = await fetchCctpFeesQuote(options?.signal);
 
     const { Contract, parseUnits } = await import("ethers");
     const amountWei = parseUnits(amount.toFixed(USDC_DECIMALS), USDC_DECIMALS);
@@ -747,7 +790,8 @@ export async function depositUsdcToHyperliquid(
     const authValidBefore = BigInt(nowSec + 3600);
     const authNonce = randomBytes32();
     const extensionAddress = getAddress(cfg.cctpExtension);
-    const receiveAuthSignature = await signer.signTypedData(
+    const receiveAuthSignature = await withTimeout(
+      signer.signTypedData(
       {
         name: cfg.usdcEip712Name,
         version: cfg.usdcEip712Version,
@@ -772,6 +816,9 @@ export async function depositUsdcToHyperliquid(
         validBefore: authValidBefore,
         nonce: authNonce,
       },
+      ),
+      WALLET_SIGN_TIMEOUT_MS,
+      "USDC authorization in wallet",
     );
     const parsedSig = Signature.from(receiveAuthSignature);
 
@@ -784,7 +831,8 @@ export async function depositUsdcToHyperliquid(
     const hookData = encodeCctpForwardHookData(recipient, options?.hyperCoreDestinationDex ?? 0);
     const fwd32 = addressToBytes32(cfg.cctpForwarder);
     const extension = new Contract(cfg.cctpExtension, CCTP_EXTENSION_ABI, signer);
-    const burnTx = await extension.batchDepositForBurnWithAuth(
+    const burnTx = await withTimeout(
+      extension.batchDepositForBurnWithAuth(
       {
         amount: amountBn,
         authValidAfter,
@@ -803,8 +851,15 @@ export async function depositUsdcToHyperliquid(
         minFinalityThreshold: minFinality,
         hookData,
       },
+      ),
+      WALLET_TX_TIMEOUT_MS,
+      "Arbitrum bridge transaction",
     );
-    const receipt = await burnTx.wait();
+    const receipt = (await withTimeout(
+      burnTx.wait(),
+      WALLET_TX_TIMEOUT_MS,
+      "Arbitrum transaction confirmation",
+    )) as Awaited<ReturnType<typeof burnTx.wait>>;
     if (!receipt) throw new Error("Burn receipt missing");
 
     messageHex = extractMessageFromBurnReceipt(receipt, cfg.messageTransmitterArbitrum);
