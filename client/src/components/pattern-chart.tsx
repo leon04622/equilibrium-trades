@@ -23,6 +23,7 @@ import {
   ChartDrawingProvider,
   ChartDrawingLeftToolbar,
   ChartDrawingCanvas,
+  ChartDrawingInteractionLayer,
 } from "@/components/chart-drawing-overlay";
 import { ChartCandleCountdown } from "@/components/chart-candle-countdown";
 import { cn } from "@/lib/utils";
@@ -1016,6 +1017,7 @@ function PatternChartComponent({
                   liqRenderedExternally
                 />
                 <ChartDrawingCanvas />
+                <ChartDrawingInteractionLayer />
                 <ChartCandleCountdown
                   interval={interval}
                   candles={candles}

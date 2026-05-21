@@ -4,17 +4,11 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
-import type {
-  IChartApi,
-  ISeriesApi,
-  MouseEventParams,
-  Time,
-} from "lightweight-charts";
+import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { lightweightTimeToSeconds } from "@/lib/chart-time";
 import { extendTrendlineToWidth } from "@/lib/chart-drawing-geometry";
 import { Button } from "@/components/ui/button";
@@ -70,7 +64,6 @@ type ChartDrawingProviderProps = {
   seriesRef: RefObject<ISeriesApi<"Candlestick"> | null>;
   paneRef: RefObject<HTMLDivElement | null>;
   layoutTick?: number;
-  /** Bumps when the LW chart instance is created — refs do not retrigger effects. */
   chartReadyTick?: number;
   children: ReactNode;
 };
@@ -84,6 +77,10 @@ type ChartDrawingContextValue = {
   setDraftPoints: React.Dispatch<React.SetStateAction<ChartDrawingPoint[]>>;
   guideText: string | null;
   svgElements: ReactNode;
+  isDrawMode: boolean;
+  placeAtClient: (clientX: number, clientY: number) => void;
+  moveCursorAtClient: (clientX: number, clientY: number) => void;
+  finishPolyline: () => void;
 };
 
 const ChartDrawingCtx = createContext<ChartDrawingContextValue | null>(null);
@@ -124,6 +121,26 @@ function distToSegment(
   return Math.hypot(px - lx, py - ly);
 }
 
+/** Map screen coords → chart time/price (same space as lightweight-charts). */
+function clientToChartPoint(
+  chart: IChartApi,
+  series: ISeriesApi<"Candlestick">,
+  clientX: number,
+  clientY: number,
+): { pt: ChartDrawingPoint; px: number; py: number } | null {
+  const el = chart.chartElement();
+  const rect = el.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+
+  const rawTime = chart.timeScale().coordinateToTime(x);
+  const price = series.coordinateToPrice(y);
+  const timeSec = rawTime != null ? lightweightTimeToSeconds(rawTime as Time) : null;
+  if (timeSec == null || price == null || !Number.isFinite(price)) return null;
+
+  return { pt: { time: timeSec, price }, px: x, py: y };
+}
+
 export function ChartDrawingProvider({
   enabled,
   coin,
@@ -136,19 +153,20 @@ export function ChartDrawingProvider({
   children,
 }: ChartDrawingProviderProps) {
   const { address } = useWallet();
-  const [tool, setTool] = useState<DrawTool>("select");
-  const lastClickMsRef = useRef(0);
+  const [tool, setTool] = useState<DrawTool>("trendline");
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [draftPoints, setDraftPoints] = useState<ChartDrawingPoint[]>([]);
   const [cursorPoint, setCursorPoint] = useState<ChartDrawingPoint | null>(null);
-  const [hoverId, setHoverId] = useState<string | null>(null);
   const [, bump] = useState(0);
   const repaint = useCallback(() => bump((n) => n + 1), []);
+
+  const isDrawMode = enabled && tool !== "select";
 
   useEffect(() => {
     setDrawings(loadChartDrawings(coin, interval, address));
     setDraftPoints([]);
-  }, [coin, interval, address]);
+    if (enabled) setTool("trendline");
+  }, [coin, interval, address, enabled]);
 
   useEffect(() => {
     if (!enabled || drawings.length === 0) return;
@@ -198,7 +216,7 @@ export function ChartDrawingProvider({
         const chart = chartRef.current;
         const series = seriesRef.current;
         if (!chart || !series) return;
-        const hit = 12;
+        const hit = 14;
 
         for (const d of [...drawings].reverse()) {
           const pixels = d.points
@@ -291,123 +309,72 @@ export function ChartDrawingProvider({
     [tool, draftPoints, commitDrawing, drawings, chartRef, seriesRef],
   );
 
-  const onChartClick = useCallback(
-    (param: MouseEventParams<Time>) => {
+  const placeAtClient = useCallback(
+    (clientX: number, clientY: number) => {
       if (!enabled || tool === "select") return;
-      if (!param.point || param.time == null) return;
-
-      const now = Date.now();
-      if (now - lastClickMsRef.current < 100) return;
-      lastClickMsRef.current = now;
-
       const chart = chartRef.current;
       const series = seriesRef.current;
       if (!chart || !series) return;
-
-      const timeSec = lightweightTimeToSeconds(param.time);
-      const price = series.coordinateToPrice(param.point.y);
-      if (timeSec == null || price == null) return;
-
-      applyChartPoint(
-        { time: timeSec, price },
-        param.point.x,
-        param.point.y,
-      );
+      const hit = clientToChartPoint(chart, series, clientX, clientY);
+      if (!hit) return;
+      applyChartPoint(hit.pt, hit.px, hit.py);
     },
     [enabled, tool, chartRef, seriesRef, applyChartPoint],
   );
 
-  const onChartDblClick = useCallback(
-    (param: MouseEventParams<Time>) => {
-      if (!enabled || tool !== "polyline" || draftPoints.length < 2) return;
-      if (!param.point) return;
-      commitDrawing("polyline", draftPoints, "Pattern");
+  const moveCursorAtClient = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!enabled || tool === "select") return;
+      if (clientX < 0 || clientY < 0) {
+        setCursorPoint(null);
+        return;
+      }
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      if (!chart || !series) return;
+      const hit = clientToChartPoint(chart, series, clientX, clientY);
+      setCursorPoint(hit?.pt ?? null);
     },
-    [enabled, tool, draftPoints, commitDrawing],
+    [enabled, tool, chartRef, seriesRef],
   );
 
+  const finishPolyline = useCallback(() => {
+    if (tool !== "polyline" || draftPoints.length < 2) return;
+    commitDrawing("polyline", draftPoints, "Pattern");
+  }, [tool, draftPoints, commitDrawing]);
+
+  /** TradingView / Hyperliquid: draw tool selected → chart pans off; clicks place points. */
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !enabled) return;
-    chart.subscribeClick(onChartClick);
-    chart.subscribeDblClick(onChartDblClick);
-    return () => {
-      try {
-        chart.unsubscribeClick(onChartClick);
-        chart.unsubscribeDblClick(onChartDblClick);
-      } catch {
-        /* disposed */
-      }
-    };
-  }, [chartRef, enabled, chartReadyTick, onChartClick, onChartDblClick]);
-
-  /** TP/SL drag handles sit above the canvas; disable them while drawing. */
-  useEffect(() => {
-    const pane = paneRef.current;
-    if (!pane || !enabled) return;
-    const bundles = pane.querySelectorAll<SVGElement>("[data-tpsl-kind]");
-    const pe = tool === "select" ? "auto" : "none";
-    bundles.forEach((node) => {
-      node.style.pointerEvents = pe;
-    });
-  }, [paneRef, enabled, tool, layoutTick]);
-
-  /** Keep pan/zoom enabled; restore defaults when chart (re)mounts. */
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart || !enabled) return;
+    const pan = tool === "select";
     chart.applyOptions({
       handleScroll: {
         mouseWheel: true,
-        pressedMouseMove: true,
-        horzTouchDrag: true,
+        pressedMouseMove: pan,
+        horzTouchDrag: pan,
         vertTouchDrag: false,
       },
       handleScale: {
         mouseWheel: true,
-        pinch: true,
-        axisPressedMouseMove: true,
+        pinch: pan,
+        axisPressedMouseMove: pan,
       },
     });
-  }, [chartRef, enabled, chartReadyTick]);
+  }, [chartRef, enabled, tool, chartReadyTick]);
 
-  /** Live preview line to cursor (TradingView-style). */
+  /** Block TP/SL and other overlays from stealing clicks while drawing. */
   useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart || !enabled || tool === "select") {
-      setCursorPoint(null);
-      return;
-    }
+    const pane = paneRef.current;
+    if (!pane || !enabled) return;
+    const block = tool !== "select";
+    pane.querySelectorAll<SVGElement>("[data-tpsl-kind]").forEach((node) => {
+      node.style.pointerEvents = block ? "none" : "auto";
+    });
+    const apex = pane.querySelector<SVGElement>("[data-testid='apex-sovereign-order-layer']");
+    if (apex) apex.style.pointerEvents = "none";
+  }, [paneRef, enabled, tool, layoutTick]);
 
-    const onCrosshair = (param: MouseEventParams<Time>) => {
-      if (!param.point) {
-        setCursorPoint(null);
-        return;
-      }
-      const series = seriesRef.current;
-      if (!series) return;
-      const timeSec =
-        param.time != null ? lightweightTimeToSeconds(param.time) : null;
-      const price = series.coordinateToPrice(param.point.y);
-      if (timeSec == null || price == null) {
-        setCursorPoint(null);
-        return;
-      }
-      setCursorPoint({ time: timeSec, price });
-    };
-
-    chart.subscribeCrosshairMove(onCrosshair);
-    return () => {
-      try {
-        chart.unsubscribeCrosshairMove(onCrosshair);
-      } catch {
-        /* disposed */
-      }
-      setCursorPoint(null);
-    };
-  }, [chartRef, seriesRef, enabled, tool, chartReadyTick]);
-
-  /** Right-click cancels in-progress drawing (like TradingView). */
   useEffect(() => {
     const pane = paneRef.current;
     if (!pane || !enabled) return;
@@ -422,14 +389,22 @@ export function ChartDrawingProvider({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setDraftPoints([]);
-      setCursorPoint(null);
-      setTool("select");
+      if (e.key === "Escape") {
+        setDraftPoints([]);
+        setCursorPoint(null);
+        setTool("select");
+        return;
+      }
+      if (!enabled) return;
+      if (e.key === "v" || e.key === "V") setTool("select");
+      if (e.key === "l" || e.key === "L") {
+        setTool("trendline");
+        setDraftPoints([]);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [enabled]);
 
   const svgElements = useMemo(() => {
     void layoutTick;
@@ -446,7 +421,7 @@ export function ChartDrawingProvider({
       if (pxs.length === 0) return;
 
       const stroke = d.color;
-      const sw = hoverId === d.id ? 2.5 : 1.75;
+      const sw = 2;
       const dash = dashed ? "6 4" : undefined;
 
       if (d.type === "hline" && pxs[0]) {
@@ -563,7 +538,6 @@ export function ChartDrawingProvider({
             </text>,
           );
         }
-        return;
       }
     };
 
@@ -576,7 +550,7 @@ export function ChartDrawingProvider({
             key={`${keyPrefix}-anchor-${i}`}
             cx={px.x}
             cy={px.y}
-            r={4}
+            r={5}
             fill={ANCHOR_FILL}
             stroke={ANCHOR_STROKE}
             strokeWidth={2}
@@ -585,11 +559,7 @@ export function ChartDrawingProvider({
       }
     };
 
-    const renderPreviewToCursor = (
-      from: ChartDrawingPoint,
-      stroke: string,
-      key: string,
-    ) => {
+    const renderPreviewToCursor = (from: ChartDrawingPoint, key: string) => {
       if (!cursorPoint) return;
       const a = pointToPixel(chart, series, from);
       const b = pointToPixel(chart, series, cursorPoint);
@@ -601,10 +571,10 @@ export function ChartDrawingProvider({
           y1={a.y}
           x2={b.x}
           y2={b.y}
-          stroke={stroke}
-          strokeWidth={1.5}
+          stroke={PREVIEW_STROKE}
+          strokeWidth={2}
           strokeDasharray="6 4"
-          opacity={0.85}
+          opacity={0.9}
         />,
       );
     };
@@ -630,10 +600,9 @@ export function ChartDrawingProvider({
       };
       renderDrawing(draft, true);
       renderAnchors(draftPoints, "draft");
-
       const last = draftPoints[draftPoints.length - 1]!;
       if (tool === "trendline" || tool === "polyline" || tool === "bull_flag") {
-        renderPreviewToCursor(last, PREVIEW_STROKE, "preview-seg");
+        renderPreviewToCursor(last, "preview-seg");
       }
       if (tool === "rect" && cursorPoint) {
         const a = pointToPixel(chart, series, draftPoints[0]!);
@@ -641,19 +610,17 @@ export function ChartDrawingProvider({
         if (a && b) {
           const x = Math.min(a.x, b.x);
           const y = Math.min(a.y, b.y);
-          const w = Math.abs(b.x - a.x);
-          const h = Math.abs(b.y - a.y);
           paths.push(
             <rect
               key="preview-rect"
               x={x}
               y={y}
-              width={w}
-              height={h}
+              width={Math.abs(b.x - a.x)}
+              height={Math.abs(b.y - a.y)}
               fill={PREVIEW_STROKE}
               fillOpacity={0.08}
               stroke={PREVIEW_STROKE}
-              strokeWidth={1.5}
+              strokeWidth={2}
               strokeDasharray="6 4"
             />,
           );
@@ -671,45 +638,36 @@ export function ChartDrawingProvider({
             x2={paneW}
             y2={y}
             stroke={TOOL_COLORS.hline}
-            strokeWidth={1.5}
+            strokeWidth={2}
             strokeDasharray="6 4"
-            opacity={0.85}
           />,
         );
       }
     }
 
     return paths;
-  }, [
-    drawings,
-    draftPoints,
-    tool,
-    hoverId,
-    cursorPoint,
-    chartRef,
-    seriesRef,
-    paneRef,
-    layoutTick,
-  ]);
+  }, [drawings, draftPoints, tool, cursorPoint, chartRef, seriesRef, paneRef, layoutTick]);
 
   const guideText =
-    tool === "bull_flag"
-      ? bullFlagGuideStep(draftPoints.length)
-      : tool === "trendline"
-        ? draftPoints.length === 0
-          ? "Click start point"
-          : "Click end point"
-        : tool === "rect"
+    tool === "select"
+      ? "Pan: drag · Zoom: scroll · V = cursor · L = line"
+      : tool === "bull_flag"
+        ? bullFlagGuideStep(draftPoints.length)
+        : tool === "trendline"
           ? draftPoints.length === 0
-            ? "Click first corner"
-            : "Click opposite corner"
-          : tool === "polyline"
-            ? "Click corners · double-click done"
-            : tool === "hline"
-              ? "Click price level"
-              : tool === "erase"
-                ? "Click a line or zone to remove"
-                : null;
+            ? "Click 1st point"
+            : "Click 2nd point"
+          : tool === "rect"
+            ? draftPoints.length === 0
+              ? "Click corner"
+              : "Click opposite corner"
+            : tool === "polyline"
+              ? "Click points · double-click to finish"
+              : tool === "hline"
+                ? "Click price level"
+                : tool === "erase"
+                  ? "Click shape to delete"
+                  : null;
 
   const ctxValue = useMemo<ChartDrawingContextValue>(
     () => ({
@@ -721,8 +679,22 @@ export function ChartDrawingProvider({
       setDraftPoints,
       guideText,
       svgElements,
+      isDrawMode,
+      placeAtClient,
+      moveCursorAtClient,
+      finishPolyline,
     }),
-    [enabled, tool, drawings, guideText, svgElements],
+    [
+      enabled,
+      tool,
+      drawings,
+      guideText,
+      svgElements,
+      isDrawMode,
+      placeAtClient,
+      moveCursorAtClient,
+      finishPolyline,
+    ],
   );
 
   return (
@@ -733,16 +705,15 @@ export function ChartDrawingProvider({
 }
 
 const DRAW_TOOLS: { id: DrawTool; icon: ReactNode; title: string }[] = [
-  { id: "select", icon: <MousePointer2 className="h-4 w-4" />, title: "Cursor — pan & zoom" },
-  { id: "trendline", icon: <TrendingUp className="h-4 w-4" />, title: "Trend line — click start, click end" },
+  { id: "select", icon: <MousePointer2 className="h-4 w-4" />, title: "Cursor (pan & zoom)" },
+  { id: "trendline", icon: <TrendingUp className="h-4 w-4" />, title: "Trend line" },
   { id: "hline", icon: <Minus className="h-4 w-4" />, title: "Horizontal line" },
   { id: "rect", icon: <Square className="h-4 w-4" />, title: "Rectangle" },
-  { id: "polyline", icon: <Pencil className="h-4 w-4" />, title: "Polyline" },
-  { id: "bull_flag", icon: <Flag className="h-4 w-4" />, title: "Bull flag (4 clicks)" },
+  { id: "polyline", icon: <Pencil className="h-4 w-4" />, title: "Brush / polyline" },
+  { id: "bull_flag", icon: <Flag className="h-4 w-4" />, title: "Bull flag" },
   { id: "erase", icon: <Eraser className="h-4 w-4" />, title: "Eraser" },
 ];
 
-/** TradingView-style vertical tool rail on the left of the chart. */
 export function ChartDrawingLeftToolbar() {
   const {
     enabled,
@@ -801,7 +772,7 @@ export function ChartDrawingLeftToolbar() {
           variant="ghost"
           size="icon"
           className="h-9 w-9 rounded-sm text-[#f23645] hover:bg-[#2a2e39] disabled:opacity-40"
-          title="Clear all drawings"
+          title="Clear all"
           disabled={drawings.length === 0}
           onClick={() => {
             setDrawings([]);
@@ -812,7 +783,7 @@ export function ChartDrawingLeftToolbar() {
         </Button>
       </div>
       {guideText ? (
-        <p className="mt-auto px-1 pb-2 text-center text-[8px] leading-tight text-[#787b86]">
+        <p className="mt-auto px-1 pb-2 text-center text-[9px] leading-tight text-[#d1d4dc] font-medium">
           {guideText}
         </p>
       ) : null}
@@ -820,20 +791,47 @@ export function ChartDrawingLeftToolbar() {
   );
 }
 
+/** Renders committed + draft drawings (no pointer capture). */
 export function ChartDrawingCanvas() {
-  const { enabled, tool, svgElements } = useChartDrawingCtx();
-
+  const { enabled, svgElements } = useChartDrawingCtx();
   if (!enabled) return null;
-
   return (
     <svg
-      className={cn(
-        "absolute inset-0 z-[22] overflow-visible pointer-events-none",
-        tool !== "select" && "cursor-crosshair",
-      )}
+      className="absolute inset-0 z-[60] overflow-visible pointer-events-none"
       aria-hidden
     >
       <g>{svgElements}</g>
     </svg>
+  );
+}
+
+/**
+ * Full-pane click capture — same model as TradingView / Hyperliquid draw tools.
+ * Active whenever a draw tool (not cursor) is selected.
+ */
+export function ChartDrawingInteractionLayer() {
+  const { enabled, isDrawMode, placeAtClient, moveCursorAtClient, finishPolyline } =
+    useChartDrawingCtx();
+
+  if (!enabled || !isDrawMode) return null;
+
+  return (
+    <div
+      className="absolute inset-0 z-[70] cursor-crosshair"
+      style={{ touchAction: "none" }}
+      data-testid="chart-drawing-interaction"
+      onPointerMove={(e) => moveCursorAtClient(e.clientX, e.clientY)}
+      onPointerLeave={() => moveCursorAtClient(-1, -1)}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.button !== 0) return;
+        placeAtClient(e.clientX, e.clientY);
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        finishPolyline();
+      }}
+    />
   );
 }

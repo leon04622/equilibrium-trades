@@ -218,7 +218,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
   // Spot markets use @N identifiers
   const isSpot = coin.startsWith("@");
-  const chartDrawingEnabled = chartEngine === "hyperliquid" && !isSpot;
+  const chartDrawingEnabled = chartEngine === "hyperliquid";
 
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
