@@ -87,6 +87,8 @@ const BORDER = "#2a3249";
 const TEXT = "#b2b5be";
 const HANDLE_PX = 6;
 const DEFAULT_VISIBLE_BARS = 120;
+/** Empty space to the right of the last candle (keep small to avoid SMMA lines drawing into a void). */
+const CHART_FUTURE_BAR_PADDING = 2;
 const CHART_HISTORY_LIMITS: Record<string, number> = {
   "1m": 2500,
   "3m": 3000,
@@ -161,6 +163,55 @@ function normalizeCandlesByTime(candles: CandleData[]): CandleData[] {
     latestByTime.set(candle.t, candle);
   }
   return [...latestByTime.values()].sort((a, b) => a.t - b.t);
+}
+
+type SmmaPoint = { time: Time; value: number };
+
+function trimLineSeriesToTime<T extends { time: Time }>(points: T[], lastTime: Time): T[] {
+  if (points.length === 0) return points;
+  let end = points.length;
+  while (end > 0 && points[end - 1]!.time > lastTime) end--;
+  return end === points.length ? points : points.slice(0, end);
+}
+
+function applySmmaToChart(
+  series21: ISeriesApi<"Line"> | null,
+  series200: ISeriesApi<"Line"> | null,
+  sma21: SmmaPoint[],
+  sma200: SmmaPoint[],
+  lastTime: Time,
+  candleCount: number,
+  mode: "full" | "tail",
+): void {
+  if (!series21 || !series200) return;
+  const s21 = trimLineSeriesToTime(sma21, lastTime);
+  const s200 = trimLineSeriesToTime(sma200, lastTime);
+
+  if (candleCount < 21) {
+    series21.setData([]);
+  } else if (s21.length > 0) {
+    if (mode === "full") series21.setData(s21);
+    else series21.update(s21[s21.length - 1]!);
+  }
+
+  if (candleCount < 200) {
+    series200.setData([]);
+  } else if (s200.length > 0) {
+    if (mode === "full") series200.setData(s200);
+    else series200.update(s200[s200.length - 1]!);
+  }
+}
+
+function visibleLogicalRangeForBarCount(barCount: number, preferredBars: number | null) {
+  const visibleBars = Math.max(
+    20,
+    Math.min(barCount, preferredBars ?? DEFAULT_VISIBLE_BARS),
+  );
+  const rightEdge = barCount - 1 + CHART_FUTURE_BAR_PADDING;
+  return {
+    from: Math.max(-0.5, rightEdge - visibleBars),
+    to: rightEdge,
+  };
 }
 
 function rankPatternStatus(status: EducationalPatternSignal["patternStatus"]): number {
@@ -577,7 +628,12 @@ function PatternChartComponent({
       layout: { background: { type: ColorType.Solid, color: BG }, textColor: TEXT },
       grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: BORDER, autoScale: true },
+      rightPriceScale: {
+        borderColor: BORDER,
+        autoScale: true,
+        minimumWidth: 76,
+        scaleMargins: { top: 0.08, bottom: 0.12 },
+      },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     };
@@ -585,7 +641,13 @@ function PatternChartComponent({
     // ── Main chart ──
     const mainChart = createChart(mainContainerRef.current, {
       ...chartOpts,
-      timeScale: { borderColor: BORDER, timeVisible: true, visible: hideIndicators, rightOffset: 5, barSpacing: 8 },
+      timeScale: {
+        borderColor: BORDER,
+        timeVisible: true,
+        visible: hideIndicators,
+        rightOffset: CHART_FUTURE_BAR_PADDING,
+        barSpacing: 8,
+      },
     });
     mainChartRef.current = mainChart;
 
@@ -597,17 +659,25 @@ function PatternChartComponent({
     candleSeriesRef.current = candleSeries;
 
     sma21SeriesRef.current = mainChart.addSeries(LineSeries, {
-      color: "#ffffff", lineWidth: 2, title: "SMMA 21", priceLineVisible: false, lastValueVisible: true,
+      color: "#ffffff",
+      lineWidth: 2,
+      title: "SMMA 21",
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
 
     sma200SeriesRef.current = mainChart.addSeries(LineSeries, {
-      color: "#f5e642", lineWidth: 2, title: "SMMA 200", priceLineVisible: false, lastValueVisible: true,
+      color: "#f5e642",
+      lineWidth: 2,
+      title: "SMMA 200",
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
 
     const volSeries = mainChart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" }, priceScaleId: "volume",
     });
-    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.72, bottom: 0.02 } });
     volumeSeriesRef.current = volSeries;
 
     volumeSmaSeriesRef.current = mainChart.addSeries(LineSeries, {
@@ -642,9 +712,17 @@ function PatternChartComponent({
     const cleanups: (() => void)[] = [];
 
     syncVisiblePriceRange();
+    let layoutRaf = 0;
+    const bumpLayoutTick = () => {
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
+      layoutRaf = requestAnimationFrame(() => {
+        layoutRaf = 0;
+        setChartLayoutTick((t) => t + 1);
+      });
+    };
     const onTimeScaleChange = () => {
       syncVisiblePriceRange();
-      setChartLayoutTick((t) => t + 1);
+      bumpLayoutTick();
       const logicalRange = mainChart.timeScale().getVisibleLogicalRange();
       if (!logicalRange) return;
       const visibleBars = Math.round(logicalRange.to - logicalRange.from);
@@ -673,21 +751,8 @@ function PatternChartComponent({
       }
     });
 
-    let layoutThrottle = 0;
-    const onCrosshairLayout = () => {
-      syncVisiblePriceRange();
-      const now = Date.now();
-      if (now - layoutThrottle < 48) return;
-      layoutThrottle = now;
-      setChartLayoutTick((t) => t + 1);
-    };
-    mainChart.subscribeCrosshairMove(onCrosshairLayout);
     cleanups.push(() => {
-      try {
-        mainChart.unsubscribeCrosshairMove(onCrosshairLayout);
-      } catch {
-        /* disposed */
-      }
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
     });
 
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
@@ -840,8 +905,15 @@ function PatternChartComponent({
           setLastVol(vols[vols.length - 1] ?? null);
 
           if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
-          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
+          applySmmaToChart(
+            sma21SeriesRef.current,
+            sma200SeriesRef.current,
+            sm.sma21,
+            sm.sma200,
+            lastTime,
+            sorted.length,
+            "full",
+          );
 
           if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
             const rsiData = calcRSI(closes, times, 14);
@@ -862,15 +934,9 @@ function PatternChartComponent({
             }
           }
 
-          const visibleBars = Math.max(
-            20,
-            Math.min(sorted.length, preferredVisibleBarsRef.current ?? DEFAULT_VISIBLE_BARS),
+          mainChartRef.current.timeScale().setVisibleLogicalRange(
+            visibleLogicalRangeForBarCount(sorted.length, preferredVisibleBarsRef.current),
           );
-          const rightEdge = sorted.length - 1 + 5;
-          mainChartRef.current.timeScale().setVisibleLogicalRange({
-            from: Math.max(-0.5, rightEdge - visibleBars),
-            to: rightEdge,
-          });
         } catch (e) {
           console.warn("[chart] setData error:", e);
           return;
@@ -913,8 +979,15 @@ function PatternChartComponent({
             })),
           );
           if (vols.length >= 20) volumeSmaSeriesRef.current.setData(calcSMA(vols, times, 20));
-          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
-          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
+          applySmmaToChart(
+            sma21SeriesRef.current,
+            sma200SeriesRef.current,
+            sm.sma21,
+            sm.sma200,
+            lastTime,
+            sorted.length,
+            "full",
+          );
           setLastVol(vols[vols.length - 1] ?? null);
         } catch (e) {
           console.warn("[chart] bulk setData error:", e);
@@ -937,11 +1010,21 @@ function PatternChartComponent({
           });
           setLastVol(parsePrice(lastCandle.v));
 
-          if (sorted.length >= 21 && sm.sma21.length > 0) sma21SeriesRef.current.setData(sm.sma21);
-          if (sorted.length >= 200 && sm.sma200.length > 0) sma200SeriesRef.current.setData(sm.sma200);
+          applySmmaToChart(
+            sma21SeriesRef.current,
+            sma200SeriesRef.current,
+            sm.sma21,
+            sm.sma200,
+            lastTime,
+            sorted.length,
+            lenChanged ? "full" : "tail",
+          );
           if (vols.length >= 20) {
             const vs = calcSMA(vols, times, 20);
-            if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]!);
+            if (vs.length > 0) {
+              if (lenChanged) volumeSmaSeriesRef.current.setData(vs);
+              else volumeSmaSeriesRef.current.update(vs[vs.length - 1]!);
+            }
           }
 
           if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {

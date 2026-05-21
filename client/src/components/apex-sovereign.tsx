@@ -605,7 +605,7 @@ export function ApexSovereign({
       lineStyle: LineStyle.Solid,
       lineWidth: 1,
       color: HL_ENTRY,
-      axisLabelVisible: true,
+      axisLabelVisible: false,
       title: `PNL ${fmtPnl(uPnl)}`,
     });
 
@@ -617,7 +617,7 @@ export function ApexSovereign({
         lineStyle: LineStyle.Solid,
         lineWidth: 1,
         color: HL_LIQ,
-        axisLabelVisible: true,
+        axisLabelVisible: false,
         title: "LIQ",
       });
     } else {
