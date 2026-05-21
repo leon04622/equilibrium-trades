@@ -97,6 +97,9 @@ function TradingViewChartComponent({
   const { theme } = useTheme();
   const { indicators } = useTrading();
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [embedGeneration, setEmbedGeneration] = useState(0);
+
+  const refreshEmbed = () => setEmbedGeneration((g) => g + 1);
 
   const enabledIndicators = indicators.filter((i) => i.enabled);
 
@@ -173,9 +176,7 @@ function TradingViewChartComponent({
       hide_side_toolbar: false,
       withdateranges: true,
       save_image: true,
-      show_popup_button: true,
-      popup_width: 1400,
-      popup_height: 900,
+      show_popup_button: false,
       support_host: "https://www.tradingview.com",
       studies,
       horztouchdrag: true,
@@ -255,6 +256,7 @@ function TradingViewChartComponent({
     JSON.stringify(
       enabledIndicators.map((i) => ({ id: i.id, enabled: i.enabled, settings: i.settings })),
     ),
+    embedGeneration,
   ]);
 
   useEffect(() => {
@@ -263,7 +265,7 @@ function TradingViewChartComponent({
 
   return (
     <div className={`tradingview-widget-container relative flex flex-col min-h-0 ${className}`}>
-      <TradingViewAccountBar symbol={symbol} interval={interval} />
+      <TradingViewAccountBar symbol={symbol} interval={interval} onChartRefresh={refreshEmbed} />
       <div
         ref={containerRef}
         style={{ height: "100%", width: "100%" }}

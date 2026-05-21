@@ -476,8 +476,8 @@ export default function Trading({ visible = true }: TradingProps) {
             </Button>
 
             {chartEngine === "tradingview" && (
-              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[260px] leading-tight shrink-0">
-                TV: use <strong className="text-foreground">Log in</strong> / <strong className="text-foreground">Open full chart</strong> above the chart to connect your TradingView account and keep saved work.
+              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[280px] leading-tight shrink-0">
+                TV chart stays on this page — use <strong className="text-foreground">Connect TradingView</strong> above the chart (popup sign-in, then refresh).
               </span>
             )}
 
@@ -499,7 +499,7 @@ export default function Trading({ visible = true }: TradingProps) {
             <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
               <div
                 className="flex items-center gap-2 md:gap-3 shrink-0"
-                title="AI = native venue candles + TP/SL. TV = TradingView (log in via bar above chart for saved layouts)."
+                title="AI = native venue candles + TP/SL. TV = embedded TradingView on this page (Connect account above chart)."
               >
                 <div className="flex items-center gap-1.5">
                   <Switch
