@@ -9,6 +9,7 @@ import {
   type CctpDepositStep,
   type HyperliquidDepositConfig,
 } from "@/lib/hyperliquid-client";
+import { hasEnoughArbitrumGasForBurn } from "@/lib/arbitrum-gas";
 import {
   CLIENT_CCTP_DEPOSIT_DEFAULTS,
   clearCctpBridgeProgress,
@@ -21,7 +22,13 @@ import {
 export function useCctpDeposit() {
   const { toast } = useToast();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
-  const { refreshAccount, refreshWalletUsdc, walletUsdcArbitrum } = useTrading();
+  const {
+    refreshAccount,
+    refreshWalletUsdc,
+    walletUsdcArbitrum,
+    walletEthArbitrum,
+    walletUsdcReady,
+  } = useTrading();
   const { data: userSync } = useUserSync();
 
   const [depositAmount, setDepositAmount] = useState("");
@@ -43,6 +50,8 @@ export function useCctpDeposit() {
   const bridgeProgress = userSync?.cctpBridgeProgress ?? null;
   const hasResumableDeposit = isCctpPostBurnResumeEligible(bridgeProgress);
   const isResumeOnly = hasResumableDeposit;
+  const hasArbitrumGasForNewDeposit =
+    isResumeOnly || hasEnoughArbitrumGasForBurn(walletEthArbitrum);
 
   const prepareDeposit = useCallback(async () => {
     if (!address) return;
@@ -198,6 +207,21 @@ export function useCctpDeposit() {
       return;
     }
 
+    if (!isResumeOnly && walletUsdcReady && !hasEnoughArbitrumGasForBurn(walletEthArbitrum)) {
+      setDepositStep("");
+      setDepositResult({
+        success: false,
+        error:
+          "Add a small amount of ETH on Arbitrum One to the same wallet that holds your USDC (for bridge gas). Trading USDC cannot pay this fee.",
+      });
+      toast({
+        title: "ETH needed on Arbitrum",
+        description: "Bridge or buy ~0.0002 ETH on Arbitrum in your connected wallet, then try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     depositAbortRef.current?.abort();
     const abort = new AbortController();
     depositAbortRef.current = abort;
@@ -311,6 +335,8 @@ export function useCctpDeposit() {
     depositCfg,
     depositAmount,
     walletUsdcArbitrum,
+    walletEthArbitrum,
+    walletUsdcReady,
     bridgeProgress,
     hasResumableDeposit,
     isResumeOnly,
@@ -332,6 +358,9 @@ export function useCctpDeposit() {
     walletUsdcArbitrum,
     hasResumableDeposit,
     isResumeOnly,
+    hasArbitrumGasForNewDeposit,
+    walletEthArbitrum,
+    walletUsdcReady,
     prepareDeposit,
     resetDepositState,
     dismissStuckDeposit,

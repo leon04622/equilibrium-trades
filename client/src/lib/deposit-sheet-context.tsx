@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, ArrowDownToLine, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DepositGasNotice } from "@/components/deposit-gas-notice";
 import { useCctpDeposit } from "@/hooks/use-cctp-deposit";
 import { useWallet } from "@/lib/wallet-context";
 import { useTrading } from "@/lib/trading-context";
@@ -49,7 +50,7 @@ export function useDepositSheet(): DepositSheetContextValue {
 export function DepositSheetProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { address, chainId } = useWallet();
-  const { walletUsdcArbitrum, isLoadingWalletUsdc } = useTrading();
+  const { walletUsdcArbitrum, walletEthArbitrum, isLoadingWalletUsdc } = useTrading();
   const [open, setOpen] = useState(false);
   const deposit = useCctpDeposit();
   const autoResumeRanRef = useRef(false);
@@ -95,6 +96,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
     !deposit.depositing &&
     !isLoadingWalletUsdc &&
     !!deposit.depositCfg &&
+    deposit.hasArbitrumGasForNewDeposit &&
     deposit.depositAmount &&
     parseFloat(deposit.depositAmount) >= minDeposit &&
     parseFloat(deposit.depositAmount) <= maxBal + 0.001;
@@ -135,6 +137,14 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
                 {deposit.depositCfgLoadError}
               </div>
             )}
+
+            <DepositGasNotice
+              walletAddress={address}
+              ethBalance={walletEthArbitrum}
+              isLoading={isLoadingWalletUsdc}
+              resumeOnly={deposit.isResumeOnly}
+              relayMintEnabled={deposit.depositCfg?.relayMintEnabled}
+            />
 
             <div className="rounded-lg border border-border/80 bg-muted/30 p-3 text-[11px] text-muted-foreground space-y-1.5">
               <p className="font-medium text-foreground">What your wallet will ask</p>

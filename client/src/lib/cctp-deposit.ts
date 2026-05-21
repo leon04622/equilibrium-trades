@@ -1,6 +1,7 @@
 import type { JsonRpcSigner } from "ethers";
 import { getAddress, getBytes, hexlify, keccak256, Interface, Signature, randomBytes } from "ethers";
 import type { CctpBridgeProgressSync } from "@/context/AuthContext";
+import { isLikelyInsufficientGasError } from "./arbitrum-gas";
 import { isLikelyMintConsumedError } from "./cctp-bridge-progress";
 import { encodeCctpForwardHookData } from "./cctp-forwarder-hook";
 
@@ -296,6 +297,13 @@ export async function getArbitrumUsdcBalance(address: string, usdcToken: string)
 
 /** Shorter errors for wallet revert blobs (e.g. estimateGas "not attester"). */
 export function humanizeCctpDepositError(raw: string): string {
+  if (isLikelyInsufficientGasError(raw)) {
+    return (
+      "Not enough ETH on Arbitrum in your connected wallet to pay gas for the bridge transaction. " +
+      "Add a small amount of ETH on Arbitrum One (same wallet address as your USDC), then try again. " +
+      "Trading USDC cannot pay this fee."
+    );
+  }
   const m = raw.toLowerCase();
   if (isLikelyMintConsumedError(raw)) {
     return "This deposit was already credited on Hyperliquid. Refresh your trading balance — no further wallet steps.";

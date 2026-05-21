@@ -23,9 +23,12 @@ import { useWallet } from "@/lib/wallet-context";
 import {
   CLIENT_CCTP_DEPOSIT_DEFAULTS,
   fetchHyperliquidDepositConfig,
+  humanizeCctpDepositError,
   isCctpPostBurnResumeEligible,
 } from "@/lib/cctp-deposit";
+import { DepositGasNotice } from "@/components/deposit-gas-notice";
 import { ExternalDepositHelp } from "@/components/external-deposit-help";
+import { hasEnoughArbitrumGasForBurn } from "@/lib/arbitrum-gas";
 import { UnifiedBalanceCard } from "@/components/unified-balance-card";
 import { useDepositSheet } from "@/lib/deposit-sheet-context";
 import {
@@ -61,6 +64,7 @@ export default function Funding() {
     refreshAccount,
     walletUsdcArbitrum,
     walletUsdcBridged,
+    walletEthArbitrum,
     displayTotalUsd,
     unifiedAccountUsd,
     isLoadingWalletUsdc,
@@ -347,6 +351,21 @@ export default function Funding() {
       return;
     }
 
+    if (!hasResumableDeposit && !hasEnoughArbitrumGasForBurn(walletEthArbitrum)) {
+      setDepositStep("");
+      setDepositResult({
+        success: false,
+        error:
+          "Add a small amount of ETH on Arbitrum One to this wallet for bridge gas. Trading USDC cannot pay this fee.",
+      });
+      toast({
+        title: "ETH needed on Arbitrum",
+        description: "Add ~0.0002 ETH on Arbitrum in your connected wallet, then try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setDepositing(true);
     setDepositAwaitingChain(false);
     setDepositStep("Fetching Circle CCTP forward fee quote...");
@@ -392,7 +411,11 @@ export default function Funding() {
 
       setDepositAwaitingChain(false);
       setDepositStep("");
-      setDepositResult(result);
+      setDepositResult(
+        result.success
+          ? result
+          : { ...result, error: result.error ? humanizeCctpDepositError(result.error) : result.error },
+      );
 
       if (result.success) {
         window.dispatchEvent(new Event("equilibrium-deposit-confirmed"));
@@ -411,8 +434,10 @@ export default function Funding() {
       } else {
         toast({ title: "Deposit Failed", description: result.error || "Deposit failed", variant: "destructive" });
       }
-    } catch (err: any) {
-      const errMsg = err?.message || String(err) || "Deposit failed unexpectedly";
+    } catch (err: unknown) {
+      const errMsg = humanizeCctpDepositError(
+        err instanceof Error ? err.message : String(err) || "Deposit failed unexpectedly",
+      );
       setDepositAwaitingChain(false);
       setDepositStep("");
       setDepositResult({ success: false, error: errMsg });
@@ -604,6 +629,14 @@ export default function Funding() {
                 isLoading={isLoadingArbBalance}
               />
 
+              <DepositGasNotice
+                walletAddress={address}
+                ethBalance={walletEthArbitrum}
+                isLoading={isLoadingArbBalance}
+                resumeOnly={hasResumableDeposit}
+                relayMintEnabled={depositCfg?.relayMintEnabled}
+              />
+
               {!isOnArbitrum && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
                   <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -700,6 +733,7 @@ export default function Funding() {
                   disabled={
                     depositing ||
                     isLoadingArbBalance ||
+                    (!hasResumableDeposit && !hasEnoughArbitrumGasForBurn(walletEthArbitrum)) ||
                     !depositAmount ||
                     parseFloat(depositAmount) <= 0 ||
                     parseFloat(depositAmount) > arbUsdcBalance + 0.001

@@ -16,6 +16,7 @@ import {
   mapClearinghouseAssetPositionsToDashboard,
   applyMarginSummaryFromAccountState,
 } from "./hl-account-map";
+import { getArbitrumEthBalance } from "./arbitrum-gas";
 import { getArbitrumUsdcBalances } from "./arbitrum-usdc";
 import { SubscriptionClient, WebSocketTransport } from "@nktkas/hyperliquid";
 
@@ -90,12 +91,18 @@ interface TradingContextType {
   /** Native USDC on Arbitrum in the connected wallet (Revolut / external sends). */
   walletUsdcArbitrum: number;
   walletUsdcBridged: number;
+  /** Native ETH on Arbitrum in the connected wallet (pays CCTP burn gas). */
+  walletEthArbitrum: number;
   /** Trading + wallet USDC — what users see as "total balance". */
   displayTotalUsd: number;
   isLoadingWalletUsdc: boolean;
   /** False until the first wallet USDC fetch finishes (success or failure). */
   walletUsdcReady: boolean;
-  refreshWalletUsdc: (options?: { silent?: boolean }) => Promise<{ native: number; bridged: number }>;
+  refreshWalletUsdc: (options?: { silent?: boolean }) => Promise<{
+    native: number;
+    bridged: number;
+    eth: number;
+  }>;
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
@@ -243,6 +250,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [unifiedAccountUsd, setUnifiedAccountUsd] = useState(0);
   const [walletUsdcArbitrum, setWalletUsdcArbitrum] = useState(0);
   const [walletUsdcBridged, setWalletUsdcBridged] = useState(0);
+  const [walletEthArbitrum, setWalletEthArbitrum] = useState(0);
   const [walletUsdcReady, setWalletUsdcReady] = useState(false);
   const walletUsdcFetchGenRef = useRef(0);
   const [marginUsed, setMarginUsed] = useState(0);
@@ -271,24 +279,33 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const address = walletAddress || "";
   const displayTotalUsd = unifiedAccountUsd + walletUsdcArbitrum;
 
-  const refreshWalletUsdc = useCallback(async (options?: { silent?: boolean }): Promise<{ native: number; bridged: number }> => {
+  const refreshWalletUsdc = useCallback(async (options?: { silent?: boolean }): Promise<{
+    native: number;
+    bridged: number;
+    eth: number;
+  }> => {
     if (!walletAddress) {
       setWalletUsdcArbitrum(0);
       setWalletUsdcBridged(0);
+      setWalletEthArbitrum(0);
       setWalletUsdcReady(false);
-      return { native: 0, bridged: 0 };
+      return { native: 0, bridged: 0, eth: 0 };
     }
     const gen = ++walletUsdcFetchGenRef.current;
     try {
-      const { native, bridged } = await getArbitrumUsdcBalances(walletAddress);
+      const [{ native, bridged }, eth] = await Promise.all([
+        getArbitrumUsdcBalances(walletAddress),
+        getArbitrumEthBalance(walletAddress),
+      ]);
       if (walletUsdcFetchGenRef.current === gen) {
         setWalletUsdcArbitrum(native);
         setWalletUsdcBridged(bridged);
+        setWalletEthArbitrum(eth);
       }
-      return { native, bridged };
+      return { native, bridged, eth };
     } catch (e) {
       console.warn("[wallet-usdc] balance refresh failed:", e);
-      return { native: 0, bridged: 0 };
+      return { native: 0, bridged: 0, eth: 0 };
     } finally {
       if (walletUsdcFetchGenRef.current === gen) {
         setWalletUsdcReady(true);
@@ -300,6 +317,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!walletAddress) {
       setWalletUsdcArbitrum(0);
       setWalletUsdcBridged(0);
+      setWalletEthArbitrum(0);
       setWalletUsdcReady(false);
       return;
     }
@@ -949,6 +967,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       unifiedAccountUsd,
       walletUsdcArbitrum,
       walletUsdcBridged,
+      walletEthArbitrum,
       displayTotalUsd,
       isLoadingWalletUsdc: !walletUsdcReady,
       walletUsdcReady,
