@@ -1,8 +1,8 @@
-import { Link } from "react-router-dom";
 import { ArrowDownToLine, Loader2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrading } from "@/lib/trading-context";
+import { useDepositSheet } from "@/lib/deposit-sheet-context";
 
 function fmtUsd(v: number): string {
   if (Math.abs(v) >= 1000) {
@@ -28,12 +28,15 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
     isLoadingAccount,
     connected,
   } = useTrading();
+  const { openAddToTrading } = useDepositSheet();
 
   const trading = unifiedAccountUsd;
   const wallet = walletUsdcArbitrum;
   const total = trading + wallet;
   const hasWalletFunds = wallet >= 0.01;
-  const loading = isLoadingWalletUsdc || isLoadingAccount;
+  const loading =
+    (isLoadingWalletUsdc && wallet <= 0 && trading <= 0) ||
+    (isLoadingAccount && trading <= 0 && wallet <= 0);
 
   if (!connected) return null;
 
@@ -65,11 +68,15 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
           )}
         </div>
         {hasWalletFunds && !loading ? (
-          <Button size="sm" className="shrink-0" asChild>
-            <Link to="/funding?tab=deposit&activate=1" data-testid="button-add-to-trading">
-              <ArrowDownToLine className="h-4 w-4 mr-1" />
-              Add to trading
-            </Link>
+          <Button
+            size="sm"
+            className="shrink-0"
+            type="button"
+            onClick={openAddToTrading}
+            data-testid="button-add-to-trading"
+          >
+            <ArrowDownToLine className="h-4 w-4 mr-1" />
+            Add to trading
           </Button>
         ) : null}
       </div>

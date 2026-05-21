@@ -8,6 +8,7 @@ import { OrderBook } from "@/components/order-book";
 import { RecentTrades } from "@/components/recent-trades";
 import { OrderEntry } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
+import { ChartBalanceBar } from "@/components/chart-balance-bar";
 import { BottomTradingPanel } from "@/components/bottom-trading-panel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -105,7 +106,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
   useEffect(() => {
     if (!tradingConnected) return;
-    void refreshAccount();
+    void refreshAccount({ silent: true });
   }, [coin, tradingConnected, refreshAccount]);
 
   useEffect(() => {
@@ -454,9 +455,11 @@ export default function Trading({ visible = true }: TradingProps) {
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Chart toolbar - only show when chart tab is active on mobile */}
           <div className={cn(
-            "flex items-center justify-between px-1 md:px-2 py-1 border-b gap-1 md:gap-2 shrink-0",
+            "flex flex-col gap-1.5 px-1 md:px-2 py-1 border-b shrink-0",
             mobileTab !== "chart" && !isFullscreen && "hidden md:flex"
           )}>
+            <ChartBalanceBar className="w-full" />
+          <div className="flex items-center justify-between gap-1 md:gap-2">
             {/* Fullscreen toggle for mobile - exit button when fullscreen */}
             <Button
               variant="ghost"
@@ -562,6 +565,7 @@ export default function Trading({ visible = true }: TradingProps) {
                 </label>
               </div>
             </div>
+          </div>
           </div>
 
           {/* Chart and optional order book - fills remaining space */}

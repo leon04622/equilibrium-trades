@@ -7,6 +7,7 @@ import { useUserSync } from "@/context/AuthContext";
 import { ShieldCheck, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
+import { useDepositSheet } from "@/lib/deposit-sheet-context";
 import { StatePanel } from "@/components/state-panel";
 
 export function AccountEquity() {
@@ -26,6 +27,7 @@ export function AccountEquity() {
   const { data: userSync } = useUserSync();
   const { connect } = useWallet();
   const navigate = useNavigate();
+  const { openAddToTrading, openTransfer } = useDepositSheet();
 
   const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
   const crossMarginRatio = accountValue > 0 ? (marginUsed / accountValue) * 100 : 0;
@@ -66,15 +68,24 @@ export function AccountEquity() {
           <span className="text-sm font-semibold">Account Equity</span>
           <p className="mt-0.5 text-[11px] text-muted-foreground">Live collateral overview</p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg text-xs bg-background/80"
+            onClick={openTransfer}
+            data-testid="button-transfer"
+          >
+            Transfer
+          </Button>
           <Button
             variant="default"
             size="sm"
             className="h-8 rounded-lg text-xs"
-            onClick={() => navigate("/funding?tab=deposit")}
+            onClick={walletUsdcArbitrum >= 0.01 ? openAddToTrading : () => navigate("/funding?tab=deposit")}
             data-testid="button-deposit"
           >
-            Deposit
+            {walletUsdcArbitrum >= 0.01 ? "Add funds" : "Deposit"}
           </Button>
           <Button
             variant="outline"
@@ -89,7 +100,8 @@ export function AccountEquity() {
       </div>
 
       <div className="space-y-3 p-3 text-xs">
-        {isLoadingAccount || isLoadingWalletUsdc ? (
+        {(isLoadingAccount && displayTrading <= 0 && walletUsdcArbitrum <= 0) ||
+        (isLoadingWalletUsdc && displayTrading <= 0 && walletUsdcArbitrum <= 0) ? (
           <div className="space-y-2">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
@@ -132,7 +144,9 @@ export function AccountEquity() {
                 variant="secondary"
                 size="sm"
                 className="w-full h-8 text-xs"
-                onClick={() => navigate("/funding?tab=deposit&activate=1")}
+                type="button"
+                onClick={openAddToTrading}
+                data-testid="button-add-wallet-to-trading"
               >
                 Add {formatValue(walletUsdcArbitrum)} to trading
               </Button>

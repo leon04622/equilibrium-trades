@@ -29,6 +29,7 @@ import { AppErrorBoundary } from "@/components/app-error-boundary";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 import { WalletUsdcStrip } from "@/components/wallet-usdc-strip";
 import { WalletBalanceEffects } from "@/components/wallet-balance-effects";
+import { DepositSheetProvider } from "@/lib/deposit-sheet-context";
 
 import { AdminGuard } from "@/components/admin-guard";
 import { LazyJournalView } from "@/components/journal-view.lazy";
@@ -117,6 +118,7 @@ function App() {
             <UserPersistenceProvider>
             <UserTierSync />
             <TradingProvider>
+              <DepositSheetProvider>
               <WalletBalanceEffects />
               <TradeHandshakeProvider>
                 <ChatProvider>
@@ -150,6 +152,7 @@ function App() {
                   </TooltipProvider>
                 </ChatProvider>
               </TradeHandshakeProvider>
+              </DepositSheetProvider>
             </TradingProvider>
             </UserPersistenceProvider>
             </AuthProvider>

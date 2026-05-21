@@ -55,13 +55,17 @@ import {
 import { queryClient } from "@/lib/queryClient";
 import { getArbitrumBridgedUsdcBalance } from "@/lib/arbitrum-usdc";
 import { ExternalDepositHelp } from "@/components/external-deposit-help";
+import { UnifiedBalanceCard } from "@/components/unified-balance-card";
+import { useDepositSheet } from "@/lib/deposit-sheet-context";
 import { Progress } from "@/components/ui/progress";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useUserSync } from "@/context/AuthContext";
 import { StatePanel } from "@/components/state-panel";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 
 export default function Portfolio() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { openAddToTrading } = useDepositSheet();
   const { 
     connected, 
     positions, 
@@ -71,6 +75,11 @@ export default function Portfolio() {
     withdrawable,
     currentPrices,
     refreshAccount,
+    displayTotalUsd,
+    unifiedAccountUsd,
+    walletUsdcArbitrum,
+    walletUsdcBridged,
+    isLoadingWalletUsdc,
   } = useTrading();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
   const { data: userSync } = useUserSync();
@@ -105,7 +114,9 @@ export default function Portfolio() {
   const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
   const cctpAttestationCelebratedRef = useRef(false);
 
-  const totalEquity = accountValue || 0;
+  const totalEquity =
+    displayTotalUsd > 0 ? displayTotalUsd : (accountValue || 0) + walletUsdcArbitrum;
+  const hlTradingUsd = unifiedAccountUsd > 0 ? unifiedAccountUsd : accountValue || 0;
   const availableBalance = balance || 0;
   const withdrawablePerp = withdrawable || 0;
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
@@ -132,8 +143,9 @@ export default function Portfolio() {
   useEffect(() => {
     if (connected && address) {
       fetchSpotBalances();
+      void refreshAccount({ silent: true });
     }
-  }, [connected, address]);
+  }, [connected, address, refreshAccount]);
 
   // Auto-refresh spot balances every 15 seconds when connected
   useEffect(() => {
@@ -177,6 +189,15 @@ export default function Portfolio() {
     setTransferStep("");
     setTransferOpen(true);
   };
+
+  useEffect(() => {
+    if (searchParams.get("transfer") === "1" && connected) {
+      openTransferDialog(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("transfer");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, connected, setSearchParams]);
 
   const handleTransfer = async () => {
     console.log("[Transfer] handleTransfer called — signer:", !!signer, "address:", address, "provider:", !!provider);
@@ -618,6 +639,8 @@ export default function Portfolio() {
         </CardContent>
       </Card>
 
+      <UnifiedBalanceCard />
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-1.5 flex-wrap">
           <Button variant="outline" size="sm" onClick={handleRefresh} data-testid="button-refresh-portfolio" className="h-8 px-2 text-xs">
@@ -637,12 +660,12 @@ export default function Portfolio() {
           <Button
             variant="outline"
             size="sm"
-            onClick={openDepositDialog}
+            onClick={walletUsdcArbitrum >= 0.01 ? openAddToTrading : openDepositDialog}
             data-testid="button-deposit"
             className="h-8 px-2 text-xs"
           >
             <ArrowDownToLine className="h-3 w-3 mr-1" />
-            Deposit
+            {walletUsdcArbitrum >= 0.01 ? "Add to trading" : "Deposit"}
           </Button>
           <Button
             size="sm"
@@ -656,7 +679,7 @@ export default function Portfolio() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-3 xl:grid-cols-5">
         <Card data-testid="card-total-equity">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Equity</CardTitle>
@@ -664,7 +687,41 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">${formatPrice(totalEquity)}</div>
-            <p className="text-xs text-muted-foreground">Account value</p>
+            <p className="text-xs text-muted-foreground">Wallet + Hyperliquid</p>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-wallet-usdc">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Wallet USDC</CardTitle>
+            <Coins className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {isLoadingWalletUsdc ? "…" : `$${formatPrice(walletUsdcArbitrum)}`}
+            </div>
+            <p className="text-xs text-muted-foreground">Arbitrum (not yet trading)</p>
+            {walletUsdcArbitrum >= 0.01 && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-auto p-0 mt-1 text-xs text-primary"
+                onClick={openAddToTrading}
+              >
+                Add to trading →
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-hl-trading">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">HL Trading</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">${formatPrice(hlTradingUsd)}</div>
+            <p className="text-xs text-muted-foreground">Perp + spot on exchange</p>
           </CardContent>
         </Card>
 

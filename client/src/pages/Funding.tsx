@@ -26,6 +26,7 @@ import {
 } from "@/lib/cctp-deposit";
 import { ExternalDepositHelp } from "@/components/external-deposit-help";
 import { UnifiedBalanceCard } from "@/components/unified-balance-card";
+import { useDepositSheet } from "@/lib/deposit-sheet-context";
 import {
   depositUsdcToHyperliquid,
   withdrawUsdcToWallet,
@@ -51,6 +52,7 @@ export default function Funding() {
   const activeTab: FundingTab = requestedTab === "withdraw" ? "withdraw" : "deposit";
 
   const { toast } = useToast();
+  const { openAddToTrading } = useDepositSheet();
   const { address, signer, provider, chainId, connect, switchToArbitrum } = useWallet();
   const {
     connected,
@@ -116,8 +118,8 @@ export default function Funding() {
       setDepositCfg(cfg);
       setDepositCfgLoadError(null);
       const [{ native }] = await Promise.all([
-        refreshWalletUsdc(),
-        refreshAccount(),
+        refreshWalletUsdc({ silent: true }),
+        refreshAccount({ silent: true }),
       ]);
       setDepositAmount((current) => {
         if (current.trim().length > 0) return current;
@@ -136,18 +138,21 @@ export default function Funding() {
 
   useEffect(() => {
     if (!address) return;
-    void refreshAccount();
+    void refreshAccount({ silent: true });
     void refreshFundingData();
   }, [address, refreshAccount, refreshFundingData]);
 
   useEffect(() => {
     if (searchParams.get("activate") !== "1") return;
-    const min = depositCfg?.minDepositUsdc ?? 5;
-    if (walletUsdcArbitrum >= min) {
-      setDepositAmount((Math.floor(walletUsdcArbitrum * 100) / 100).toFixed(2));
-      setTab("deposit");
+    setTab("deposit");
+    if (walletUsdcArbitrum >= 0.01) {
+      openAddToTrading();
     }
-  }, [searchParams, walletUsdcArbitrum, depositCfg, setSearchParams]);
+    const next = new URLSearchParams(searchParams);
+    next.delete("activate");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per activate=1 navigation
+  }, [searchParams.get("activate")]);
 
   const fundingHealth = useMemo(
     () => [

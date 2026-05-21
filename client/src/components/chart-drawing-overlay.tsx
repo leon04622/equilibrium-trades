@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -158,15 +159,22 @@ export function ChartDrawingProvider({
   const [draftPoints, setDraftPoints] = useState<ChartDrawingPoint[]>([]);
   const [cursorPoint, setCursorPoint] = useState<ChartDrawingPoint | null>(null);
   const [, bump] = useState(0);
-  const repaint = useCallback(() => bump((n) => n + 1), []);
+  const repaintRafRef = useRef(0);
+  const repaint = useCallback(() => {
+    if (repaintRafRef.current) return;
+    repaintRafRef.current = requestAnimationFrame(() => {
+      repaintRafRef.current = 0;
+      bump((n) => n + 1);
+    });
+  }, []);
 
   const isDrawMode = enabled && tool !== "select";
 
   useEffect(() => {
     setDrawings(loadChartDrawings(coin, interval, address));
     setDraftPoints([]);
-    if (enabled) setTool("trendline");
-  }, [coin, interval, address, enabled]);
+    setCursorPoint(null);
+  }, [coin, interval, address]);
 
   useEffect(() => {
     if (!enabled || drawings.length === 0) return;

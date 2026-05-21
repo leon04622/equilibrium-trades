@@ -94,7 +94,7 @@ interface TradingContextType {
   /** Trading + wallet USDC — what users see as "total balance". */
   displayTotalUsd: number;
   isLoadingWalletUsdc: boolean;
-  refreshWalletUsdc: () => Promise<{ native: number; bridged: number }>;
+  refreshWalletUsdc: (options?: { silent?: boolean }) => Promise<{ native: number; bridged: number }>;
   marginUsed: number;
   positions: Position[];
   openOrders: HLOpenOrder[];
@@ -125,7 +125,7 @@ interface TradingContextType {
   ) => Promise<{ success: boolean; error?: string }>;
   setIndicators: (indicators: Indicator[]) => void;
   updatePrices: (prices: Record<string, number>) => void;
-  refreshAccount: () => Promise<void>;
+  refreshAccount: (options?: { silent?: boolean }) => Promise<void>;
 }
 
 const defaultIndicators: Indicator[] = [
@@ -269,13 +269,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const address = walletAddress || "";
   const displayTotalUsd = unifiedAccountUsd + walletUsdcArbitrum;
 
-  const refreshWalletUsdc = useCallback(async (): Promise<{ native: number; bridged: number }> => {
+  const refreshWalletUsdc = useCallback(async (options?: { silent?: boolean }): Promise<{ native: number; bridged: number }> => {
     if (!walletAddress) {
       setWalletUsdcArbitrum(0);
       setWalletUsdcBridged(0);
       return { native: 0, bridged: 0 };
     }
-    setIsLoadingWalletUsdc(true);
+    const silent = options?.silent ?? false;
+    if (!silent) setIsLoadingWalletUsdc(true);
     try {
       const cfg = await fetchCctpDepositConfig().catch(() => null);
       const [native, bridged] = await Promise.all([
@@ -291,7 +292,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       console.warn("[wallet-usdc] balance refresh failed:", e);
       return { native: 0, bridged: 0 };
     } finally {
-      setIsLoadingWalletUsdc(false);
+      if (!silent) setIsLoadingWalletUsdc(false);
     }
   }, [walletAddress]);
 
@@ -302,7 +303,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       return;
     }
     void refreshWalletUsdc();
-    const id = setInterval(() => void refreshWalletUsdc(), 20_000);
+    const id = setInterval(() => void refreshWalletUsdc({ silent: true }), 20_000);
     return () => clearInterval(id);
   }, [walletAddress, refreshWalletUsdc]);
 
@@ -320,10 +321,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   }, [currentPrices]);
 
   // Fetch account data from the venue when wallet connects
-  const refreshAccount = useCallback(async () => {
+  const refreshAccount = useCallback(async (options?: { silent?: boolean }) => {
     if (!walletAddress) return;
-    
-    setIsLoadingAccount(true);
+
+    const silent = options?.silent ?? false;
+    if (!silent) setIsLoadingAccount(true);
     setHlAccountFetchError(null);
     try {
       const [accountState, hlOrders, spotState] = await Promise.all([
@@ -415,7 +417,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       console.error("Error fetching exchange account:", error);
       setHlAccountFetchError(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsLoadingAccount(false);
+      if (!silent) setIsLoadingAccount(false);
     }
   }, [walletAddress]);
 
@@ -423,7 +425,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!walletConnected || !walletAddress) return;
     const onDepositConfirmed = () => {
-      void refreshAccount();
+      void refreshAccount({ silent: true });
+      void refreshWalletUsdc({ silent: true });
     };
     window.addEventListener("equilibrium-deposit-confirmed", onDepositConfirmed);
     return () => window.removeEventListener("equilibrium-deposit-confirmed", onDepositConfirmed);
