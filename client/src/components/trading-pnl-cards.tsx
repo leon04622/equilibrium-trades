@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useTrading } from "@/lib/trading-context";
+import { useTrading, type Position } from "@/lib/trading-context";
 import { cn } from "@/lib/utils";
 
 function formatUsd(v: number): string {
@@ -21,6 +21,11 @@ function formatSignedPct(v: number): string {
   if (!Number.isFinite(v)) return "0.00%";
   const sign = v > 0 ? "+" : "";
   return `${sign}${v.toFixed(2)}%`;
+}
+
+function positionRoePct(p: Position): number {
+  if (p.margin > 0) return (p.unrealizedPnl / p.margin) * 100;
+  return p.unrealizedPnlPercent ?? 0;
 }
 
 type PnlCardProps = {
@@ -58,16 +63,84 @@ function PnlCard({ label, value, sub, tone, className }: PnlCardProps) {
   );
 }
 
+function AllPositionsPnlCard({
+  positions,
+  loading,
+}: {
+  positions: Position[];
+  loading: boolean;
+}) {
+  const open = positions.filter((p) => p.size > 0);
+  const total = open.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
+  const tone = total > 0 ? "profit" : total < 0 ? "loss" : "neutral";
+
+  return (
+    <div
+      className={cn(
+        "flex min-w-[11rem] flex-[1.4] flex-col gap-1 rounded-lg border px-2.5 py-2 sm:min-w-[14rem] sm:px-3",
+        tone === "profit" && "border-bullish/25 bg-bullish/5",
+        tone === "loss" && "border-bearish/25 bg-bearish/5",
+        tone === "neutral" && "border-border/80 bg-muted/20",
+      )}
+      data-testid="pnl-card-all-positions"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          All positions
+        </span>
+        {!loading && open.length > 0 && (
+          <span
+            className={cn(
+              "font-mono text-xs font-bold tabular-nums",
+              tone === "profit" && "text-bullish",
+              tone === "loss" && "text-bearish",
+            )}
+          >
+            {formatSignedUsd(total)}
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <span className="font-mono text-sm text-muted-foreground">…</span>
+      ) : open.length === 0 ? (
+        <span className="text-[10px] text-muted-foreground">No open positions</span>
+      ) : (
+        <ul className="max-h-[4.5rem] space-y-1 overflow-y-auto pr-0.5 scrollbar-thin">
+          {open.map((p) => {
+            const roe = positionRoePct(p);
+            const rowTone = p.unrealizedPnl > 0 ? "text-bullish" : p.unrealizedPnl < 0 ? "text-bearish" : "";
+            return (
+              <li
+                key={p.id || `${p.coin}-${p.side}`}
+                className="flex items-center justify-between gap-2 text-[10px] leading-tight"
+              >
+                <span className="min-w-0 truncate font-medium text-foreground">
+                  {p.coin}{" "}
+                  <span className={p.side === "long" ? "text-bullish" : "text-bearish"}>
+                    {p.side === "long" ? "Long" : "Short"}
+                  </span>
+                  <span className="text-muted-foreground"> {p.leverage}x</span>
+                </span>
+                <span className={cn("shrink-0 font-mono font-semibold tabular-nums", rowTone)}>
+                  {formatSignedUsd(p.unrealizedPnl)}{" "}
+                  <span className="font-normal opacity-90">({formatSignedPct(roe)})</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 type TradingPnlCardsProps = {
-  /** Active chart symbol (perp coin id or spot @N). */
-  activeCoin: string;
-  /** Display name for the position card, e.g. HYPE-USDC */
-  activeLabel?: string;
   className?: string;
 };
 
-/** Exchange-style P&L score cards — unrealized, active pair, equity, available. */
-export function TradingPnlCards({ activeCoin, activeLabel, className }: TradingPnlCardsProps) {
+/** Exchange-style P&L score cards — unrealized total, every open position, equity, available. */
+export function TradingPnlCards({ className }: TradingPnlCardsProps) {
   const {
     connected,
     positions,
@@ -82,24 +155,14 @@ export function TradingPnlCards({ activeCoin, activeLabel, className }: TradingP
     const totalUnrealized = open.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
     const totalMargin = open.reduce((s, p) => s + (p.margin || 0), 0);
     const roePct = totalMargin > 0 ? (totalUnrealized / totalMargin) * 100 : 0;
-    const activePos = open.find((p) => p.coin === activeCoin) ?? null;
-    return { totalUnrealized, roePct, activePos, openCount: open.length };
-  }, [positions, activeCoin]);
+    return { totalUnrealized, roePct, openCount: open.length };
+  }, [positions]);
 
   if (!connected) return null;
 
   const loading = isLoadingAccount && unifiedAccountUsd <= 0;
   const unrealTone =
     stats.totalUnrealized > 0 ? "profit" : stats.totalUnrealized < 0 ? "loss" : "neutral";
-  const activeTone = stats.activePos
-    ? stats.activePos.unrealizedPnl > 0
-      ? "profit"
-      : stats.activePos.unrealizedPnl < 0
-        ? "loss"
-        : "neutral"
-    : "neutral";
-
-  const pairName = activeLabel?.trim() || activeCoin;
 
   return (
     <div
@@ -121,22 +184,7 @@ export function TradingPnlCards({ activeCoin, activeLabel, className }: TradingP
         tone={loading ? "neutral" : unrealTone}
       />
 
-      <PnlCard
-        label={stats.activePos ? `${pairName} P&L` : "This market"}
-        value={
-          loading
-            ? "…"
-            : stats.activePos
-              ? formatSignedUsd(stats.activePos.unrealizedPnl)
-              : "—"
-        }
-        sub={
-          stats.activePos
-            ? `${stats.activePos.side === "long" ? "Long" : "Short"} · ${formatSignedPct(stats.activePos.unrealizedPnlPercent)} ROE`
-            : "No position here"
-        }
-        tone={loading ? "neutral" : activeTone}
-      />
+      <AllPositionsPnlCard positions={positions} loading={loading} />
 
       <PnlCard
         label="Account equity"
