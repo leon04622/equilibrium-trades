@@ -25,7 +25,6 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
     walletUsdcArbitrum,
     walletUsdcBridged,
     isLoadingWalletUsdc,
-    isLoadingAccount,
     connected,
   } = useTrading();
   const { openAddToTrading } = useDepositSheet();
@@ -34,9 +33,7 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
   const wallet = walletUsdcArbitrum;
   const total = trading + wallet;
   const hasWalletFunds = wallet >= 0.01;
-  const loading =
-    (isLoadingWalletUsdc && wallet <= 0 && trading <= 0) ||
-    (isLoadingAccount && trading <= 0 && wallet <= 0);
+  const loading = isLoadingWalletUsdc && total <= 0 && unifiedAccountUsd <= 0;
 
   if (!connected) return null;
 

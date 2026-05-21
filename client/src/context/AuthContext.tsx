@@ -76,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     enabled: syncEnabled,
     staleTime: 0,
     gcTime: 30 * 60_000,
-    refetchInterval: syncEnabled ? 10_000 : false,
+    refetchInterval: syncEnabled ? 30_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,

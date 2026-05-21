@@ -22,7 +22,7 @@ export function ChartBalanceBar({ className }: ChartBalanceBarProps) {
 
   if (!connected) return null;
 
-  const loading = isLoadingWalletUsdc && isLoadingAccount && displayTotalUsd <= 0;
+  const loading = isLoadingWalletUsdc && walletUsdcArbitrum <= 0 && unifiedAccountUsd <= 0;
   const hasWallet = walletUsdcArbitrum >= 0.01;
 
   return (

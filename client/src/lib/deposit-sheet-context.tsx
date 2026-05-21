@@ -20,6 +20,7 @@ import { Loader2, ArrowDownToLine, AlertCircle, CheckCircle2, XCircle } from "lu
 import { cn } from "@/lib/utils";
 import { useCctpDeposit } from "@/hooks/use-cctp-deposit";
 import { useWallet } from "@/lib/wallet-context";
+import { useTrading } from "@/lib/trading-context";
 
 type DepositSheetContextValue = {
   openAddToTrading: () => void;
@@ -46,6 +47,7 @@ export function useDepositSheet(): DepositSheetContextValue {
 export function DepositSheetProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { address, chainId } = useWallet();
+  const { walletUsdcArbitrum, isLoadingWalletUsdc } = useTrading();
   const [open, setOpen] = useState(false);
   const deposit = useCctpDeposit();
 
@@ -66,13 +68,14 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   const isOnArbitrum = chainId === 42161;
-  const maxBal = deposit.walletUsdcArbitrum ?? 0;
+  const maxBal = walletUsdcArbitrum ?? 0;
+  const minDeposit = deposit.depositCfg?.minDepositUsdc ?? 5;
   const canSubmit =
     !deposit.depositing &&
-    !deposit.preparing &&
-    !deposit.depositCfgLoadError &&
+    !isLoadingWalletUsdc &&
+    !!deposit.depositCfg &&
     deposit.depositAmount &&
-    parseFloat(deposit.depositAmount) > 0 &&
+    parseFloat(deposit.depositAmount) >= minDeposit &&
     parseFloat(deposit.depositAmount) <= maxBal + 0.001;
 
   return (
@@ -94,7 +97,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             <div className="rounded-lg border bg-muted/40 p-3 text-sm">
               <p className="text-muted-foreground">Wallet USDC (Arbitrum)</p>
               <p className="font-mono text-lg font-semibold">
-                {deposit.preparing ? "…" : `${maxBal.toFixed(2)} USDC`}
+                {isLoadingWalletUsdc ? "Loading…" : `${maxBal.toFixed(2)} USDC`}
               </p>
             </div>
 
@@ -106,7 +109,7 @@ export function DepositSheetProvider({ children }: { children: ReactNode }) {
             )}
 
             {deposit.depositCfgLoadError && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
                 {deposit.depositCfgLoadError}
               </div>
             )}

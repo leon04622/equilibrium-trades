@@ -8,6 +8,22 @@ export const ARBITRUM_BRIDGED_USDC = "0xFF970A61A04b1cA14834A43d5C6A0F9849eB01d2
 
 const USDC_DECIMALS = 6;
 const ARB_RPC = "https://arb1.arbitrum.io/rpc";
+const RPC_TIMEOUT_MS = 12_000;
+
+async function withRpcTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out — check your connection and try Refresh.`)),
+      RPC_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function readErc20Balance(wallet: string, token: string): Promise<number> {
   const { JsonRpcProvider, Contract } = await import("ethers");
@@ -16,7 +32,10 @@ async function readErc20Balance(wallet: string, token: string): Promise<number> 
     ["function balanceOf(address) view returns (uint256)"],
     new JsonRpcProvider(ARB_RPC),
   );
-  const raw: bigint = await contract.balanceOf(getAddress(wallet));
+  const raw: bigint = await withRpcTimeout(
+    contract.balanceOf(getAddress(wallet)),
+    "Arbitrum USDC balance",
+  );
   return Number(raw) / 10 ** USDC_DECIMALS;
 }
 

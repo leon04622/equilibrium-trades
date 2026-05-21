@@ -23,6 +23,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { cn } from "@/lib/utils";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
 import { coinToTradingViewSymbol } from "@/lib/tradingview-symbol";
+import { persistTradingViewWorkspace } from "@/lib/tradingview-chart-url";
 
 const LS_COIN = "eq_trading_coin";
 const LS_TF = "eq_trading_timeframe";
@@ -219,8 +220,6 @@ export default function Trading({ visible = true }: TradingProps) {
 
   // Spot markets use @N identifiers
   const isSpot = coin.startsWith("@");
-  const chartDrawingEnabled = chartEngine === "hyperliquid";
-
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
   const displaySymbol = currentTicker?.baseName || (isSpot ? coin : coin);
@@ -229,6 +228,11 @@ export default function Trading({ visible = true }: TradingProps) {
     () => coinToTradingViewSymbol(coin, currentTicker?.baseName),
     [coin, currentTicker?.baseName]
   );
+
+  useEffect(() => {
+    if (chartEngine !== "tradingview") return;
+    persistTradingViewWorkspace(tradingViewSymbol, timeframe);
+  }, [chartEngine, tradingViewSymbol, timeframe]);
 
   const handleOrderSubmit = (order: any) => {
     toast({
@@ -472,8 +476,8 @@ export default function Trading({ visible = true }: TradingProps) {
             </Button>
 
             {chartEngine === "tradingview" && (
-              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[200px] leading-tight shrink-0">
-                TV: trend lines from the <strong className="text-foreground">left toolbar</strong>; TP/SL on <strong className="text-foreground">AI</strong>
+              <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[260px] leading-tight shrink-0">
+                TV: use <strong className="text-foreground">Log in</strong> / <strong className="text-foreground">Open full chart</strong> above the chart to connect your TradingView account and keep saved work.
               </span>
             )}
 
@@ -495,7 +499,7 @@ export default function Trading({ visible = true }: TradingProps) {
             <div className="flex flex-wrap items-center gap-2 md:gap-3 justify-end shrink-0">
               <div
                 className="flex items-center gap-2 md:gap-3 shrink-0"
-                title="AI = native venue candles; TP/SL lines mirror exchange open orders (read-only). TV = embedded TradingView."
+                title="AI = native venue candles + TP/SL. TV = TradingView (log in via bar above chart for saved layouts)."
               >
                 <div className="flex items-center gap-1.5">
                   <Switch
@@ -584,7 +588,6 @@ export default function Trading({ visible = true }: TradingProps) {
                       interval={chartInterval}
                       currentPrice={price}
                       patternScanEnabled={canUseAIPatterns && !isSpot}
-                      drawingEnabled={chartDrawingEnabled}
                       hideIndicators={!showIndicators}
                       lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                       className="absolute inset-0" 
@@ -620,7 +623,6 @@ export default function Trading({ visible = true }: TradingProps) {
                   interval={chartInterval}
                   currentPrice={price}
                   patternScanEnabled={canUseAIPatterns && !isSpot}
-                  drawingEnabled={chartDrawingEnabled}
                   hideIndicators={!showIndicators}
                   lockPremiumIndicatorStack={lockPremiumIndicatorStack}
                   className="h-full" 

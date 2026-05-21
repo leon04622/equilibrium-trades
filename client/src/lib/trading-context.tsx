@@ -16,8 +16,7 @@ import {
   mapClearinghouseAssetPositionsToDashboard,
   applyMarginSummaryFromAccountState,
 } from "./hl-account-map";
-import { fetchCctpDepositConfig, getArbitrumUsdcBalance } from "./cctp-deposit";
-import { getArbitrumBridgedUsdcBalance, getArbitrumNativeUsdcBalance } from "./arbitrum-usdc";
+import { getArbitrumUsdcBalances } from "./arbitrum-usdc";
 import { SubscriptionClient, WebSocketTransport } from "@nktkas/hyperliquid";
 
 export interface Position {
@@ -94,6 +93,8 @@ interface TradingContextType {
   /** Trading + wallet USDC — what users see as "total balance". */
   displayTotalUsd: number;
   isLoadingWalletUsdc: boolean;
+  /** False until the first wallet USDC fetch finishes (success or failure). */
+  walletUsdcReady: boolean;
   refreshWalletUsdc: (options?: { silent?: boolean }) => Promise<{ native: number; bridged: number }>;
   marginUsed: number;
   positions: Position[];
@@ -242,7 +243,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [unifiedAccountUsd, setUnifiedAccountUsd] = useState(0);
   const [walletUsdcArbitrum, setWalletUsdcArbitrum] = useState(0);
   const [walletUsdcBridged, setWalletUsdcBridged] = useState(0);
-  const [isLoadingWalletUsdc, setIsLoadingWalletUsdc] = useState(false);
+  const [walletUsdcReady, setWalletUsdcReady] = useState(false);
+  const walletUsdcFetchGenRef = useRef(0);
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
@@ -273,26 +275,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!walletAddress) {
       setWalletUsdcArbitrum(0);
       setWalletUsdcBridged(0);
+      setWalletUsdcReady(false);
       return { native: 0, bridged: 0 };
     }
-    const silent = options?.silent ?? false;
-    if (!silent) setIsLoadingWalletUsdc(true);
+    const gen = ++walletUsdcFetchGenRef.current;
     try {
-      const cfg = await fetchCctpDepositConfig().catch(() => null);
-      const [native, bridged] = await Promise.all([
-        cfg
-          ? getArbitrumUsdcBalance(walletAddress, cfg.usdc)
-          : getArbitrumNativeUsdcBalance(walletAddress),
-        getArbitrumBridgedUsdcBalance(walletAddress),
-      ]);
-      setWalletUsdcArbitrum(native);
-      setWalletUsdcBridged(bridged);
+      const { native, bridged } = await getArbitrumUsdcBalances(walletAddress);
+      if (walletUsdcFetchGenRef.current === gen) {
+        setWalletUsdcArbitrum(native);
+        setWalletUsdcBridged(bridged);
+      }
       return { native, bridged };
     } catch (e) {
       console.warn("[wallet-usdc] balance refresh failed:", e);
       return { native: 0, bridged: 0 };
     } finally {
-      if (!silent) setIsLoadingWalletUsdc(false);
+      if (walletUsdcFetchGenRef.current === gen) {
+        setWalletUsdcReady(true);
+      }
     }
   }, [walletAddress]);
 
@@ -300,15 +300,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (!walletAddress) {
       setWalletUsdcArbitrum(0);
       setWalletUsdcBridged(0);
+      setWalletUsdcReady(false);
       return;
     }
+    setWalletUsdcReady(false);
     void refreshWalletUsdc();
     const id = setInterval(() => void refreshWalletUsdc({ silent: true }), 20_000);
     return () => clearInterval(id);
   }, [walletAddress, refreshWalletUsdc]);
 
   useEffect(() => {
-    const onDepositDone = () => void refreshWalletUsdc();
+    const onDepositDone = () => void refreshWalletUsdc({ silent: true });
     window.addEventListener("equilibrium-deposit-confirmed", onDepositDone);
     return () => window.removeEventListener("equilibrium-deposit-confirmed", onDepositDone);
   }, [refreshWalletUsdc]);
@@ -948,7 +950,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       walletUsdcArbitrum,
       walletUsdcBridged,
       displayTotalUsd,
-      isLoadingWalletUsdc,
+      isLoadingWalletUsdc: !walletUsdcReady,
+      walletUsdcReady,
       refreshWalletUsdc,
       marginUsed,
       positions,

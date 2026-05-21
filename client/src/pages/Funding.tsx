@@ -21,8 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useTrading } from "@/lib/trading-context";
 import { useWallet } from "@/lib/wallet-context";
 import {
+  CLIENT_CCTP_DEPOSIT_DEFAULTS,
   fetchHyperliquidDepositConfig,
-  getArbitrumUsdcBalance,
 } from "@/lib/cctp-deposit";
 import { ExternalDepositHelp } from "@/components/external-deposit-help";
 import { UnifiedBalanceCard } from "@/components/unified-balance-card";
@@ -81,7 +81,7 @@ export default function Funding() {
   const arbBridgedUsdcBalance = walletUsdcBridged;
   const isLoadingArbBalance = isLoadingWalletUsdc;
   const [depositAwaitingChain, setDepositAwaitingChain] = useState(false);
-  const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
+  const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(CLIENT_CCTP_DEPOSIT_DEFAULTS);
   const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
   const cctpAttestationCelebratedRef = useRef(false);
 
@@ -109,27 +109,31 @@ export default function Funding() {
 
   const refreshFundingData = useCallback(async () => {
     if (!address) {
-      setDepositCfg(null);
+      setDepositCfg(CLIENT_CCTP_DEPOSIT_DEFAULTS);
+      setDepositCfgLoadError(null);
       return;
     }
 
+    setDepositCfgLoadError(null);
     try {
-      const cfg = await fetchHyperliquidDepositConfig();
-      setDepositCfg(cfg);
-      setDepositCfgLoadError(null);
-      const [{ native }] = await Promise.all([
+      const [bal, cfg] = await Promise.all([
         refreshWalletUsdc({ silent: true }),
-        refreshAccount({ silent: true }),
+        fetchHyperliquidDepositConfig(false, { allowFallback: true }),
       ]);
+      setDepositCfg(cfg);
       setDepositAmount((current) => {
         if (current.trim().length > 0) return current;
-        const safeMax = Math.floor(native * 100) / 100;
+        const safeMax = Math.floor(bal.native * 100) / 100;
         return safeMax > 0 ? safeMax.toFixed(2) : "";
       });
-    } catch (e: any) {
-      setDepositCfgLoadError(e?.message || "Could not load deposit settings from the server.");
+      toast({ title: "Balances updated" });
+    } catch (e: unknown) {
+      setDepositCfg(CLIENT_CCTP_DEPOSIT_DEFAULTS);
+      setDepositCfgLoadError(
+        e instanceof Error ? e.message : "Could not refresh balances. Try again.",
+      );
     }
-  }, [address, refreshWalletUsdc, refreshAccount]);
+  }, [address, refreshWalletUsdc, toast]);
 
   useEffect(() => {
     if (!address) return;
@@ -138,9 +142,28 @@ export default function Funding() {
 
   useEffect(() => {
     if (!address) return;
-    void refreshAccount({ silent: true });
-    void refreshFundingData();
-  }, [address, refreshAccount, refreshFundingData]);
+    setDepositCfgLoadError(null);
+    void fetchHyperliquidDepositConfig(false, { allowFallback: true })
+      .then((cfg) => {
+        setDepositCfg(cfg);
+        setDepositCfgLoadError(null);
+      })
+      .catch((e: unknown) => {
+        setDepositCfg(CLIENT_CCTP_DEPOSIT_DEFAULTS);
+        setDepositCfgLoadError(
+          e instanceof Error ? e.message : "Using default deposit settings.",
+        );
+      });
+  }, [address]);
+
+  useEffect(() => {
+    if (!address || isLoadingWalletUsdc) return;
+    setDepositAmount((current) => {
+      if (current.trim().length > 0) return current;
+      const safeMax = Math.floor(arbUsdcBalance * 100) / 100;
+      return safeMax > 0 ? safeMax.toFixed(2) : "";
+    });
+  }, [address, isLoadingWalletUsdc, arbUsdcBalance]);
 
   useEffect(() => {
     if (searchParams.get("activate") !== "1") return;
@@ -296,7 +319,7 @@ export default function Funding() {
     if (!cfg) {
       setDepositStep("Loading deposit settings...");
       try {
-        cfg = await fetchHyperliquidDepositConfig(true);
+        cfg = await fetchHyperliquidDepositConfig(true, { allowFallback: true });
         setDepositCfg(cfg);
         setDepositCfgLoadError(null);
       } catch {
@@ -381,11 +404,11 @@ export default function Funding() {
             description: `Mint submitted on HyperEVM. ${amount} USDC (net of fees) should appear on HyperCore shortly - refresh balances if needed.`,
           });
         }
-        void refreshAccount();
-        void refreshFundingData();
-        setTimeout(() => void refreshAccount(), 5_000);
-        setTimeout(() => void refreshAccount(), 15_000);
-        setTimeout(() => void refreshAccount(), 45_000);
+        void refreshAccount({ silent: true });
+        void refreshWalletUsdc({ silent: true });
+        setTimeout(() => void refreshAccount({ silent: true }), 5_000);
+        setTimeout(() => void refreshAccount({ silent: true }), 15_000);
+        setTimeout(() => void refreshAccount({ silent: true }), 45_000);
       } else {
         toast({ title: "Deposit Failed", description: result.error || "Deposit failed", variant: "destructive" });
       }
@@ -446,17 +469,29 @@ export default function Funding() {
                 <PoweredByHyperliquid compact />
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-                USDC sent to your wallet (Revolut, exchange, etc.) shows in your total balance automatically. Use{" "}
-                <strong className="text-foreground">Add to trading</strong> once to move wallet funds into Hyperliquid.
+                Send USDC to your wallet on <strong className="text-foreground">Arbitrum One</strong>, then press{" "}
+                <strong className="text-foreground">Add to trading</strong> to move it into your Hyperliquid account.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 md:w-[460px]">
-              {fundingHealth.map((item) => (
-                <div key={item.label} className="rounded-2xl border bg-background/80 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</p>
-                  <p className="mt-2 text-base font-semibold">{item.value}</p>
-                </div>
-              ))}
+            <div className="flex flex-col gap-3 sm:items-end">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 md:w-[460px]">
+                {fundingHealth.map((item) => (
+                  <div key={item.label} className="rounded-2xl border bg-background/80 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</p>
+                    <p className="mt-2 text-base font-semibold">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+              <Button
+                type="button"
+                size="lg"
+                className="w-full sm:w-auto shrink-0"
+                onClick={() => openAddToTrading()}
+                data-testid="button-funding-add-to-trading"
+              >
+                <ArrowDownToLine className="mr-2 h-4 w-4" />
+                Add to trading
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -481,10 +516,10 @@ export default function Funding() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ArrowDownToLine className="h-5 w-5 text-primary" />
-                Add to trading
+                Add funds to trading
               </CardTitle>
               <CardDescription>
-                Moves USDC from your Arbitrum wallet into your trading account (one-time signatures per transfer).
+                Move USDC from your Arbitrum wallet into Hyperliquid. You will sign a few steps in your wallet.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -497,7 +532,7 @@ export default function Funding() {
                     <p>
                       Arbitrum USDC (native):{" "}
                       <span className="font-medium text-foreground">
-                        {isLoadingArbBalance ? "Loading..." : `${formatPrice(arbUsdcBalance)} USDC`}
+                        {isLoadingArbBalance ? "Loading…" : `${formatPrice(arbUsdcBalance)} USDC`}
                       </span>
                     </p>
                     {!isLoadingArbBalance && (arbBridgedUsdcBalance ?? 0) > 0 ? (
@@ -556,7 +591,7 @@ export default function Funding() {
               ) : null}
 
               {depositCfgLoadError && (
-                <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{depositCfgLoadError}</span>
                 </div>
@@ -652,10 +687,20 @@ export default function Funding() {
 
               <div className="flex flex-wrap gap-3">
                 <Button
+                  onClick={() => openAddToTrading()}
+                  type="button"
+                  size="lg"
+                  data-testid="button-funding-quick-deposit"
+                >
+                  <ArrowDownToLine className="mr-2 h-4 w-4" />
+                  Add to trading (recommended)
+                </Button>
+                <Button
                   onClick={handleDeposit}
+                  variant="outline"
                   disabled={
                     depositing ||
-                    !!depositCfgLoadError ||
+                    isLoadingArbBalance ||
                     !depositAmount ||
                     parseFloat(depositAmount) <= 0 ||
                     parseFloat(depositAmount) > arbUsdcBalance + 0.001
@@ -665,16 +710,21 @@ export default function Funding() {
                   {depositing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Depositing...
+                      Processing…
                     </>
                   ) : (
-                    "Deposit USDC"
+                    "Deposit on this page"
                   )}
                 </Button>
-                <Button variant="outline" asChild>
-                  <Link to="/portfolio">Open portfolio</Link>
-                </Button>
               </div>
+              {isLoadingArbBalance && (
+                <p className="text-xs text-muted-foreground">Loading wallet balance from Arbitrum…</p>
+              )}
+              {!isLoadingArbBalance && arbUsdcBalance < (depositCfg?.minDepositUsdc ?? 5) && (
+                <p className="text-xs text-muted-foreground">
+                  Send at least {depositCfg?.minDepositUsdc ?? 5} USDC to your wallet on Arbitrum, then refresh.
+                </p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

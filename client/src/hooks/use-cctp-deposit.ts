@@ -9,7 +9,10 @@ import {
   type CctpDepositStep,
   type HyperliquidDepositConfig,
 } from "@/lib/hyperliquid-client";
-import { fetchHyperliquidDepositConfig } from "@/lib/cctp-deposit";
+import {
+  CLIENT_CCTP_DEPOSIT_DEFAULTS,
+  fetchHyperliquidDepositConfig,
+} from "@/lib/cctp-deposit";
 
 export function useCctpDeposit() {
   const { toast } = useToast();
@@ -26,7 +29,7 @@ export function useCctpDeposit() {
     txHash?: string;
     error?: string;
   } | null>(null);
-  const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(null);
+  const [depositCfg, setDepositCfg] = useState<HyperliquidDepositConfig | null>(CLIENT_CCTP_DEPOSIT_DEFAULTS);
   const [depositCfgLoadError, setDepositCfgLoadError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const cctpAttestationCelebratedRef = useRef(false);
@@ -44,14 +47,19 @@ export function useCctpDeposit() {
     setPreparing(true);
     setDepositCfgLoadError(null);
     try {
-      const cfg = await fetchHyperliquidDepositConfig();
-      setDepositCfg(cfg);
-      const { native } = await refreshWalletUsdc({ silent: true });
-      const safeMax = Math.floor(native * 100) / 100;
+      const [bal] = await Promise.all([
+        refreshWalletUsdc({ silent: true }),
+        fetchHyperliquidDepositConfig(false, { allowFallback: true }).then((cfg) => {
+          setDepositCfg(cfg);
+          setDepositCfgLoadError(null);
+        }),
+      ]);
+      const safeMax = Math.floor(bal.native * 100) / 100;
       setDepositAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
-      await refreshAccount({ silent: true });
+      void refreshAccount({ silent: true });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not load deposit settings.";
+      setDepositCfg(CLIENT_CCTP_DEPOSIT_DEFAULTS);
+      const msg = e instanceof Error ? e.message : "Could not refresh balances.";
       setDepositCfgLoadError(msg);
     } finally {
       setPreparing(false);
@@ -120,7 +128,7 @@ export function useCctpDeposit() {
     if (!cfg) {
       setDepositStep("Loading deposit settings...");
       try {
-        cfg = await fetchHyperliquidDepositConfig(true);
+        cfg = await fetchHyperliquidDepositConfig(true, { allowFallback: true });
         setDepositCfg(cfg);
         setDepositCfgLoadError(null);
       } catch {

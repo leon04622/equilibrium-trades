@@ -2,6 +2,12 @@ import { useEffect, useRef, memo, useState } from "react";
 import { useTheme } from "@/lib/theme";
 import { useTrading } from "@/lib/trading-context";
 import { Button } from "@/components/ui/button";
+import { TradingViewAccountBar } from "@/components/tradingview-account-bar";
+import {
+  persistTradingViewWorkspace,
+  tradingViewEmbedPageUri,
+  tradingTimeframeToTvInterval,
+} from "@/lib/tradingview-chart-url";
 
 /** Keys forwarded by embed-widget-advanced-chart.js (see TradingView embed script `propertiesToWorkWith`). */
 const ADVANCED_CHART_SETTING_KEYS = new Set([
@@ -66,10 +72,6 @@ function filterAdvancedChartSettings(raw: Record<string, unknown>): Record<strin
   return out;
 }
 
-/** Mirrors TradingView embed `c()` for advanced-chart `page-uri` in the hash. */
-function tradingViewPageUri(): string {
-  return window.location.href.replace(/^https?:\/\//i, "");
-}
 
 const TV_RESIZE_MSG = "tv-widget-resize-iframe";
 const TV_EMBED_ORIGIN = "https://www.tradingview-widget.com";
@@ -170,7 +172,10 @@ function TradingViewChartComponent({
       hide_legend: false,
       hide_side_toolbar: false,
       withdateranges: true,
-      save_image: false,
+      save_image: true,
+      show_popup_button: true,
+      popup_width: 1400,
+      popup_height: 900,
       support_host: "https://www.tradingview.com",
       studies,
       horztouchdrag: true,
@@ -190,7 +195,7 @@ function TradingViewChartComponent({
       if (key === "locale" || key === "customer") continue;
       hashPayload[key] = settings[key];
     }
-    hashPayload["page-uri"] = tradingViewPageUri();
+    hashPayload["page-uri"] = tradingViewEmbedPageUri();
 
     const url = new URL(`${TV_EMBED_ORIGIN}/embed-widget/advanced-chart/`);
     url.searchParams.append("locale", String(settings.locale ?? "en"));
@@ -201,6 +206,7 @@ function TradingViewChartComponent({
     iframe.setAttribute("lang", "en");
     iframe.setAttribute("frameborder", "0");
     iframe.setAttribute("allowtransparency", "true");
+    iframe.setAttribute("allow", "fullscreen");
     iframe.setAttribute("scrolling", "no");
     iframe.style.display = "block";
     iframe.style.boxSizing = "border-box";
@@ -251,13 +257,18 @@ function TradingViewChartComponent({
     ),
   ]);
 
+  useEffect(() => {
+    persistTradingViewWorkspace(symbol, tradingTimeframeToTvInterval(interval));
+  }, [symbol, interval]);
+
   return (
-    <div className={`tradingview-widget-container relative ${className}`}>
+    <div className={`tradingview-widget-container relative flex flex-col min-h-0 ${className}`}>
+      <TradingViewAccountBar symbol={symbol} interval={interval} />
       <div
         ref={containerRef}
         style={{ height: "100%", width: "100%" }}
         data-testid="tradingview-chart"
-        className="h-full w-full"
+        className="flex-1 min-h-0 w-full"
       />
       {loadState === "loading" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-sm">

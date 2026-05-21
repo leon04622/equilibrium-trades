@@ -54,8 +54,28 @@ export type CctpDepositProgressStage = CctpDepositStep;
 
 let depositConfigCache: { config: CctpDepositConfig; at: number } | null = null;
 const DEPOSIT_CONFIG_TTL_MS = 10 * 60 * 1000;
+const DEPOSIT_CONFIG_FETCH_MS = 12_000;
 const ATTEST_POLL_MS = 3000;
 const ATTEST_MAX_MS = 20 * 60 * 1000;
+
+/** Circle mainnet defaults — matches server `deposit-service.ts` so UI works if `/api/cctp/deposit-config` is slow or down. */
+export const CLIENT_CCTP_DEPOSIT_DEFAULTS: CctpDepositConfig = {
+  cctpExtension: "0xA95d9c1F655341597C94393fDdc30cf3c08E4fcE",
+  tokenMessenger: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+  messageTransmitterArbitrum: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+  usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  usdcEip712Name: "USD Coin",
+  usdcEip712Version: "2",
+  cctpForwarder: "0xb21D281DEdb17AE5B501F6AA8256fe38C4e45757",
+  messageTransmitterHyperEvm: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+  chainId: 42161,
+  hyperevmChainId: 999,
+  destinationDomain: 19,
+  sourceDomain: 3,
+  minDepositUsdc: 5,
+  minFinalityThreshold: 1000,
+  verifiedHyperliquidBridge2Arbitrum: "0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7",
+};
 
 function parseCctpConfig(data: unknown): CctpDepositConfig {
   if (!data || typeof data !== "object") throw new Error("Invalid CCTP config");
@@ -105,7 +125,11 @@ function parseCctpConfig(data: unknown): CctpDepositConfig {
   };
 }
 
-export async function fetchCctpDepositConfig(forceRefresh = false): Promise<CctpDepositConfig> {
+export async function fetchCctpDepositConfig(
+  forceRefresh = false,
+  options?: { allowFallback?: boolean },
+): Promise<CctpDepositConfig> {
+  const allowFallback = options?.allowFallback !== false;
   if (
     !forceRefresh &&
     depositConfigCache &&
@@ -113,21 +137,38 @@ export async function fetchCctpDepositConfig(forceRefresh = false): Promise<Cctp
   ) {
     return depositConfigCache.config;
   }
-  const res = await fetch("/api/cctp/deposit-config", { credentials: "include" });
-  const text = await res.text();
-  if (!res.ok) {
-    let msg = text || res.statusText;
-    try {
-      const j = JSON.parse(text) as { error?: string };
-      if (typeof j.error === "string") msg = j.error;
-    } catch {
-      /* keep */
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), DEPOSIT_CONFIG_FETCH_MS);
+  try {
+    const res = await fetch("/api/cctp/deposit-config", {
+      credentials: "include",
+      signal: ctrl.signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = text || res.statusText;
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (typeof j.error === "string") msg = j.error;
+      } catch {
+        /* keep */
+      }
+      throw new Error(msg);
     }
-    throw new Error(msg);
+    const config = parseCctpConfig(JSON.parse(text));
+    depositConfigCache = { config, at: Date.now() };
+    return config;
+  } catch (e) {
+    if (allowFallback) {
+      console.warn("[CCTP] deposit-config fetch failed, using client defaults:", e);
+      depositConfigCache = { config: CLIENT_CCTP_DEPOSIT_DEFAULTS, at: Date.now() };
+      return CLIENT_CCTP_DEPOSIT_DEFAULTS;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  const config = parseCctpConfig(JSON.parse(text));
-  depositConfigCache = { config, at: Date.now() };
-  return config;
 }
 
 export const fetchHyperliquidDepositConfig = fetchCctpDepositConfig;
@@ -163,8 +204,13 @@ async function postBridgeProgress(
 
 export async function getArbitrumUsdcBalance(address: string, usdcToken: string): Promise<number> {
   try {
-    const { JsonRpcProvider, Contract } = await import("ethers");
+    const { getArbitrumNativeUsdcBalance } = await import("./arbitrum-usdc");
     const token = getAddress(usdcToken);
+    const native = getAddress(CLIENT_CCTP_DEPOSIT_DEFAULTS.usdc);
+    if (token === native) {
+      return await getArbitrumNativeUsdcBalance(address);
+    }
+    const { JsonRpcProvider, Contract } = await import("ethers");
     const provider = new JsonRpcProvider("https://arb1.arbitrum.io/rpc");
     const contract = new Contract(token, ["function balanceOf(address) view returns (uint256)"], provider);
     const raw: bigint = await contract.balanceOf(address);
