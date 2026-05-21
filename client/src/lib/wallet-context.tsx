@@ -8,6 +8,7 @@ import {
 } from "@/lib/hyperliquid-client";
 import { hasLocalLifetimeHandshakeDone } from "@/lib/TradeExecution";
 import { queryClient } from "@/lib/queryClient";
+import { humanizeWalletConnectError } from "@/lib/wallet-errors";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
 
@@ -34,6 +35,7 @@ interface WalletContextType {
   detectedWallets: DetectedWallet[];
   isMobile: boolean;
   connectError: string | null;
+  clearConnectError: () => void;
   connect: (walletType?: WalletType) => Promise<void>;
   disconnect: () => void;
   switchToArbitrum: () => Promise<void>;
@@ -237,6 +239,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const isConnected = !!address && !!signer;
 
+  const bindInjectedWalletSession = useCallback(async (raw: any) => {
+    activeInjectedRef.current = raw;
+    const browserProvider = new BrowserProvider(raw);
+    const browserSigner = await browserProvider.getSigner();
+    let chainId: number | null = null;
+    try {
+      const chainHex = await raw.request({ method: "eth_chainId" });
+      if (typeof chainHex === "string" && chainHex.startsWith("0x")) {
+        const id = parseInt(chainHex, 16);
+        if (Number.isFinite(id)) chainId = id;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (chainId == null) {
+      try {
+        const network = await browserProvider.getNetwork();
+        chainId = Number(network.chainId);
+      } catch (netErr) {
+        console.warn("[Wallet] Network read deferred (will sync on chainChanged):", netErr);
+      }
+    }
+    return { browserProvider, browserSigner, chainId };
+  }, []);
+
+  const clearConnectError = useCallback(() => setConnectError(null), []);
+
   const rebuildDetectedWallets = useCallback(() => {
     setDetectedWallets(mergeDetectedWallets(eip6963MapRef.current));
   }, []);
@@ -327,14 +356,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             setIsConnecting(true);
             const accounts = await rawProvider.request({ method: "eth_requestAccounts" });
             if (accounts?.length) {
-              activeInjectedRef.current = rawProvider;
-              const browserProvider = new BrowserProvider(rawProvider);
-              const browserSigner = await browserProvider.getSigner();
-              const network = await browserProvider.getNetwork();
+              const { browserProvider, browserSigner, chainId } =
+                await bindInjectedWalletSession(rawProvider);
               setProvider(browserProvider);
               setSigner(browserSigner);
               setAddress(accounts[0]);
-              setChainId(Number(network.chainId));
+              if (chainId != null) setChainId(chainId);
               try {
                 sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
                 sessionStorage.removeItem("metamask_deep_link_pending");
@@ -363,7 +390,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, bindInjectedWalletSession]);
 
   const confirmBuilderCodeApproved = useCallback(() => {
     setBuilderCodeApproved(true);
@@ -483,8 +510,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setAddress(accounts[0]);
       if (raw) {
         try {
-          const browserProvider = new BrowserProvider(raw);
-          const browserSigner = await browserProvider.getSigner();
+          const { browserProvider, browserSigner } = await bindInjectedWalletSession(raw);
           setProvider(browserProvider);
           setSigner(browserSigner);
         } catch (err) {
@@ -492,7 +518,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, []);
+  }, [bindInjectedWalletSession]);
 
   const handleChainChanged = useCallback(async (chainIdHex: string) => {
     const newChainId = parseInt(chainIdHex, 16);
@@ -500,15 +526,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const raw = activeInjectedRef.current ?? window.ethereum;
     if (raw) {
       try {
-        const browserProvider = new BrowserProvider(raw);
-        const browserSigner = await browserProvider.getSigner();
+        const { browserProvider, browserSigner } = await bindInjectedWalletSession(raw);
         setProvider(browserProvider);
         setSigner(browserSigner);
       } catch (error) {
         console.error("Error reinitializing provider after chain change:", error);
       }
     }
-  }, []);
+  }, [bindInjectedWalletSession]);
 
   useEffect(() => {
     const raw = activeInjectedRef.current ?? window.ethereum;
@@ -535,15 +560,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       try {
         const accounts = await raw.request({ method: "eth_accounts" });
         if (accounts.length > 0) {
-          activeInjectedRef.current = raw;
-          const browserProvider = new BrowserProvider(raw);
-          const browserSigner = await browserProvider.getSigner();
-          const network = await browserProvider.getNetwork();
-
+          const { browserProvider, browserSigner, chainId } = await bindInjectedWalletSession(raw);
           setProvider(browserProvider);
           setSigner(browserSigner);
           setAddress(accounts[0]);
-          setChainId(Number(network.chainId));
+          if (chainId != null) setChainId(chainId);
         } else if (isMobile && window.ethereum) {
           const mmPending = sessionStorage.getItem("metamask_deep_link_pending");
           const rbPending = sessionStorage.getItem("rabby_deep_link_pending");
@@ -558,15 +579,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
               setIsConnecting(true);
               const requestedAccounts = await raw.request({ method: "eth_requestAccounts" });
               if (requestedAccounts.length > 0) {
-                activeInjectedRef.current = raw;
-                const browserProvider = new BrowserProvider(raw);
-                const browserSigner = await browserProvider.getSigner();
-                const network = await browserProvider.getNetwork();
-
+                const { browserProvider, browserSigner, chainId } =
+                  await bindInjectedWalletSession(raw);
                 setProvider(browserProvider);
                 setSigner(browserSigner);
                 setAddress(requestedAccounts[0]);
-                setChainId(Number(network.chainId));
+                if (chainId != null) setChainId(chainId);
               }
             } catch (err) {
               console.error("Error auto-connecting after wallet deep link:", err);
@@ -581,7 +599,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
 
     checkConnection();
-  }, [isMobile]);
+  }, [isMobile, bindInjectedWalletSession]);
 
   useEffect(() => {
     const handleVisibilityChange = async () => {
@@ -608,15 +626,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         try {
           const accounts = await raw.request({ method: "eth_accounts" });
           if (accounts.length > 0) {
-            activeInjectedRef.current = raw;
-            const browserProvider = new BrowserProvider(raw);
-            const browserSigner = await browserProvider.getSigner();
-            const network = await browserProvider.getNetwork();
-
+            const { browserProvider, browserSigner, chainId } = await bindInjectedWalletSession(raw);
             setProvider(browserProvider);
             setSigner(browserSigner);
             setAddress(accounts[0]);
-            setChainId(Number(network.chainId));
+            if (chainId != null) setChainId(chainId);
             try {
               sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
             } catch {
@@ -631,7 +645,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isMobile, address]);
+  }, [isMobile, address, bindInjectedWalletSession]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
     const u = new URL(window.location.href);
@@ -673,7 +687,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(WALLET_DISCONNECTED_KEY);
     setConnectError(null);
 
-    const selectedProvider = resolveInjectedProvider(walletType, eip6963MapRef.current);
+    const fromList =
+      walletType && walletType !== "injected"
+        ? detectedWallets.find((w) => w.type === walletType)?.provider
+        : undefined;
+    const selectedProvider =
+      fromList ?? resolveInjectedProvider(walletType, eip6963MapRef.current);
 
     if (!selectedProvider?.request) {
       if (isMobile) {
@@ -699,32 +718,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         throw new Error("No accounts returned. Please unlock your wallet and try again.");
       }
 
-      activeInjectedRef.current = selectedProvider;
+      const { browserProvider, browserSigner, chainId } =
+        await bindInjectedWalletSession(selectedProvider);
 
-      const browserProvider = new BrowserProvider(selectedProvider);
-      const browserSigner = await browserProvider.getSigner();
-      const network = await browserProvider.getNetwork();
-      
       setProvider(browserProvider);
       setSigner(browserSigner);
       setAddress(accounts[0]);
-      setChainId(Number(network.chainId));
-    } catch (error: any) {
+      if (chainId != null) setChainId(chainId);
+    } catch (error: unknown) {
       console.error("Error connecting wallet:", error);
-      let message = "Connection failed. Please try again.";
-      if (error.code === 4001) {
-        message = "Connection rejected. Please approve the request in your wallet.";
-      } else if (error.code === -32002) {
-        message = "A connection request is already pending. Please open your wallet and approve it.";
-      } else if (error.message) {
-        message = error.message;
-      }
+      const message = humanizeWalletConnectError(error);
       setConnectError(message);
       throw error;
     } finally {
       setIsConnecting(false);
     }
-  }, [isMobile]);
+  }, [isMobile, detectedWallets, bindInjectedWalletSession]);
 
   const disconnect = useCallback(() => {
     const prev = address;
@@ -795,6 +804,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       detectedWallets,
       isMobile,
       connectError,
+      clearConnectError,
       connect,
       disconnect,
       switchToArbitrum,

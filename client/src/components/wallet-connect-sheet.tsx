@@ -45,6 +45,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
     isConnected, 
     address,
     connectError,
+    clearConnectError,
     openInWalletBrowser 
   } = useWallet();
   const [open, setOpen] = useState(false);
@@ -60,7 +61,9 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
       setOpen(false);
     } catch (err: any) {
       // Error is already stored in connectError via context; surface it locally too
-      setLocalError(connectError ?? err?.message ?? "Connection failed. Please try again.");
+      setLocalError(
+        connectError ?? (err instanceof Error ? err.message : null) ?? "Connection failed. Please try again.",
+      );
     } finally {
       setConnectingWallet(null);
     }
@@ -85,7 +88,18 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
   );
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { setOpen(v); if (!v) setLocalError(null); }}>
+    <Sheet
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (v) {
+          setLocalError(null);
+          clearConnectError();
+        } else {
+          setLocalError(null);
+        }
+      }}
+    >
       <SheetTrigger asChild>
         {trigger || defaultTrigger}
       </SheetTrigger>
