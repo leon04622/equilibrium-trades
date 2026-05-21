@@ -98,6 +98,14 @@ export default function Trading({ visible = true }: TradingProps) {
   useEffect(() => {
     if (pathname !== "/trading" && pathname !== "/trade") return;
     const params = new URLSearchParams(search || window.location.search);
+    if (params.get("tv_session") === "1") {
+      setChartEngine("tradingview");
+      try {
+        localStorage.setItem(LS_CHART_ENGINE, "tradingview");
+      } catch {
+        /* ignore */
+      }
+    }
     const coinParam = params.get("coin");
     if (coinParam) {
       setIsResolvingCoin(true);
@@ -490,7 +498,7 @@ export default function Trading({ visible = true }: TradingProps) {
 
             {chartEngine === "tradingview" && (
               <span className="hidden md:inline text-[10px] text-amber-500/90 max-w-[280px] leading-tight shrink-0">
-                TV chart stays here — <strong className="text-foreground">Connect TradingView</strong> signs you in on TradingView, then returns to this page.
+                TV chart stays here — use <strong className="text-foreground">TV account help</strong> above the chart (not the logo inside the graph).
               </span>
             )}
 

@@ -177,11 +177,14 @@ function TradingViewChartComponent({
       withdateranges: true,
       save_image: true,
       show_popup_button: false,
-      support_host: "https://www.tradingview.com",
+      /** Logo link stays on Equilibrium — default TV URL opens a new TradingView tab/window. */
+      support_host:
+        typeof window !== "undefined" ? window.location.origin : "https://www.equilibrium-trading.xyz",
+      disabled_features: ["popup_hints", "header_saveload", "header_settings"],
       studies,
       horztouchdrag: true,
       verttouchdrag: true,
-      enabled_features: ["left_toolbar", "side_toolbar_in_fullscreen_mode"],
+      enabled_features: ["left_toolbar", "side_toolbar_in_fullscreen_mode"] as string[],
       width: "100%",
       height: "100%",
     };
