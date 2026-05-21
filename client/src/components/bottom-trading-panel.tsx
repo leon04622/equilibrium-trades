@@ -666,9 +666,15 @@ function PositionsTable({
                   title={onCoinChange ? `Switch chart to ${pos.coin}` : undefined}
                 >
                   <span className="font-medium">{pos.coin}</span>
-                  <span className={cn("text-[10px]", pos.side === "long" ? "text-bullish" : "text-bearish")}>
-                    {pos.leverage}x
+                  <span
+                    className={cn(
+                      "text-[10px] font-semibold uppercase",
+                      pos.side === "long" ? "text-bullish" : "text-bearish",
+                    )}
+                  >
+                    {pos.side === "long" ? "Long" : "Short"}
                   </span>
+                  <span className={cn("text-[10px] text-muted-foreground")}>{pos.leverage}x</span>
                 </button>
               </td>
               <td className={cn("px-3 py-1.5 text-right font-mono", pos.side === "long" ? "text-bullish" : "text-bearish")}>

@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ChevronDown, Star, ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { useTrading } from "@/lib/trading-context";
 
 interface Ticker {
   coin: string;
@@ -105,6 +105,21 @@ function fmtFunding(f: number) {
   return `${f >= 0 ? "+" : ""}${(f * 100).toFixed(4)}%`;
 }
 
+function PositionSideBadge({ side }: { side: "long" | "short" }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-[10px] font-semibold px-1 py-0 rounded border uppercase tracking-wide",
+        side === "long"
+          ? "text-bullish border-bullish/35 bg-bullish/10"
+          : "text-bearish border-bearish/35 bg-bearish/10",
+      )}
+    >
+      {side === "long" ? "Long" : "Short"}
+    </span>
+  );
+}
+
 export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -120,7 +135,18 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
     refetchInterval: 3000,
   });
 
+  const { positions, connected } = useTrading();
+  const positionSideByCoin = useMemo(() => {
+    const map = new Map<string, "long" | "short">();
+    if (!connected) return map;
+    for (const p of positions) {
+      if (p.size > 0) map.set(p.coin, p.side);
+    }
+    return map;
+  }, [positions, connected]);
+
   const currentTicker = tickers.find(t => t.coin === currentSymbol);
+  const currentPositionSide = positionSideByCoin.get(currentSymbol);
   const price = currentTicker ? parseFloat(currentTicker.markPx) : 0;
   const prevPrice = currentTicker ? parseFloat(currentTicker.prevDayPx) : price;
   const change = prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
@@ -248,6 +274,7 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
             <span className="text-sm font-bold">
               {currentTicker ? getTickerLabel(currentTicker) : `${currentSymbol || "BTC"}-USDC`}
             </span>
+            {currentPositionSide && <PositionSideBadge side={currentPositionSide} />}
             {!isCurrentSpot && (
               <span className="text-[10px] font-semibold text-muted-foreground border border-border rounded px-1 py-0">{currentLeverage}x</span>
             )}
@@ -359,6 +386,9 @@ export function SymbolSelector({ currentSymbol, onSymbolChange }: SymbolSelector
                   {/* Symbol + leverage / spot badge */}
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="font-mono text-sm font-semibold truncate">{getTickerLabel(ticker)}</span>
+                    {positionSideByCoin.get(ticker.coin) && (
+                      <PositionSideBadge side={positionSideByCoin.get(ticker.coin)!} />
+                    )}
                     {search && aliasBoosted.has(ticker.coin) && (
                       <span className="shrink-0 text-[9px] font-medium px-1 rounded border text-amber-400 border-amber-400/30 bg-amber-400/10">
                         alias
