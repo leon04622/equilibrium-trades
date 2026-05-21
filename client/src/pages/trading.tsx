@@ -9,6 +9,7 @@ import { RecentTrades } from "@/components/recent-trades";
 import { OrderEntry, type OrderSubmitPayload } from "@/components/order-entry";
 import { AccountEquity } from "@/components/account-equity";
 import { ChartBalanceBar } from "@/components/chart-balance-bar";
+import { TradingPnlCards } from "@/components/trading-pnl-cards";
 import { BottomTradingPanel } from "@/components/bottom-trading-panel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -237,6 +238,9 @@ export default function Trading({ visible = true }: TradingProps) {
   // Derive display name for spot coins (e.g. "@0" → "PURR")
   const currentTicker = tickers.find((t: any) => t.coin === coin);
   const displaySymbol = currentTicker?.baseName || (isSpot ? coin : coin);
+  const pairLabel = currentTicker
+    ? currentTicker.displayName || (isSpot ? coin : `${displaySymbol}-USDC`)
+    : `${coin}-USDC`;
 
   const tradingViewSymbol = useMemo(
     () => coinToTradingViewSymbol(coin, currentTicker?.baseName),
@@ -490,6 +494,7 @@ export default function Trading({ visible = true }: TradingProps) {
             mobileTab !== "chart" && !isFullscreen && "hidden md:flex"
           )}>
             <ChartBalanceBar className="w-full" />
+            <TradingPnlCards activeCoin={coin} activeLabel={pairLabel} className="w-full" />
           <div className="flex items-center justify-between gap-1 md:gap-2">
             {/* Fullscreen toggle for mobile - exit button when fullscreen */}
             <Button
