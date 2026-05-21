@@ -165,6 +165,17 @@ function normalizeCandlesByTime(candles: CandleData[]): CandleData[] {
   return [...latestByTime.values()].sort((a, b) => a.t - b.t);
 }
 
+function fingerprintCandles(candles: CandleData[]): string {
+  if (candles.length === 0) return "empty";
+  const last = candles[candles.length - 1]!;
+  return `${candles.length}:${last.t}:${last.o}:${last.h}:${last.l}:${last.c}:${last.v}`;
+}
+
+function candlesStructurallyEqual(a: CandleData[] | undefined, b: CandleData[] | undefined): boolean {
+  if (!a || !b) return a === b;
+  return fingerprintCandles(a) === fingerprintCandles(b);
+}
+
 type SmmaPoint = { time: Time; value: number };
 
 function trimLineSeriesToTime<T extends { time: Time }>(points: T[], lastTime: Time): T[] {
@@ -346,6 +357,9 @@ function PatternChartComponent({
   const preferredVisibleBarsRef = useRef<number | null>(null);
   const smaCardRunRef = useRef(0);
   const chartSmmaRunRef = useRef(0);
+  const lastChartFingerprintRef = useRef("");
+  const layoutTickRafRef = useRef(0);
+  const visibleRangeCacheRef = useRef<{ min: number; max: number } | null>(null);
 
   /** Keeps optimistic TP/SL prices until openOrders refresh (Apex Sovereign + order lines contract). */
   const [nativeTpslOverride, setNativeTpslOverride] = useState<{ tp: number | null; sl: number | null }>({
@@ -404,6 +418,9 @@ function PatternChartComponent({
   // Do NOT call setData([]) here — keep old candles visible until new ones arrive.
   useEffect(() => {
     chartDataReadyRef.current = false;
+    prevDataKeyRef.current = "";
+    lastChartFingerprintRef.current = "";
+    preferredVisibleBarsRef.current = null;
     setLastVol(null);
     setLastRSI(null);
     setLastK(null);
@@ -426,14 +443,15 @@ function PatternChartComponent({
   } = useQuery<CandleData[]>({
     // candlesLoading kept for React Query semantics; UI uses cache-aware flags below
     queryKey: [candleQueryKey],
-    placeholderData: (previousData) =>
-      previousData && previousData.length > 0
-        ? previousData
-        : cachedCandles.length > 0
-          ? (cachedCandles as CandleData[])
-          : undefined,
-    refetchInterval: 10_000,
-    staleTime: 8000,
+    /** Never reuse another market's candles while the query key changes — that caused ghost charts until refresh. */
+    placeholderData: () =>
+      cachedCandles.length > 0 ? (cachedCandles as CandleData[]) : undefined,
+    structuralSharing: (prev, next) =>
+      candlesStructurallyEqual(prev as CandleData[] | undefined, next as CandleData[] | undefined)
+        ? (prev as CandleData[])
+        : (next as CandleData[]),
+    refetchInterval: 15_000,
+    staleTime: 12_000,
     retry: false,
     queryFn: async ({ signal }) => {
       const attempt = async () => {
@@ -622,7 +640,6 @@ function PatternChartComponent({
     if (!mainContainerRef.current) return;
     if (!hideIndicators && (!rsiContainerRef.current || !stochContainerRef.current)) return;
 
-    console.log("[chart] creating chart instance for", coin);
 
     const chartOpts = {
       layout: { background: { type: ColorType.Solid, color: BG }, textColor: TEXT },
@@ -685,15 +702,35 @@ function PatternChartComponent({
       priceLineVisible: false, lastValueVisible: false, title: "",
     });
 
-    // lightweight-charts v5: read visible price range from the candlestick series' price scale
+    const publishVisiblePriceRange = (from: number, to: number) => {
+      const min = Math.min(from, to);
+      const max = Math.max(from, to);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0) return;
+      const prev = visibleRangeCacheRef.current;
+      if (
+        prev &&
+        Math.abs(prev.min - min) / Math.max(prev.min, 1e-12) < 0.00015 &&
+        Math.abs(prev.max - max) / Math.max(prev.max, 1e-12) < 0.00015
+      ) {
+        return;
+      }
+      visibleRangeCacheRef.current = { min, max };
+      setVisiblePriceRange({ min, max });
+    };
+
     const syncVisiblePriceRange = () => {
       const series = candleSeriesRef.current;
       if (!series) return;
       const range = series.priceScale().getVisibleRange();
       if (!range) return;
-      setVisiblePriceRange({
-        min: Math.min(range.from, range.to),
-        max: Math.max(range.from, range.to),
+      publishVisiblePriceRange(range.from, range.to);
+    };
+
+    const scheduleLayoutTick = () => {
+      if (layoutTickRafRef.current) return;
+      layoutTickRafRef.current = requestAnimationFrame(() => {
+        layoutTickRafRef.current = 0;
+        setChartLayoutTick((t) => t + 1);
       });
     };
 
@@ -712,17 +749,9 @@ function PatternChartComponent({
     const cleanups: (() => void)[] = [];
 
     syncVisiblePriceRange();
-    let layoutRaf = 0;
-    const bumpLayoutTick = () => {
-      if (layoutRaf) cancelAnimationFrame(layoutRaf);
-      layoutRaf = requestAnimationFrame(() => {
-        layoutRaf = 0;
-        setChartLayoutTick((t) => t + 1);
-      });
-    };
     const onTimeScaleChange = () => {
       syncVisiblePriceRange();
-      bumpLayoutTick();
+      scheduleLayoutTick();
       const logicalRange = mainChart.timeScale().getVisibleLogicalRange();
       if (!logicalRange) return;
       const visibleBars = Math.round(logicalRange.to - logicalRange.from);
@@ -749,10 +778,6 @@ function PatternChartComponent({
       } catch {
         /* disposed */
       }
-    });
-
-    cleanups.push(() => {
-      if (layoutRaf) cancelAnimationFrame(layoutRaf);
     });
 
     if (!hideIndicators && rsiContainerRef.current && stochContainerRef.current) {
@@ -847,8 +872,9 @@ function PatternChartComponent({
       try { mainChart.remove(); } catch (_) {}
       mainChartRef.current = null;
       cleanups.forEach(fn => fn());
+      if (layoutTickRafRef.current) cancelAnimationFrame(layoutTickRafRef.current);
     };
-  }, [theme, hideIndicators]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [theme, hideIndicators, coin, interval]);
 
   // ── Data update — smart setData vs update(); SMMA computed in Web Worker (same formula) ──
   useEffect(() => {
@@ -867,6 +893,14 @@ function PatternChartComponent({
     const lastTime = times[times.length - 1]!;
 
     const dataKey = `${coin}:${interval}`;
+    const fingerprint = fingerprintCandles(sorted);
+    if (
+      chartDataReadyRef.current &&
+      prevDataKeyRef.current === dataKey &&
+      lastChartFingerprintRef.current === fingerprint
+    ) {
+      return;
+    }
 
     const runId = ++chartSmmaRunRef.current;
 
@@ -882,7 +916,7 @@ function PatternChartComponent({
       const isFirstLoad = !chartDataReadyRef.current;
 
       if (isKeyChange || isFirstLoad) {
-        console.log("[chart] setData →", dataKey, sorted.length, "candles", isKeyChange ? "(key change)" : "(first load)");
+        if (isKeyChange) preferredVisibleBarsRef.current = null;
 
         try {
           candleSeriesRef.current.setData(
@@ -945,22 +979,23 @@ function PatternChartComponent({
         prevDataKeyRef.current = dataKey;
         prevCandlesLenRef.current = sorted.length;
         prevLastTimeRef.current = lastCandle.t;
+        lastChartFingerprintRef.current = fingerprint;
         chartDataReadyRef.current = true;
         setLastRenderedDataKey(dataKey);
         return;
+      }
+
+      let preservedRange: { from: number; to: number } | null = null;
+      try {
+        preservedRange = mainChartRef.current.timeScale().getVisibleLogicalRange();
+      } catch {
+        preservedRange = null;
       }
 
       const lenChanged = sorted.length !== prevCandlesLenRef.current;
       const timeWentBackward = lastCandle.t < prevLastTimeRef.current;
 
       if (sorted.length - prevCandlesLenRef.current > 2 || timeWentBackward) {
-        console.log(
-          "[chart] setData (fallback) →",
-          coin,
-          sorted.length,
-          "candles",
-          timeWentBackward ? "(time went backward)" : "(bulk update)",
-        );
         try {
           candleSeriesRef.current.setData(
             sorted.map((c, i) => ({
@@ -989,11 +1024,17 @@ function PatternChartComponent({
             "full",
           );
           setLastVol(vols[vols.length - 1] ?? null);
+          if (preservedRange) {
+            try {
+              mainChartRef.current.timeScale().setVisibleLogicalRange(preservedRange);
+            } catch {
+              /* ignore */
+            }
+          }
         } catch (e) {
           console.warn("[chart] bulk setData error:", e);
         }
       } else {
-        console.log("[chart] update → last candle", lastTime, lenChanged ? "(new bar)" : "(in-progress bar)");
         try {
           candleSeriesRef.current.update({
             time: lastTime,
@@ -1048,10 +1089,18 @@ function PatternChartComponent({
         } catch (e) {
           console.warn("[chart] update error:", e);
         }
+        if (preservedRange) {
+          try {
+            mainChartRef.current.timeScale().setVisibleLogicalRange(preservedRange);
+          } catch {
+            /* ignore */
+          }
+        }
       }
 
       prevCandlesLenRef.current = sorted.length;
       prevLastTimeRef.current = lastCandle.t;
+      lastChartFingerprintRef.current = fingerprint;
       chartDataReadyRef.current = true;
       setLastRenderedDataKey(dataKey);
     })();
