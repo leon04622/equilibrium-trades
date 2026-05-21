@@ -27,35 +27,20 @@ export function buildTradingViewFullChartUrl(symbol: string, interval?: string):
   return url.toString();
 }
 
-/** After sign-in, return user to the same Equilibrium page (chart stays embedded). */
-export function buildTradingViewSignInUrl(returnUrl?: string): string {
-  const url = new URL("https://www.tradingview.com/accounts/signin/");
-  url.searchParams.set("return_url", returnUrl?.trim() || window.location.href);
-  return url.toString();
+/** Where TradingView sends the user after sign-in (stay on Equilibrium, not tradingview.com/chart). */
+export function buildTradingViewSignInReturnUrl(): string {
+  if (typeof window === "undefined") return "https://www.equilibrium-trading.xyz/trading";
+  const { origin, pathname, search } = window.location;
+  return `${origin}${pathname}${search}`;
 }
 
-/**
- * Centered popup (not a new tab) — TradingView blocks iframe embed of their site,
- * but cookies on `.tradingview.com` can apply to the embedded widget after sign-in.
- */
-export function openTradingViewAuthPopup(returnUrl?: string): Window | null {
-  const w = 520;
-  const h = 740;
-  const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - w) / 2));
-  const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - h) / 2));
-  const features = [
-    `width=${w}`,
-    `height=${h}`,
-    `left=${left}`,
-    `top=${top}`,
-    "menubar=no",
-    "toolbar=no",
-    "location=yes",
-    "status=no",
-    "resizable=yes",
-    "scrollbars=yes",
-  ].join(",");
-  return window.open(buildTradingViewSignInUrl(returnUrl), "equilibrium_tradingview_auth", features);
+export function buildTradingViewSignInUrl(returnUrl?: string): string {
+  const url = new URL("https://www.tradingview.com/accounts/signin/");
+  url.searchParams.set(
+    "return_url",
+    returnUrl?.trim() || (typeof window !== "undefined" ? buildTradingViewSignInReturnUrl() : ""),
+  );
+  return url.toString();
 }
 
 export function persistTradingViewWorkspace(symbol: string, interval: string): void {

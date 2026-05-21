@@ -6,8 +6,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useWallet, ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
+import { useWallet } from "@/lib/wallet-context";
 import { TradeHandshakeModal } from "@/components/trade-handshake-modal";
+import {
+  ARBITRUM_CHAIN_ID,
+  ensureWalletOnArbitrum,
+  isFullyTradeReady,
+  isTradingHandshakeComplete,
+} from "@/lib/trade-readiness";
 
 type TradeHandshakeContextValue = {
   ensureTradeReady: () => Promise<boolean>;
@@ -18,10 +24,13 @@ const TradeHandshakeContext = createContext<TradeHandshakeContextValue | null>(n
 export function TradeHandshakeProvider({ children }: { children: ReactNode }) {
   const {
     isConnected,
+    address,
     chainId,
     builderCodeApproved,
     hyperliquidSessionReady,
     signer,
+    switchToArbitrum,
+    prepareHyperliquidSession,
   } = useWallet();
   const [open, setOpen] = useState(false);
   const resolveRef = useRef<((value: boolean) => void) | null>(null);
@@ -34,25 +43,54 @@ export function TradeHandshakeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const ensureTradeReady = useCallback(async () => {
-    if (
-      isConnected &&
-      chainId === ARBITRUM_CHAIN_ID &&
-      builderCodeApproved &&
-      hyperliquidSessionReady &&
-      signer
-    ) {
+    if (!isConnected || !signer || !address) {
+      return await new Promise<boolean>((resolve) => {
+        resolveRef.current = resolve;
+        setOpen(true);
+      });
+    }
+
+    const snap = {
+      address,
+      chainId,
+      builderCodeApproved,
+      hyperliquidSessionReady,
+      isConnected,
+      hasSigner: true,
+    };
+
+    if (chainId !== ARBITRUM_CHAIN_ID) {
+      const onArb = await ensureWalletOnArbitrum(signer, switchToArbitrum);
+      if (!onArb) {
+        return await new Promise<boolean>((resolve) => {
+          resolveRef.current = resolve;
+          setOpen(true);
+        });
+      }
+    }
+
+    if (isFullyTradeReady({ ...snap, chainId: ARBITRUM_CHAIN_ID })) {
       return true;
     }
+
+    if (isTradingHandshakeComplete(snap)) {
+      const restored = await prepareHyperliquidSession();
+      if (restored.success) return true;
+    }
+
     return await new Promise<boolean>((resolve) => {
       resolveRef.current = resolve;
       setOpen(true);
     });
   }, [
     isConnected,
+    address,
     chainId,
     builderCodeApproved,
     hyperliquidSessionReady,
     signer,
+    switchToArbitrum,
+    prepareHyperliquidSession,
   ]);
 
   return (

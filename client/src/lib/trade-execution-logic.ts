@@ -10,3 +10,10 @@ export {
   lifetimeHandshakeStorageKey,
   saveTradeToJournal,
 } from "@/lib/TradeExecution";
+export {
+  ARBITRUM_CHAIN_ID,
+  isTradingHandshakeComplete,
+  isFullyTradeReady,
+  ensureWalletOnArbitrum,
+  type TradeReadinessSnapshot,
+} from "@/lib/trade-readiness";

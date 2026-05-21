@@ -17,7 +17,7 @@ export const EQUILIBRIUM_HL_BUILDER_ADDRESS = EQUILIBRIUM_HL_BUILDER_ADDRESS_CHE
  * this flow runs them back-to-back in a single user action (one modal CTA).
  */
 export const TRADE_HANDSHAKE_USER_MESSAGE =
-  "One-time setup: Equilibrium sign-in (no gas), then approveAgent and approveBuilderFee for the fixed builder address. Your first CoreWriter action also covers the one-time ~1 USDC account activation.";
+  "One-time setup (about a minute): sign in to Equilibrium, then approve your trading key and platform fee. After that, orders run without a wallet popup on every trade. The first on-chain step may include a one-time ~1 USDC account activation.";
 
 const LIFETIME_STORAGE_PREFIX = "equilibrium_lifetime_handshake_v1";
 

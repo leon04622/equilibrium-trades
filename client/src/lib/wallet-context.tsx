@@ -6,6 +6,7 @@ import {
   isHyperliquidTradingSessionReady,
   clearHyperliquidTradingSession,
 } from "@/lib/hyperliquid-client";
+import { hasLocalLifetimeHandshakeDone } from "@/lib/TradeExecution";
 import { queryClient } from "@/lib/queryClient";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
@@ -404,7 +405,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setBuilderCodeApproved(Boolean(data.exists && data.builderCodeApproved));
     } catch (error) {
       console.error("Error checking approval status:", error);
-      setBuilderCodeApproved(false);
+      setBuilderCodeApproved((prev) => prev || hasLocalLifetimeHandshakeDone(address));
     } finally {
       clearTimeout(t);
       setIsCheckingApproval(false);
@@ -447,13 +448,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [signer, address]);
 
-  // Do NOT auto-open trading-setup wallet prompts here — that caused blank screens / frozen tabs for some
-  // users right after login. HL session (agent + optional builder fee) runs from the trading banner or first order.
+  // Sync HL agent from localStorage; silently re-validate when handshake was done before (no modal).
   useEffect(() => {
-    if (!signer || !address || isCheckingApproval || !builderCodeApproved) return;
-    if (!isHyperliquidTradingSessionReady(address)) return;
-    setHyperliquidSessionReady(true);
-    trySetReferrer(signer).catch(() => {});
+    if (!signer || !address || isCheckingApproval) return;
+    if (isHyperliquidTradingSessionReady(address)) {
+      setHyperliquidSessionReady(true);
+      trySetReferrer(signer).catch(() => {});
+      return;
+    }
+    const mayRestore =
+      builderCodeApproved || hasLocalLifetimeHandshakeDone(address);
+    if (!mayRestore) return;
+    let cancelled = false;
+    void ensureHyperliquidTradingSession(signer).then((result) => {
+      if (cancelled) return;
+      if (result.success || isHyperliquidTradingSessionReady(address)) {
+        setHyperliquidSessionReady(true);
+        trySetReferrer(signer).catch(() => {});
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [signer, address, builderCodeApproved, isCheckingApproval]);
 
   const handleAccountsChanged = useCallback(async (accounts: string[]) => {

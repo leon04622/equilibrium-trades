@@ -8,11 +8,17 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useWallet, ARBITRUM_CHAIN_ID } from "@/lib/wallet-context";
+import { useWallet } from "@/lib/wallet-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield, Wallet, Link2, AlertCircle, Smartphone } from "lucide-react";
 import { TRADE_HANDSHAKE_USER_MESSAGE, runEquilibriumLifetimeHandshake } from "@/lib/trade-execution-logic";
+import {
+  ARBITRUM_CHAIN_ID,
+  ensureWalletOnArbitrum,
+  isFullyTradeReady,
+  isTradingHandshakeComplete,
+} from "@/lib/trade-readiness";
 import { isLikelyMobileDevice } from "@/lib/eip712-typed-data";
 
 type Props = {
@@ -43,18 +49,38 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
   const mobile = isLikelyMobileDevice();
   const busyHandshakeRef = useRef(false);
   const [handshakeRunning, setHandshakeRunning] = useState(false);
+  const [switchingChain, setSwitchingChain] = useState(false);
+  const autoSwitchAttemptedRef = useRef(false);
 
-  const allReady =
-    isConnected &&
-    chainId === ARBITRUM_CHAIN_ID &&
-    builderCodeApproved &&
-    hyperliquidSessionReady &&
-    !!signer;
+  const readiness = {
+    address: address ?? null,
+    chainId,
+    builderCodeApproved,
+    hyperliquidSessionReady,
+    isConnected,
+    hasSigner: !!signer,
+  };
+
+  const allReady = isFullyTradeReady(readiness);
+  const handshakeComplete = isTradingHandshakeComplete(readiness);
 
   useEffect(() => {
     if (!open || !allReady) return;
     onFinalize(true);
   }, [open, allReady, onFinalize]);
+
+  useEffect(() => {
+    if (!open) {
+      autoSwitchAttemptedRef.current = false;
+      return;
+    }
+    if (!isConnected || !signer || chainId === ARBITRUM_CHAIN_ID || autoSwitchAttemptedRef.current) {
+      return;
+    }
+    autoSwitchAttemptedRef.current = true;
+    setSwitchingChain(true);
+    void ensureWalletOnArbitrum(signer, switchToArbitrum).finally(() => setSwitchingChain(false));
+  }, [open, isConnected, signer, chainId, switchToArbitrum]);
 
   const handleConnect = async () => {
     try {
@@ -105,8 +131,7 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
   ]);
 
   const wrongChain = isConnected && chainId !== ARBITRUM_CHAIN_ID;
-  const needsUnifiedHandshake =
-    isConnected && !wrongChain && (!builderCodeApproved || !hyperliquidSessionReady);
+  const needsUnifiedHandshake = isConnected && !wrongChain && !handshakeComplete;
   const handshakeBusy = handshakeRunning || isPreparingHyperliquidSession;
 
   return (
@@ -174,13 +199,27 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
                 {wrongChain ? (
                   <>
                     <p className="text-xs text-muted-foreground">
-                      Trading setup requires Arbitrum One (chain 42161).
+                      Trading setup uses Arbitrum One. We can switch your wallet automatically.
                     </p>
                     <Button
                       className="h-12 w-full text-base font-semibold"
-                      onClick={() => void switchToArbitrum()}
+                      disabled={switchingChain}
+                      onClick={() => {
+                        if (!signer) return;
+                        setSwitchingChain(true);
+                        void ensureWalletOnArbitrum(signer, switchToArbitrum).finally(() =>
+                          setSwitchingChain(false),
+                        );
+                      }}
                     >
-                      Switch network
+                      {switchingChain ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Switching…
+                        </>
+                      ) : (
+                        "Switch network"
+                      )}
                     </Button>
                   </>
                 ) : (
@@ -247,7 +286,7 @@ export function TradeHandshakeModal({ open, onFinalize }: Props) {
             </Button>
             <p className="flex items-start gap-2 text-[11px] text-muted-foreground">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              This flow runs when you open a trade; it only needs to succeed once per wallet.
+              Setup is once per wallet. After that, placing orders does not ask for a signature each time.
             </p>
           </div>
         </div>
