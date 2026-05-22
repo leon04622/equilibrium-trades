@@ -9,6 +9,7 @@ import {
   cancelOrder as hlCancelOrder,
   placeTriggerOrder,
   placeTrailingStopMarketOrder,
+  syncOrderToExchange,
   type AccountState,
 } from "./hyperliquid-client";
 import {
@@ -16,6 +17,12 @@ import {
   mapClearinghouseAssetPositionsToDashboard,
   applyMarginSummaryFromAccountState,
 } from "./hl-account-map";
+import {
+  isVenueTpslCandidate,
+  orderKindForTpsl,
+  selectTpSlOrders,
+} from "./chart-tpsl-from-orders";
+import { snapOrderPrice } from "./trailing-stop-orchestrator";
 import { getArbitrumEthBalance } from "./arbitrum-gas";
 import { getArbitrumUsdcBalances } from "./arbitrum-usdc";
 import { SubscriptionClient, WebSocketTransport } from "@nktkas/hyperliquid";
@@ -241,7 +248,7 @@ function saveToStorage<T>(key: string, value: T): void {
 }
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const { address: walletAddress, isConnected: walletConnected, signer } = useWallet();
+  const { address: walletAddress, isConnected: walletConnected, signer, hyperliquidSessionReady } = useWallet();
   
   const [balance, setBalance] = useState(0);
   const [withdrawable, setWithdrawable] = useState(0);
@@ -802,78 +809,140 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isPlacingTPSLRef.current = true;
 
     try {
-      // TP validates against entry price (direction must be correct relative to entry).
-      // SL validates against current mark price — this allows setting SL at entry
-      // (breakeven stop) or between mark and entry (lock in partial profit).
       const pos = positions.find(p => p.coin === coin);
       const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
       const markPrice = pos?.markPrice || currentPrices[coin] || refPrice;
-      if (refPrice > 0) {
-        const entryFmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
-        if (tpPrice && tpPrice > 0) {
-          if (isLong && tpPrice <= refPrice) {
-            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be above entry price ($${entryFmt}) for a Long.` };
-          }
-          if (!isLong && tpPrice >= refPrice) {
-            return { success: false, error: `Take Profit ($${tpPrice.toLocaleString()}) must be below entry price ($${entryFmt}) for a Short.` };
-          }
-        }
-        if (slPrice && slPrice > 0) {
-          const slRef = markPrice > 0 ? markPrice : refPrice;
-          const slFmt = slRef.toLocaleString(undefined, { maximumFractionDigits: 2 });
-          // Only guard instant trigger vs mark — SL may sit above entry (profit-lock / trailing).
-          if (isLong && slPrice >= slRef) {
-            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be below the current price ($${slFmt}) — it would trigger immediately.` };
-          }
-          if (!isLong && slPrice <= slRef) {
-            return { success: false, error: `Stop Loss ($${slPrice.toLocaleString()}) must be above the current price ($${slFmt}) — it would trigger immediately.` };
-          }
-        }
+      const snapRef = markPrice > 0 ? markPrice : refPrice;
+
+      const { tpOrder, slOrder, tpPrice: liveTp, slPrice: liveSl } = selectTpSlOrders(
+        coin,
+        pos,
+        openOrders,
+      );
+
+      const tpSnap = tpPrice != null && tpPrice > 0 ? snapOrderPrice(tpPrice, snapRef) : null;
+      const slSnap = slPrice != null && slPrice > 0 ? snapOrderPrice(slPrice, snapRef) : null;
+      const liveTpSnap =
+        liveTp != null && liveTp > 0 ? snapOrderPrice(liveTp, snapRef) : null;
+      const liveSlSnap =
+        liveSl != null && liveSl > 0 ? snapOrderPrice(liveSl, snapRef) : null;
+
+      const updateTp = tpSnap != null && tpSnap !== liveTpSnap;
+      const updateSl = slSnap != null && slSnap !== liveSlSnap;
+
+      if (!updateTp && !updateSl) {
+        return { success: true };
       }
 
-      // Cancel only the specific trigger order types that are being replaced.
-      // If updating only TP, the existing SL is preserved (and vice-versa).
-      const existingOrders = openOrders.filter(
-        (o) =>
-          o.coin === coin &&
-          (o.triggerPx ||
-            o.orderType === "stop_loss" ||
-            o.orderType === "take_profit"),
-      );
-      const cancelRef = pos?.entryPrice || currentPrices[coin] || 0;
-      for (const order of existingOrders) {
-        const orderType = (() => {
-          if (order.orderType === "stop_loss") return "sl";
-          if (order.orderType === "take_profit") return "tp";
-          if (cancelRef === 0) return "tp";
-          const trigPx = parseFloat(order.triggerPx || order.limitPx);
-          return isLong
-            ? trigPx > cancelRef ? "tp" : "sl"
-            : trigPx < cancelRef ? "tp" : "sl";
-        })();
-        const shouldCancel =
-          (orderType === "tp" && tpPrice !== undefined) ||
-          (orderType === "sl" && slPrice !== undefined);
-        if (shouldCancel) {
-          await hlCancelOrder(signer, coin, order.oid);
+      if (refPrice > 0) {
+        const entryFmt = refPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        if (updateTp && tpSnap != null) {
+          if (isLong && tpSnap <= refPrice) {
+            return { success: false, error: `Take Profit ($${tpSnap.toLocaleString()}) must be above entry price ($${entryFmt}) for a Long.` };
+          }
+          if (!isLong && tpSnap >= refPrice) {
+            return { success: false, error: `Take Profit ($${tpSnap.toLocaleString()}) must be below entry price ($${entryFmt}) for a Short.` };
+          }
+          const tpMarkRef = markPrice > 0 ? markPrice : refPrice;
+          const tpMarkFmt = tpMarkRef.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          if (isLong && tpSnap <= tpMarkRef) {
+            return { success: false, error: `Take Profit ($${tpSnap.toLocaleString()}) must be above the current price ($${tpMarkFmt}) — it would trigger immediately.` };
+          }
+          if (!isLong && tpSnap >= tpMarkRef) {
+            return { success: false, error: `Take Profit ($${tpSnap.toLocaleString()}) must be below the current price ($${tpMarkFmt}) — it would trigger immediately.` };
+          }
+        }
+        if (updateSl && slSnap != null) {
+          const slRef = markPrice > 0 ? markPrice : refPrice;
+          const slFmt = slRef.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          if (isLong && slSnap >= slRef) {
+            return { success: false, error: `Stop Loss ($${slSnap.toLocaleString()}) must be below the current price ($${slFmt}) — it would trigger immediately.` };
+          }
+          if (!isLong && slSnap <= slRef) {
+            return { success: false, error: `Stop Loss ($${slSnap.toLocaleString()}) must be above the current price ($${slFmt}) — it would trigger immediately.` };
+          }
         }
       }
 
       const results: Array<{ success: boolean; error?: string }> = [];
-      
-      if (tpPrice && tpPrice > 0) {
+      const useTrailingSl = updateSl && options?.slTrailingCallbackRate != null && options.slTrailingCallbackRate > 0;
+      let tpSynced = false;
+      let slSynced = false;
+
+      if (updateTp && tpSnap != null && tpOrder?.oid && walletAddress && hyperliquidSessionReady) {
+        const mod = await syncOrderToExchange(walletAddress, {
+          coin,
+          orderId: tpOrder.oid,
+          newPrice: tpSnap,
+          isBuy: !isLong,
+          size:
+            parseFloat(String(tpOrder.sz)) > 0 ? parseFloat(String(tpOrder.sz)) : size,
+          tpsl: "tp",
+        });
+        if (mod.ok) {
+          tpSynced = true;
+        } else {
+          console.warn("[placeTPSL] TP modify failed, cancel+replace:", mod.error);
+        }
+      }
+
+      if (
+        updateSl &&
+        slSnap != null &&
+        !useTrailingSl &&
+        slOrder?.oid &&
+        walletAddress &&
+        hyperliquidSessionReady
+      ) {
+        const mod = await syncOrderToExchange(walletAddress, {
+          coin,
+          orderId: slOrder.oid,
+          newPrice: slSnap,
+          isBuy: !isLong,
+          size:
+            parseFloat(String(slOrder.sz)) > 0 ? parseFloat(String(slOrder.sz)) : size,
+          tpsl: "sl",
+        });
+        if (mod.ok) {
+          slSynced = true;
+        } else {
+          console.warn("[placeTPSL] SL modify failed, cancel+replace:", mod.error);
+        }
+      }
+
+      if (tpSynced && (!updateSl || slSynced)) {
+        await refreshAccount();
+        return { success: true };
+      }
+
+      if (pos) {
+        const existingOrders = openOrders.filter(
+          (o) => o.coin === coin && isVenueTpslCandidate(o),
+        );
+        for (const order of existingOrders) {
+          const kind = orderKindForTpsl(order, pos, markPrice);
+          const shouldCancel =
+            (kind === "tp" && updateTp && !tpSynced) ||
+            (kind === "sl" && updateSl && !slSynced);
+          if (shouldCancel && order.oid) {
+            await hlCancelOrder(signer, coin, order.oid);
+          }
+        }
+      }
+
+      if (updateTp && tpSnap != null && !tpSynced) {
         const tpResult = await placeTriggerOrder(signer, {
           coin,
           isBuy: !isLong,
           size,
-          triggerPrice: tpPrice,
+          triggerPrice: tpSnap,
           isStopLoss: false,
           reduceOnly: true,
         });
         results.push(tpResult);
       }
-      
-      if (slPrice && slPrice > 0) {
+
+      if (updateSl && slSnap != null && !slSynced) {
         const cb = options?.slTrailingCallbackRate;
         let slResult: { success: boolean; error?: string } | Awaited<ReturnType<typeof placeTriggerOrder>>;
         if (cb != null && cb > 0) {
@@ -882,14 +951,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             isBuy: !isLong,
             size,
             callbackRate: cb,
-            anchorTriggerPx: slPrice,
+            anchorTriggerPx: slSnap,
           });
           if (!slResult.success) {
             slResult = await placeTriggerOrder(signer, {
               coin,
               isBuy: !isLong,
               size,
-              triggerPrice: slPrice,
+              triggerPrice: slSnap,
               isStopLoss: true,
               reduceOnly: true,
             });
@@ -899,21 +968,21 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             coin,
             isBuy: !isLong,
             size,
-            triggerPrice: slPrice,
+            triggerPrice: slSnap,
             isStopLoss: true,
             reduceOnly: true,
           });
         }
         results.push(slResult);
       }
-      
+
       await refreshAccount();
-      
+
       const errors = results.filter(r => !r.success).map(r => r.error);
       if (errors.length > 0) {
         return { success: false, error: errors.join(", ") };
       }
-      
+
       return { success: true };
     } catch (error: any) {
       console.error("Error placing TP/SL:", error);
@@ -921,7 +990,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     } finally {
       isPlacingTPSLRef.current = false;
     }
-  }, [signer, openOrders, positions, refreshAccount, currentPrices]);
+  }, [signer, openOrders, positions, refreshAccount, currentPrices, walletAddress, hyperliquidSessionReady]);
 
   const setIndicators = useCallback((newIndicators: Indicator[]) => {
     setIndicatorsState(newIndicators);

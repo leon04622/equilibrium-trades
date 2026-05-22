@@ -177,6 +177,17 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
         return;
       }
     }
+    if (tp && markPrice > 0) {
+      const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      if (isLong && tp <= markPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be above the current price ($${fmtMark}) — it would close the position immediately.`, variant: "destructive" });
+        return;
+      }
+      if (!isLong && tp >= markPrice) {
+        toast({ title: "Invalid Take Profit", description: `TP must be below the current price ($${fmtMark}) — it would close the position immediately.`, variant: "destructive" });
+        return;
+      }
+    }
     if (sl && markPrice > 0) {
       const fmtMark = markPrice.toLocaleString(undefined, { maximumFractionDigits: 2 });
       if (isLong && sl >= markPrice) {

@@ -34,11 +34,8 @@ export function convertRawFrontendOrdersToHl(raw: unknown[]): HLOpenOrder[] {
       orderType = "take_profit";
     } else if (ot.includes("stop")) {
       orderType = "stop_loss";
-    } else if (tc.includes("above")) {
-      orderType = "take_profit";
-    } else if (tc.includes("below")) {
-      orderType = "stop_loss";
     }
+    // Do not infer TP/SL from triggerCondition "above"/"below" alone — wrong for shorts.
     const oidRaw = ord.oid;
     const oidNum = typeof oidRaw === "string" ? parseInt(oidRaw, 10) : Number(oidRaw);
     return {

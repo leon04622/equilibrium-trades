@@ -482,6 +482,50 @@ export function ApexSovereign({
         return;
       }
 
+      const pos = positionRef.current;
+      if (pos) {
+        const isLong = pos.side === "long";
+        const markAtDrop = pos.markPrice || currentPriceRef.current;
+        let fallbackFailed = false;
+        for (const { spec, kind, revertPrice } of items) {
+          const tp =
+            kind === "tp" ? spec.newPrice : (tpPriceRef.current ?? undefined);
+          const sl =
+            kind === "sl" ? spec.newPrice : (slPriceRef.current ?? undefined);
+          const cbRate =
+            kind === "sl"
+              ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, spec.newPrice)
+              : null;
+          const fb = await placeTPSL(
+            coinRef.current,
+            pos.size,
+            isLong,
+            tp,
+            sl,
+            pos.entryPrice,
+            cbRate != null ? { slTrailingCallbackRate: cbRate } : undefined,
+          );
+          if (fb.success) {
+            onPendingClear(kind);
+          } else {
+            fallbackFailed = true;
+            restoreLineAfterError(kind, revertPrice);
+          }
+        }
+        if (!fallbackFailed) {
+          try {
+            await refreshAccountRef.current();
+          } catch {
+            /* ignore */
+          }
+          toast({
+            title: "TP/SL updated",
+            description: items.map((i) => `${i.kind.toUpperCase()}: $${fmt(i.spec.newPrice)}`).join(" · "),
+          });
+          return;
+        }
+      }
+
       for (const { kind, revertPrice } of items) {
         onPendingClear(kind);
         restoreLineAfterError(kind, revertPrice);
@@ -492,7 +536,7 @@ export function ApexSovereign({
         variant: "destructive",
       });
     },
-    [onPendingClear, restoreLineAfterError, setLineL1Pending, toast],
+    [onPendingClear, restoreLineAfterError, setLineL1Pending, toast, placeTPSL],
   );
 
   const enqueueSdkModifyCommit = useCallback(

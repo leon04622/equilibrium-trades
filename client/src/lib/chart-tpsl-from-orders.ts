@@ -49,7 +49,7 @@ export function ghostTpslPrices(
   return { ghostTp, ghostSl };
 }
 
-function isVenueTpslCandidate(o: HLOpenOrder): boolean {
+export function isVenueTpslCandidate(o: HLOpenOrder): boolean {
   if (o.isTrigger === true && o.reduceOnly === true) return true;
   const ot = (o.orderType || "").toLowerCase();
   if (ot.includes("take profit") || ot === "take_profit") return true;

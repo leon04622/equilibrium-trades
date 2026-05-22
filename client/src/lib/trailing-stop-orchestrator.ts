@@ -66,9 +66,10 @@ export function clampTpDragPrice(
   isLong: boolean,
   entry: number,
   refPrice: number,
+  mark?: number,
 ): number {
   let p = snapOrderPrice(price, refPrice);
-  const tick = tickSize(refPrice || entry);
+  const tick = tickSize(refPrice || entry || mark || price);
   if (entry > 0) {
     if (isLong) {
       const minTp = snapOrderPrice(entry + tick, refPrice);
@@ -76,6 +77,18 @@ export function clampTpDragPrice(
     } else {
       const maxTp = snapOrderPrice(entry - tick, refPrice);
       p = Math.min(p, maxTp);
+    }
+  }
+  const mk = (mark ?? 0) > 0 ? mark! : refPrice;
+  if (mk > 0) {
+    if (isLong) {
+      const minAboveMark = snapOrderPrice(mk + tick, refPrice);
+      p = Math.max(p, minAboveMark);
+      if (p <= mk) p = minAboveMark;
+    } else {
+      const maxBelowMark = snapOrderPrice(mk - tick, refPrice);
+      p = Math.min(p, maxBelowMark);
+      if (p >= mk) p = maxBelowMark;
     }
   }
   return p;
@@ -89,7 +102,7 @@ export function clampTpslDragPrice(
   mark: number,
   refPrice: number,
 ): number {
-  if (kind === "tp") return clampTpDragPrice(price, isLong, entry, refPrice);
+  if (kind === "tp") return clampTpDragPrice(price, isLong, entry, refPrice, mark);
   return clampSlDragPriceMarkOnly(price, isLong, mark, refPrice);
 }
 
