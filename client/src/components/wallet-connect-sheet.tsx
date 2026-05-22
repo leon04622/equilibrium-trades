@@ -51,9 +51,10 @@ export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenC
     address,
     connectError,
     clearConnectError,
-    openInWalletBrowser,
     walletBrowserKind,
     hasInjectedProvider,
+    prepareRabbyPasteHandoff,
+    rabbyPasteHandoffActive,
     pendingConnectAccounts,
     pendingConnectWalletName,
     confirmConnectAccount,
@@ -73,7 +74,9 @@ export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenC
     setLocalError(null);
     setConnectingWallet(walletType ?? null);
     try {
-      await connect(walletType, { forceAccountPicker: true });
+      await connect(walletType, {
+        forceAccountPicker: !isMobile || hasInjectedProvider,
+      });
       onConnect?.();
     } catch (err: any) {
       // Error is already stored in connectError via context; surface it locally too
@@ -124,8 +127,10 @@ export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenC
           <SheetTitle>Connect your wallet to start</SheetTitle>
           <SheetDescription>
             {isMobile
-              ? "From Safari or Chrome, open the app in Rabby or MetaMask — the site will prompt to connect automatically when it loads. If you already opened this page inside Rabby or MetaMask, tap Connect in this browser below."
-              : "Select your wallet below. Any EVM-compatible wallet works; on mobile, prefer your wallet’s in-app browser or WalletConnect for a smooth handoff."}
+              ? hasInjectedProvider
+                ? "You opened Equilibrium inside a wallet app. Tap Connect Rabby below and approve — then pick your account if you have more than one."
+                : "On phone, copy the link, open Rabby → DApps, paste the URL, then tap Connect Rabby inside Rabby (not from Safari)."
+              : "Select your wallet below. Any EVM-compatible wallet works."}
           </SheetDescription>
         </SheetHeader>
 
@@ -137,7 +142,13 @@ export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenC
 
         {/* Error banner */}
         {errorMessage && (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 mb-3 text-sm text-destructive">
+          <div
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2 mb-3 text-sm ${
+              rabbyPasteHandoffActive
+                ? "border-green-500/40 bg-green-500/10 text-green-800 dark:text-green-300"
+                : "border-destructive/40 bg-destructive/10 text-destructive"
+            }`}
+          >
             <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <span>{errorMessage}</span>
           </div>
@@ -164,121 +175,23 @@ export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenC
               onCancel={() => cancelPendingConnect()}
             />
           ) : isMobile ? (
-            /* ── Mobile ── */
-            <>
-              <RabbyMobileConnectHelp
-                inWalletBrowser={hasInjectedProvider}
-                walletBrowserLabel={
-                  walletBrowserKind === "rabby"
-                    ? "Rabby"
-                    : walletBrowserKind === "metamask"
-                      ? "MetaMask"
-                      : hasInjectedProvider
-                        ? "Wallet"
-                        : undefined
-                }
-                onConnectInBrowser={() => handleConnect(walletBrowserKind === "metamask" ? "metamask" : "rabby")}
-                isConnecting={isConnecting}
-                onOpenRabby={() => openInWalletBrowser("rabby")}
-              />
-              {detectedWallets.length > 0 ? (
-                <>
-                  <p className="text-xs text-muted-foreground pb-1 pt-2">
-                    Or pick a detected wallet:
-                  </p>
-                  {detectedWallets.map((wallet) => {
-                    const meta = WALLET_META[wallet.type] ?? WALLET_META.injected;
-                    return (
-                      <Button
-                        key={wallet.type}
-                        variant="outline"
-                        className="w-full justify-between h-14 text-left"
-                        onClick={() => handleConnect(wallet.type)}
-                        disabled={isConnecting}
-                        data-testid={`button-connect-${wallet.type}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <WalletIcon type={wallet.type} color={meta.color} />
-                          <span className="font-medium">{wallet.name}</span>
-                        </div>
-                        {connectingWallet === wallet.type ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </Button>
-                    );
-                  })}
-                </>
-              ) : null}
-              {!hasInjectedProvider ? (
-              <p className="text-xs text-muted-foreground pb-1 pt-2">
-                Other wallets (open in app from Safari / Chrome):
-              </p>
-              ) : null}
-              {!hasInjectedProvider ? (
-              <Button
-                variant="outline"
-                className="w-full justify-between h-14"
-                onClick={() => openInWalletBrowser("rabby")}
-                data-testid="button-open-rabby-mobile"
-              >
-                <div className="flex items-center gap-3">
-                  <WalletIcon type="rabby" color={WALLET_META.rabby.color} />
-                  <div className="text-left">
-                    <span className="font-medium block">Rabby</span>
-                    <span className="text-xs text-muted-foreground">Try opening in Rabby app</span>
-                  </div>
-                </div>
-                <Smartphone className="h-4 w-4 text-muted-foreground" />
-              </Button>
-              ) : null}
-              <Button
-                variant="outline"
-                className="w-full justify-between h-14"
-                onClick={() => openInWalletBrowser("metamask")}
-                data-testid="button-open-metamask"
-              >
-                <div className="flex items-center gap-3">
-                  <WalletIcon type="metamask" color={WALLET_META.metamask.color} />
-                  <div className="text-left">
-                    <span className="font-medium block">MetaMask</span>
-                    <span className="text-xs text-muted-foreground">Open in MetaMask browser</span>
-                  </div>
-                </div>
-                <Smartphone className="h-4 w-4 text-muted-foreground" />
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-between h-14"
-                onClick={() => window.open("https://trustwallet.com/", "_blank")}
-                data-testid="button-open-trust"
-              >
-                <div className="flex items-center gap-3">
-                  <WalletIcon type="trust" color={WALLET_META.trust.color} />
-                  <div className="text-left">
-                    <span className="font-medium block">Trust Wallet</span>
-                    <span className="text-xs text-muted-foreground">Open in Trust browser</span>
-                  </div>
-                </div>
-                <Smartphone className="h-4 w-4 text-muted-foreground" />
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-between h-14"
-                onClick={() => window.open("https://www.okx.com/web3", "_blank")}
-                data-testid="button-open-okx"
-              >
-                <div className="flex items-center gap-3">
-                  <WalletIcon type="okx" color="#333" />
-                  <div className="text-left">
-                    <span className="font-medium block">OKX Wallet</span>
-                    <span className="text-xs text-muted-foreground">Open in OKX browser</span>
-                  </div>
-                </div>
-                <Smartphone className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </>
+            <RabbyMobileConnectHelp
+              inWalletBrowser={hasInjectedProvider}
+              walletBrowserLabel={
+                walletBrowserKind === "rabby"
+                  ? "Rabby"
+                  : walletBrowserKind === "metamask"
+                    ? "MetaMask"
+                    : "Wallet"
+              }
+              detectedWalletTypes={detectedWallets.map((w) => w.type)}
+              onConnectRabby={() => handleConnect("rabby")}
+              onConnectMetamask={() => handleConnect("metamask")}
+              onConnectWallet={(t) => handleConnect(t)}
+              isConnecting={isConnecting}
+              onCopyLink={prepareRabbyPasteHandoff}
+              pasteHandoffActive={rabbyPasteHandoffActive}
+            />
           ) : detectedWallets.length > 0 ? (
             /* ── Desktop: wallets found ── */
             <>

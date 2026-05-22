@@ -5,6 +5,9 @@ export const RABBY_IOS_STORE =
 export const RABBY_ANDROID_STORE =
   "https://play.google.com/store/apps/details?id=com.debank.rabbymobile";
 
+export const WALLET_HANDOFF_QS = "eq_wallet_handoff";
+export const WALLET_HANDOFF_SESSION_KEY = "eq_wallet_handoff_pending";
+
 export type WalletBrowserKind = "rabby" | "metamask" | "injected" | "none";
 
 export function isMobileUserAgent(): boolean {
@@ -21,14 +24,30 @@ export function isIOS(): boolean {
   return /iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
+function getEthereum(): {
+  isRabby?: boolean;
+  isMetaMask?: boolean;
+  request?: unknown;
+} | null {
+  if (typeof window === "undefined") return null;
+  const eth = (window as Window & { ethereum?: unknown }).ethereum;
+  if (!eth || typeof eth !== "object") return null;
+  return eth as { isRabby?: boolean; isMetaMask?: boolean; request?: unknown };
+}
+
+/** Rabby Mobile WebView often includes "Rabby" in the user agent. */
+export function isRabbyUserAgent(): boolean {
+  return /rabby/i.test(navigator.userAgent);
+}
+
 /** Which in-app / injected wallet environment we're running in (if any). */
 export function detectWalletBrowserKind(): WalletBrowserKind {
-  const eth = typeof window !== "undefined" ? (window as Window & { ethereum?: unknown }).ethereum : undefined;
-  if (!eth || typeof eth !== "object") return "none";
-  const p = eth as { isRabby?: boolean; isMetaMask?: boolean; request?: unknown };
-  if (p.isRabby) return "rabby";
-  if (p.isMetaMask) return "metamask";
-  if (typeof p.request === "function") return "injected";
+  if (isRabbyUserAgent()) return "rabby";
+  const eth = getEthereum();
+  if (!eth) return "none";
+  if (eth.isRabby) return "rabby";
+  if (eth.isMetaMask) return "metamask";
+  if (typeof eth.request === "function") return "injected";
   return "none";
 }
 
@@ -36,21 +55,35 @@ export function hasInjectedEthereum(): boolean {
   return detectWalletBrowserKind() !== "none";
 }
 
-export function currentSiteUrlForWalletHandoff(): string {
+/** True when the user is inside a wallet's in-app browser (can connect via eth_requestAccounts). */
+export function isInsideWalletInAppBrowser(): boolean {
+  return hasInjectedEthereum();
+}
+
+export function currentSiteUrlForWalletHandoff(wallet: "rabby" | "metamask" = "rabby"): string {
   const u = new URL(window.location.href);
-  u.searchParams.set("eq_wallet_handoff", "rabby");
+  u.searchParams.set(WALLET_HANDOFF_QS, wallet);
   return u.toString();
 }
 
-/** Try to open the Rabby native app with this dapp URL (may no-op if app not installed). */
-export function openRabbyMobileApp(siteUrl: string): void {
-  const encoded = encodeURIComponent(siteUrl);
-  if (isAndroid()) {
-    const fallback = encodeURIComponent(RABBY_ANDROID_STORE);
-    window.location.href = `intent://dapp?url=${encoded}#Intent;scheme=rabby;package=com.debank.rabbymobile;S.browser_fallback_url=${fallback};end`;
-    return;
+/**
+ * Copy Equilibrium URL for manual paste into Rabby → DApps.
+ * Do NOT use rabby:// deep links — they open the app home screen, not this dapp.
+ */
+export async function prepareRabbyMobileHandoff(): Promise<{
+  url: string;
+  copied: boolean;
+}> {
+  const url = currentSiteUrlForWalletHandoff("rabby");
+  try {
+    sessionStorage.setItem(WALLET_HANDOFF_SESSION_KEY, "rabby");
+    sessionStorage.removeItem("metamask_deep_link_pending");
+    sessionStorage.removeItem("rabby_deep_link_pending");
+  } catch {
+    /* ignore */
   }
-  window.location.href = `rabby://dapp?url=${encoded}`;
+  const copied = await copyTextForUser(url);
+  return { url, copied };
 }
 
 export async function copyTextForUser(text: string): Promise<boolean> {
@@ -76,3 +109,6 @@ export async function copyTextForUser(text: string): Promise<boolean> {
     return false;
   }
 }
+
+export const RABBY_MOBILE_PASTE_INSTRUCTIONS =
+  "Link copied. Open the Rabby app → DApps (or Websites) → paste the link → Go. On Equilibrium tap Connect Rabby and choose your account.";

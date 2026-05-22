@@ -15,11 +15,12 @@ import {
   requestAccountsFromProvider,
 } from "@/lib/wallet-connect-flow";
 import {
-  copyTextForUser,
   currentSiteUrlForWalletHandoff,
   detectWalletBrowserKind,
+  isInsideWalletInAppBrowser,
   isMobileUserAgent,
-  openRabbyMobileApp,
+  prepareRabbyMobileHandoff,
+  RABBY_MOBILE_PASTE_INSTRUCTIONS,
   type WalletBrowserKind,
 } from "@/lib/wallet-mobile-rabby";
 
@@ -51,6 +52,8 @@ interface WalletContextType {
   walletBrowserKind: WalletBrowserKind;
   hasInjectedProvider: boolean;
   copySiteUrlForRabbyWallet: () => Promise<boolean>;
+  rabbyPasteHandoffActive: boolean;
+  prepareRabbyPasteHandoff: () => Promise<{ copied: boolean }>;
   connectError: string | null;
   clearConnectError: () => void;
   pendingConnectAccounts: string[] | null;
@@ -260,6 +263,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [detectedWallets, setDetectedWallets] = useState<DetectedWallet[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [walletBrowserKind, setWalletBrowserKind] = useState<WalletBrowserKind>("none");
+  const [rabbyPasteHandoffActive, setRabbyPasteHandoffActive] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [pendingConnectAccounts, setPendingConnectAccounts] = useState<string[] | null>(null);
   const [pendingConnectWalletName, setPendingConnectWalletName] = useState<string | null>(null);
@@ -317,6 +321,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setPendingConnectWalletName(null);
       pendingProviderRef.current = null;
       setConnectError(null);
+      setRabbyPasteHandoffActive(false);
       console.info(`[Wallet] Connected ${normalized.slice(0, 6)}… via ${walletLabel}`);
     },
     [bindInjectedWalletSession],
@@ -354,7 +359,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const copySiteUrlForRabbyWallet = useCallback(async () => {
-    return copyTextForUser(currentSiteUrlForWalletHandoff());
+    const { copied } = await prepareRabbyMobileHandoff();
+    return copied;
+  }, []);
+
+  const prepareRabbyPasteHandoff = useCallback(async () => {
+    const { copied } = await prepareRabbyMobileHandoff();
+    setRabbyPasteHandoffActive(true);
+    setConnectError(
+      copied
+        ? RABBY_MOBILE_PASTE_INSTRUCTIONS
+        : "Copy the site link, open Rabby → DApps, paste it, then tap Connect Rabby on Equilibrium.",
+    );
+    return { copied };
   }, []);
 
   // EIP-6963 + legacy detection; Rabby is sorted before MetaMask when both exist
@@ -793,19 +810,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (walletType === "rabby") {
-      u.searchParams.set(WALLET_HANDOFF_QS, "rabby");
-      try {
-        sessionStorage.setItem(WALLET_HANDOFF_SESSION_KEY, "rabby");
-        sessionStorage.setItem("rabby_deep_link_pending", "true");
-        sessionStorage.removeItem("metamask_deep_link_pending");
-      } catch {
-        /* ignore */
-      }
-      openRabbyMobileApp(u.toString());
+      void prepareRabbyPasteHandoff();
       return;
     }
     alert("Open this site in your wallet app's browser (DApp / Discover), then use Connect Wallet.");
-  }, []);
+  }, [prepareRabbyPasteHandoff]);
 
   const connect = useCallback(async (
     walletType?: WalletType,
@@ -825,14 +834,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       resolveInjectedProvider(walletType, eip6963MapRef.current);
 
     if (!selectedProvider?.request) {
-      if (isMobile && walletType === "rabby") {
-        setConnectError(
-          "Rabby is not available in Safari/Chrome. Copy the site link below, open Rabby → DApps, paste the URL, then tap Connect Rabby.",
-        );
-        void copySiteUrlForRabbyWallet();
+      if (isMobile && (walletType === "rabby" || walletType === undefined)) {
+        await prepareRabbyPasteHandoff();
+        return;
       } else if (isMobile) {
         setConnectError(
-          "No wallet in this browser. Use Rabby’s in-app browser (DApps → paste this site’s URL) or tap Open Rabby below.",
+          "No wallet in this browser. Copy the site link, open Rabby → DApps, paste the URL, then tap Connect Rabby.",
         );
       } else {
         setConnectError(
@@ -853,8 +860,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIsConnecting(true);
 
     try {
+      const existing = await readAuthorizedAccounts(selectedProvider);
       const accounts = await requestAccountsFromProvider(selectedProvider, {
-        forceAccountPicker: isMobile ? false : (options?.forceAccountPicker ?? true),
+        forceAccountPicker:
+          isMobile && existing.length > 1
+            ? true
+            : isMobile
+              ? false
+              : (options?.forceAccountPicker ?? true),
       });
 
       if (accounts.length === 0) {
@@ -877,7 +890,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
-  }, [isMobile, detectedWallets, completeInjectedConnect, cancelPendingConnect, copySiteUrlForRabbyWallet]);
+  }, [isMobile, detectedWallets, completeInjectedConnect, cancelPendingConnect, prepareRabbyPasteHandoff]);
 
   const disconnect = useCallback(() => {
     const prev = address;
@@ -906,6 +919,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setBuilderCodeApproved(false);
     setHyperliquidSessionReady(false);
     setConnectError(null);
+    setRabbyPasteHandoffActive(false);
   }, [address]);
 
   const switchToArbitrum = useCallback(async () => {
@@ -951,8 +965,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       detectedWallets,
       isMobile,
       walletBrowserKind,
-      hasInjectedProvider: walletBrowserKind !== "none",
+      hasInjectedProvider: isInsideWalletInAppBrowser(),
       copySiteUrlForRabbyWallet,
+      rabbyPasteHandoffActive,
+      prepareRabbyPasteHandoff,
       connectError,
       clearConnectError,
       pendingConnectAccounts,

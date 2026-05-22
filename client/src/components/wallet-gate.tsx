@@ -42,7 +42,6 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
     isConnecting,
     connect,
     isMobile,
-    openInWalletBrowser,
     detectedWallets,
     connectError,
     clearConnectError,
@@ -52,6 +51,8 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
     cancelPendingConnect,
     walletBrowserKind,
     hasInjectedProvider,
+    prepareRabbyPasteHandoff,
+    rabbyPasteHandoffActive,
   } = useWallet();
   const [email, setEmail] = useState("");
   const [emailSubmitted, setEmailSubmitted] = useState(false);
@@ -125,7 +126,13 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
           </p>
 
           {connectError && (
-            <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div
+              className={`flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm ${
+                rabbyPasteHandoffActive
+                  ? "border-green-500/40 bg-green-500/10 text-green-800 dark:text-green-300"
+                  : "border-destructive/40 bg-destructive/10 text-destructive"
+              }`}
+            >
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>{connectError}</span>
@@ -151,88 +158,23 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
               onCancel={() => cancelPendingConnect()}
             />
           ) : isMobile ? (
-            <>
-              <RabbyMobileConnectHelp
-                inWalletBrowser={hasInjectedProvider}
-                walletBrowserLabel={
-                  walletBrowserKind === "rabby"
-                    ? "Rabby"
-                    : walletBrowserKind === "metamask"
-                      ? "MetaMask"
-                      : hasInjectedProvider
-                        ? "Wallet"
-                        : undefined
-                }
-                onConnectInBrowser={() =>
-                  connect(walletBrowserKind === "metamask" ? "metamask" : "rabby", {
-                    forceAccountPicker: false,
-                  })
-                }
-                isConnecting={isConnecting}
-                onOpenRabby={() => openInWalletBrowser("rabby")}
-              />
-              {!hasInjectedProvider ? (
-                <>
-                  <Button
-                    onClick={() => openInWalletBrowser("rabby")}
-                    className="w-full h-12 gap-3 text-base font-semibold"
-                    data-testid="button-open-rabby-mobile"
-                  >
-                    <Wallet className="h-5 w-5" />
-                    Open in Rabby
-                    <ArrowRight className="h-4 w-4 ml-auto" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => openInWalletBrowser("metamask")}
-                    className="w-full h-12 gap-3 text-base font-semibold"
-                    data-testid="button-open-metamask"
-                  >
-                    <Wallet className="h-5 w-5" />
-                    Open in MetaMask
-                    <ArrowRight className="h-4 w-4 ml-auto" />
-                  </Button>
-                </>
-              ) : null}
-              {hasWallet ? (
-                <>
-              {detectedWallets.length > 0 ? (
-                detectedWallets.map((wallet) => (
-                  <Button
-                    key={wallet.type}
-                    onClick={() => connect(wallet.type, { forceAccountPicker: false })}
-                    disabled={isConnecting}
-                    className="w-full h-12 gap-3 text-base font-semibold"
-                    data-testid={`button-connect-${wallet.type}`}
-                  >
-                    {isConnecting ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <Wallet className="h-5 w-5" />
-                    )}
-                    {isConnecting ? "Connecting..." : `Connect ${wallet.name}`}
-                    {!isConnecting && <ArrowRight className="h-4 w-4 ml-auto" />}
-                  </Button>
-                ))
-              ) : (
-                <Button
-                  onClick={() => connect(undefined, { forceAccountPicker: false })}
-                  disabled={isConnecting}
-                  className="w-full h-12 gap-3 text-base font-semibold"
-                  data-testid="button-connect-wallet"
-                >
-                  {isConnecting ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <Wallet className="h-5 w-5" />
-                  )}
-                  {isConnecting ? "Connecting..." : "Connect Wallet"}
-                  {!isConnecting && <ArrowRight className="h-4 w-4 ml-auto" />}
-                </Button>
-              )}
-                </>
-              ) : null}
-            </>
+            <RabbyMobileConnectHelp
+              inWalletBrowser={hasInjectedProvider}
+              walletBrowserLabel={
+                walletBrowserKind === "rabby"
+                  ? "Rabby"
+                  : walletBrowserKind === "metamask"
+                    ? "MetaMask"
+                    : "Wallet"
+              }
+              detectedWalletTypes={detectedWallets.map((w) => w.type)}
+              onConnectRabby={() => connect("rabby", { forceAccountPicker: true })}
+              onConnectMetamask={() => connect("metamask", { forceAccountPicker: true })}
+              onConnectWallet={(t) => connect(t, { forceAccountPicker: true })}
+              isConnecting={isConnecting}
+              onCopyLink={prepareRabbyPasteHandoff}
+              pasteHandoffActive={rabbyPasteHandoffActive}
+            />
           ) : hasWallet ? (
             <>
               {detectedWallets.length > 0 ? (
