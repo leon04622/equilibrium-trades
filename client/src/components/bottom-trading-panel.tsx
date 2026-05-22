@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
 import { computeTrailingCallbackRateDecimal } from "@/lib/trailing-stop-orchestrator";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +54,16 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePosition, setSharePosition] = useState<SharePositionSnapshot | null>(null);
+  /** Blocks accidental Market-close when TP/SL dialog dismiss steals the click (Radix unmount before mouseup). */
+  const suppressPositionCloseRef = useRef(false);
+
+  const closeTpslDialog = useCallback(() => {
+    suppressPositionCloseRef.current = true;
+    setTpslDialog((prev) => ({ ...prev, open: false }));
+    window.setTimeout(() => {
+      suppressPositionCloseRef.current = false;
+    }, 400);
+  }, []);
 
   // Debug: log all positions whenever they change
   useEffect(() => {
@@ -93,6 +103,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
   };
 
   const handleClosePosition = async (pos: any) => {
+    if (suppressPositionCloseRef.current) return;
     setClosingPositionId(pos.id);
     const result = await closePosition(pos.id);
     setClosingPositionId(null);
@@ -195,7 +206,7 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
         title: "TP/SL Orders Placed",
         description: `${tp ? `TP: ${tpPrice}` : ""}${tp && sl ? ", " : ""}${sl ? `SL: ${slPrice}` : ""} for ${tpslDialog.coin}`,
       });
-      setTpslDialog({ ...tpslDialog, open: false });
+      closeTpslDialog();
     } else {
       toast({
         title: "Failed to Place TP/SL",
@@ -435,8 +446,17 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
         </div>
       </div>
 
-      <Dialog open={tpslDialog.open} onOpenChange={(open) => setTpslDialog({ ...tpslDialog, open })}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
+      <Dialog
+        open={tpslDialog.open}
+        onOpenChange={(open) => {
+          if (open) setTpslDialog((prev) => ({ ...prev, open: true }));
+          else closeTpslDialog();
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md bg-card border-border"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader className="text-center">
             <DialogTitle className="text-lg">TP/SL for Position</DialogTitle>
           </DialogHeader>
