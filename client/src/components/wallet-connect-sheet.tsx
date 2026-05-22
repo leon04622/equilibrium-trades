@@ -2,11 +2,16 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 import { Button } from "@/components/ui/button";
 import { useWallet, WalletType } from "@/lib/wallet-context";
 import { Wallet, ExternalLink, Smartphone, Loader2, CheckCircle2, AlertCircle, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { WalletAccountPicker } from "@/components/wallet-account-picker";
+import { RabbyMobileConnectHelp } from "@/components/rabby-mobile-connect-help";
 
 interface WalletConnectSheetProps {
   trigger?: React.ReactNode;
   onConnect?: () => void;
+  /** Controlled open (e.g. account picker after "Switch account"). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Wallet brand colours and labels
@@ -36,7 +41,7 @@ function WalletIcon({ type, color }: { type: string; color: string }) {
 // Popular wallets to suggest installing when none detected
 const SUGGESTED_INSTALLS = ["metamask", "rabby", "okx", "coinbase"];
 
-export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetProps) {
+export function WalletConnectSheet({ trigger, onConnect, open: openProp, onOpenChange }: WalletConnectSheetProps) {
   const { 
     detectedWallets, 
     isMobile, 
@@ -46,19 +51,30 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
     address,
     connectError,
     clearConnectError,
-    openInWalletBrowser 
+    openInWalletBrowser,
+    walletBrowserKind,
+    hasInjectedProvider,
+    pendingConnectAccounts,
+    pendingConnectWalletName,
+    confirmConnectAccount,
+    cancelPendingConnect,
   } = useWallet();
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openProp ?? openInternal;
+  const setOpen = onOpenChange ?? setOpenInternal;
   const [connectingWallet, setConnectingWallet] = useState<WalletType | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isConnected && address) setOpen(false);
+  }, [isConnected, address]);
 
   const handleConnect = async (walletType?: WalletType) => {
     setLocalError(null);
     setConnectingWallet(walletType ?? null);
     try {
-      await connect(walletType);
+      await connect(walletType, { forceAccountPicker: true });
       onConnect?.();
-      setOpen(false);
     } catch (err: any) {
       // Error is already stored in connectError via context; surface it locally too
       setLocalError(
@@ -71,7 +87,7 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
 
   const errorMessage = localError ?? connectError;
 
-  if (isConnected && address) {
+  if (isConnected && address && !(pendingConnectAccounts && pendingConnectAccounts.length > 0)) {
     return (
       <Button variant="outline" className="gap-2" data-testid="button-wallet-connected">
         <CheckCircle2 className="h-4 w-4 text-green-500" />
@@ -128,32 +144,79 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
         )}
 
         <div className="py-3 space-y-2">
-          {isMobile ? (
+          {pendingConnectAccounts && pendingConnectAccounts.length > 0 ? (
+            <WalletAccountPicker
+              accounts={pendingConnectAccounts}
+              walletName={pendingConnectWalletName}
+              isSubmitting={isConnecting}
+              onSelect={async (acc) => {
+                setLocalError(null);
+                try {
+                  await confirmConnectAccount(acc);
+                  onConnect?.();
+                  setOpen(false);
+                } catch (err: unknown) {
+                  setLocalError(
+                    err instanceof Error ? err.message : "Could not connect with that account.",
+                  );
+                }
+              }}
+              onCancel={() => cancelPendingConnect()}
+            />
+          ) : isMobile ? (
             /* ── Mobile ── */
             <>
-              {(detectedWallets.length > 0 || (typeof window !== "undefined" && !!(window as unknown as { ethereum?: unknown }).ethereum)) && (
-                <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 space-y-2 mb-2">
-                  <p className="text-xs font-medium text-foreground">Already in Rabby, MetaMask, or another wallet browser?</p>
-                  <Button
-                    className="w-full h-12"
-                    onClick={() => handleConnect()}
-                    disabled={isConnecting}
-                    data-testid="button-connect-in-wallet-browser"
-                  >
-                    {isConnecting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Connecting…
-                      </>
-                    ) : (
-                      "Connect wallet in this browser"
-                    )}
-                  </Button>
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground pb-1">
-                Or open this site inside a wallet app from Safari / Chrome:
+              <RabbyMobileConnectHelp
+                inWalletBrowser={hasInjectedProvider}
+                walletBrowserLabel={
+                  walletBrowserKind === "rabby"
+                    ? "Rabby"
+                    : walletBrowserKind === "metamask"
+                      ? "MetaMask"
+                      : hasInjectedProvider
+                        ? "Wallet"
+                        : undefined
+                }
+                onConnectInBrowser={() => handleConnect(walletBrowserKind === "metamask" ? "metamask" : "rabby")}
+                isConnecting={isConnecting}
+                onOpenRabby={() => openInWalletBrowser("rabby")}
+              />
+              {detectedWallets.length > 0 ? (
+                <>
+                  <p className="text-xs text-muted-foreground pb-1 pt-2">
+                    Or pick a detected wallet:
+                  </p>
+                  {detectedWallets.map((wallet) => {
+                    const meta = WALLET_META[wallet.type] ?? WALLET_META.injected;
+                    return (
+                      <Button
+                        key={wallet.type}
+                        variant="outline"
+                        className="w-full justify-between h-14 text-left"
+                        onClick={() => handleConnect(wallet.type)}
+                        disabled={isConnecting}
+                        data-testid={`button-connect-${wallet.type}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <WalletIcon type={wallet.type} color={meta.color} />
+                          <span className="font-medium">{wallet.name}</span>
+                        </div>
+                        {connectingWallet === wallet.type ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    );
+                  })}
+                </>
+              ) : null}
+              {!hasInjectedProvider ? (
+              <p className="text-xs text-muted-foreground pb-1 pt-2">
+                Other wallets (open in app from Safari / Chrome):
               </p>
+              ) : null}
+              {!hasInjectedProvider ? (
               <Button
                 variant="outline"
                 className="w-full justify-between h-14"
@@ -164,11 +227,12 @@ export function WalletConnectSheet({ trigger, onConnect }: WalletConnectSheetPro
                   <WalletIcon type="rabby" color={WALLET_META.rabby.color} />
                   <div className="text-left">
                     <span className="font-medium block">Rabby</span>
-                    <span className="text-xs text-muted-foreground">Open in Rabby app — unlock, then connect</span>
+                    <span className="text-xs text-muted-foreground">Try opening in Rabby app</span>
                   </div>
                 </div>
                 <Smartphone className="h-4 w-4 text-muted-foreground" />
               </Button>
+              ) : null}
               <Button
                 variant="outline"
                 className="w-full justify-between h-14"

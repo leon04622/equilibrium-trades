@@ -10,6 +10,18 @@ import { hasLocalLifetimeHandshakeDone } from "@/lib/TradeExecution";
 import { syncCrmBuilderLinkIfSessionReady } from "@/lib/crm-builder-link-sync";
 import { queryClient } from "@/lib/queryClient";
 import { humanizeWalletConnectError } from "@/lib/wallet-errors";
+import {
+  readAuthorizedAccounts,
+  requestAccountsFromProvider,
+} from "@/lib/wallet-connect-flow";
+import {
+  copyTextForUser,
+  currentSiteUrlForWalletHandoff,
+  detectWalletBrowserKind,
+  isMobileUserAgent,
+  openRabbyMobileApp,
+  type WalletBrowserKind,
+} from "@/lib/wallet-mobile-rabby";
 
 export type WalletType = "metamask" | "rabby" | "okx" | "coinbase" | "trust" | "phantom" | "injected" | "none";
 
@@ -35,9 +47,20 @@ interface WalletContextType {
   prepareHyperliquidSession: () => Promise<{ success: boolean; error?: string }>;
   detectedWallets: DetectedWallet[];
   isMobile: boolean;
+  /** Injected wallet environment when inside Rabby/MetaMask in-app browser. */
+  walletBrowserKind: WalletBrowserKind;
+  hasInjectedProvider: boolean;
+  copySiteUrlForRabbyWallet: () => Promise<boolean>;
   connectError: string | null;
   clearConnectError: () => void;
-  connect: (walletType?: WalletType) => Promise<void>;
+  pendingConnectAccounts: string[] | null;
+  pendingConnectWalletName: string | null;
+  confirmConnectAccount: (account: string) => Promise<void>;
+  cancelPendingConnect: () => void;
+  connect: (
+    walletType?: WalletType,
+    options?: { forceAccountPicker?: boolean },
+  ) => Promise<void>;
   disconnect: () => void;
   switchToArbitrum: () => Promise<void>;
   refreshApprovalStatus: () => Promise<void>;
@@ -70,7 +93,7 @@ declare global {
 }
 
 function detectMobile(): boolean {
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  return isMobileUserAgent();
 }
 
 function getWalletInfo(provider: any): { type: WalletType; name: string } | null {
@@ -196,6 +219,8 @@ function resolveInjectedProvider(
       }
     }
     if (getWalletInfo(window.ethereum)?.type === walletType) return window.ethereum;
+    // Rabby mobile often exposes only isMetaMask ("disguise as MetaMask")
+    if (walletType === "rabby" && window.ethereum?.request) return window.ethereum;
     return null;
   }
 
@@ -234,16 +259,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isPreparingHyperliquidSession, setIsPreparingHyperliquidSession] = useState(false);
   const [detectedWallets, setDetectedWallets] = useState<DetectedWallet[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const [walletBrowserKind, setWalletBrowserKind] = useState<WalletBrowserKind>("none");
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [pendingConnectAccounts, setPendingConnectAccounts] = useState<string[] | null>(null);
+  const [pendingConnectWalletName, setPendingConnectWalletName] = useState<string | null>(null);
   const eip6963MapRef = useRef(new Map<string, DetectedWallet>());
   const activeInjectedRef = useRef<any>(null);
+  const pendingProviderRef = useRef<any>(null);
 
   const isConnected = !!address && !!signer;
 
-  const bindInjectedWalletSession = useCallback(async (raw: any) => {
+  const bindInjectedWalletSession = useCallback(async (raw: any, accountAddress?: string) => {
     activeInjectedRef.current = raw;
     const browserProvider = new BrowserProvider(raw);
-    const browserSigner = await browserProvider.getSigner();
+    const browserSigner = accountAddress
+      ? await browserProvider.getSigner(accountAddress)
+      : await browserProvider.getSigner();
     let chainId: number | null = null;
     try {
       const chainHex = await raw.request({ method: "eth_chainId" });
@@ -267,8 +298,63 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const clearConnectError = useCallback(() => setConnectError(null), []);
 
+  const cancelPendingConnect = useCallback(() => {
+    setPendingConnectAccounts(null);
+    setPendingConnectWalletName(null);
+    pendingProviderRef.current = null;
+  }, []);
+
+  const completeInjectedConnect = useCallback(
+    async (raw: any, account: string, walletLabel: string) => {
+      const normalized = account.toLowerCase();
+      const { browserProvider, browserSigner, chainId } =
+        await bindInjectedWalletSession(raw, normalized);
+      setProvider(browserProvider);
+      setSigner(browserSigner);
+      setAddress(normalized);
+      if (chainId != null) setChainId(chainId);
+      setPendingConnectAccounts(null);
+      setPendingConnectWalletName(null);
+      pendingProviderRef.current = null;
+      setConnectError(null);
+      console.info(`[Wallet] Connected ${normalized.slice(0, 6)}… via ${walletLabel}`);
+    },
+    [bindInjectedWalletSession],
+  );
+
+  const confirmConnectAccount = useCallback(
+    async (account: string) => {
+      const raw = pendingProviderRef.current;
+      if (!raw) {
+        setConnectError("Connection session expired. Please connect again.");
+        cancelPendingConnect();
+        return;
+      }
+      setIsConnecting(true);
+      try {
+        await completeInjectedConnect(
+          raw,
+          account,
+          pendingConnectWalletName ?? "Wallet",
+        );
+      } catch (error: unknown) {
+        console.error("Error confirming wallet account:", error);
+        setConnectError(humanizeWalletConnectError(error));
+        throw error;
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [completeInjectedConnect, pendingConnectWalletName, cancelPendingConnect],
+  );
+
   const rebuildDetectedWallets = useCallback(() => {
     setDetectedWallets(mergeDetectedWallets(eip6963MapRef.current));
+    setWalletBrowserKind(detectWalletBrowserKind());
+  }, []);
+
+  const copySiteUrlForRabbyWallet = useCallback(async () => {
+    return copyTextForUser(currentSiteUrlForWalletHandoff());
   }, []);
 
   // EIP-6963 + legacy detection; Rabby is sorted before MetaMask when both exist
@@ -289,12 +375,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("eip6963:requestProvider"));
 
     const retryTimer = setTimeout(rebuildDetectedWallets, 800);
+    const retryTimer2 = setTimeout(rebuildDetectedWallets, 2000);
+    const retryTimer3 = setTimeout(rebuildDetectedWallets, 4500);
 
     return () => {
       clearTimeout(retryTimer);
+      clearTimeout(retryTimer2);
+      clearTimeout(retryTimer3);
       window.removeEventListener("eip6963:announceProvider", on6963);
     };
   }, [rebuildDetectedWallets]);
+
+  /** Inside Rabby in-app browser on mobile: auto-start connect handoff. */
+  useEffect(() => {
+    if (!isMobile || address) return;
+    if (localStorage.getItem(WALLET_DISCONNECTED_KEY) === "true") return;
+    const kind = detectWalletBrowserKind();
+    if (kind !== "rabby" && kind !== "metamask" && kind !== "injected") return;
+    try {
+      const existing = sessionStorage.getItem(WALLET_HANDOFF_SESSION_KEY);
+      if (!existing) {
+        sessionStorage.setItem(
+          WALLET_HANDOFF_SESSION_KEY,
+          kind === "metamask" ? "metamask" : "rabby",
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isMobile, address]);
 
   /**
    * Mobile: opening Rabby/MetaMask from system browser loads this URL in the wallet WebView.
@@ -348,21 +457,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     void (async () => {
-      for (let attempt = 0; attempt < 12; attempt++) {
+      for (let attempt = 0; attempt < 24; attempt++) {
         if (cancelled || localStorage.getItem(WALLET_DISCONNECTED_KEY) === "true") return;
+
+        window.dispatchEvent(new Event("eip6963:requestProvider"));
+        rebuildDetectedWallets();
 
         const rawProvider = resolveInjectedProvider(walletType, eip6963MapRef.current);
         if (rawProvider?.request) {
           try {
             setIsConnecting(true);
-            const accounts = await rawProvider.request({ method: "eth_requestAccounts" });
-            if (accounts?.length) {
-              const { browserProvider, browserSigner, chainId } =
-                await bindInjectedWalletSession(rawProvider);
-              setProvider(browserProvider);
-              setSigner(browserSigner);
-              setAddress(accounts[0]);
-              if (chainId != null) setChainId(chainId);
+            const accounts = await requestAccountsFromProvider(rawProvider, {
+              forceAccountPicker: !isMobileUserAgent(),
+            });
+            if (accounts.length >= 1) {
+              if (accounts.length === 1) {
+                await completeInjectedConnect(
+                  rawProvider,
+                  accounts[0],
+                  walletType === "rabby" ? "Rabby Wallet" : "MetaMask",
+                );
+              } else {
+                pendingProviderRef.current = rawProvider;
+                setPendingConnectAccounts(accounts);
+                setPendingConnectWalletName(
+                  walletType === "rabby" ? "Rabby Wallet" : "MetaMask",
+                );
+              }
               try {
                 sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
                 sessionStorage.removeItem("metamask_deep_link_pending");
@@ -379,7 +500,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        await new Promise((r) => setTimeout(r, 320));
+        await new Promise((r) => setTimeout(r, 450));
       }
       try {
         sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
@@ -391,7 +512,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [address, bindInjectedWalletSession]);
+  }, [address, completeInjectedConnect, rebuildDetectedWallets]);
 
   const confirmBuilderCodeApproved = useCallback(() => {
     setBuilderCodeApproved(true);
@@ -511,10 +632,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setProvider(null);
       activeInjectedRef.current = null;
     } else {
-      setAddress(accounts[0]);
+      const next = accounts[0].toLowerCase();
+      setAddress(next);
       if (raw) {
         try {
-          const { browserProvider, browserSigner } = await bindInjectedWalletSession(raw);
+          const { browserProvider, browserSigner } = await bindInjectedWalletSession(raw, next);
           setProvider(browserProvider);
           setSigner(browserSigner);
         } catch (err) {
@@ -562,13 +684,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (!raw?.request) return;
 
       try {
-        const accounts = await raw.request({ method: "eth_accounts" });
-        if (accounts.length > 0) {
-          const { browserProvider, browserSigner, chainId } = await bindInjectedWalletSession(raw);
-          setProvider(browserProvider);
-          setSigner(browserSigner);
-          setAddress(accounts[0]);
-          if (chainId != null) setChainId(chainId);
+        const accounts = await readAuthorizedAccounts(raw);
+        if (accounts.length === 1) {
+          await completeInjectedConnect(raw, accounts[0], "Saved session");
+        } else if (accounts.length > 1) {
+          pendingProviderRef.current = raw;
+          setPendingConnectAccounts(accounts);
+          setPendingConnectWalletName("Wallet");
         } else if (isMobile && window.ethereum) {
           const mmPending = sessionStorage.getItem("metamask_deep_link_pending");
           const rbPending = sessionStorage.getItem("rabby_deep_link_pending");
@@ -581,14 +703,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             sessionStorage.removeItem("rabby_deep_link_pending");
             try {
               setIsConnecting(true);
-              const requestedAccounts = await raw.request({ method: "eth_requestAccounts" });
-              if (requestedAccounts.length > 0) {
-                const { browserProvider, browserSigner, chainId } =
-                  await bindInjectedWalletSession(raw);
-                setProvider(browserProvider);
-                setSigner(browserSigner);
-                setAddress(requestedAccounts[0]);
-                if (chainId != null) setChainId(chainId);
+              const requestedAccounts = await requestAccountsFromProvider(raw, {
+                forceAccountPicker: !isMobileUserAgent(),
+              });
+              if (requestedAccounts.length === 1) {
+                await completeInjectedConnect(raw, requestedAccounts[0], "Wallet app");
+              } else if (requestedAccounts.length > 1) {
+                pendingProviderRef.current = raw;
+                setPendingConnectAccounts(requestedAccounts);
+                setPendingConnectWalletName("Wallet app");
               }
             } catch (err) {
               console.error("Error auto-connecting after wallet deep link:", err);
@@ -603,7 +726,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
 
     checkConnection();
-  }, [isMobile, bindInjectedWalletSession]);
+  }, [isMobile, completeInjectedConnect]);
 
   useEffect(() => {
     const handleVisibilityChange = async () => {
@@ -628,18 +751,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           window.ethereum;
         if (!raw?.request) return;
         try {
-          const accounts = await raw.request({ method: "eth_accounts" });
-          if (accounts.length > 0) {
-            const { browserProvider, browserSigner, chainId } = await bindInjectedWalletSession(raw);
-            setProvider(browserProvider);
-            setSigner(browserSigner);
-            setAddress(accounts[0]);
-            if (chainId != null) setChainId(chainId);
+          const accounts = await readAuthorizedAccounts(raw);
+          if (accounts.length === 1) {
+            await completeInjectedConnect(raw, accounts[0], "Wallet app");
             try {
               sessionStorage.removeItem(WALLET_HANDOFF_SESSION_KEY);
             } catch {
               /* ignore */
             }
+          } else if (accounts.length > 1) {
+            pendingProviderRef.current = raw;
+            setPendingConnectAccounts(accounts);
+            setPendingConnectWalletName("Wallet app");
           }
         } catch (error) {
           console.error("Error reconnecting on visibility change:", error);
@@ -649,7 +772,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isMobile, address, bindInjectedWalletSession]);
+  }, [isMobile, address, completeInjectedConnect]);
 
   const openInWalletBrowser = useCallback((walletType: WalletType) => {
     const u = new URL(window.location.href);
@@ -671,37 +794,45 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
     if (walletType === "rabby") {
       u.searchParams.set(WALLET_HANDOFF_QS, "rabby");
-      const hp = new URLSearchParams(u.hash.startsWith("#") ? u.hash.slice(1) : "");
-      hp.set(WALLET_HANDOFF_QS, "rabby");
-      u.hash = hp.toString() ? `#${hp.toString()}` : `#${WALLET_HANDOFF_QS}=rabby`;
       try {
+        sessionStorage.setItem(WALLET_HANDOFF_SESSION_KEY, "rabby");
         sessionStorage.setItem("rabby_deep_link_pending", "true");
         sessionStorage.removeItem("metamask_deep_link_pending");
       } catch {
         /* ignore */
       }
-      const fullUrl = u.toString();
-      window.location.href = `rabby://dapp?url=${encodeURIComponent(fullUrl)}`;
+      openRabbyMobileApp(u.toString());
       return;
     }
     alert("Open this site in your wallet app's browser (DApp / Discover), then use Connect Wallet.");
   }, []);
 
-  const connect = useCallback(async (walletType?: WalletType) => {
+  const connect = useCallback(async (
+    walletType?: WalletType,
+    options?: { forceAccountPicker?: boolean },
+  ) => {
     localStorage.removeItem(WALLET_DISCONNECTED_KEY);
     setConnectError(null);
+    cancelPendingConnect();
 
     const fromList =
       walletType && walletType !== "injected"
         ? detectedWallets.find((w) => w.type === walletType)?.provider
         : undefined;
     const selectedProvider =
-      fromList ?? resolveInjectedProvider(walletType, eip6963MapRef.current);
+      fromList ??
+      (walletType ? null : activeInjectedRef.current) ??
+      resolveInjectedProvider(walletType, eip6963MapRef.current);
 
     if (!selectedProvider?.request) {
-      if (isMobile) {
+      if (isMobile && walletType === "rabby") {
         setConnectError(
-          "No wallet in this browser. Tap Rabby or MetaMask below to open this site in the app, unlock, then connect."
+          "Rabby is not available in Safari/Chrome. Copy the site link below, open Rabby → DApps, paste the URL, then tap Connect Rabby.",
+        );
+        void copySiteUrlForRabbyWallet();
+      } else if (isMobile) {
+        setConnectError(
+          "No wallet in this browser. Use Rabby’s in-app browser (DApps → paste this site’s URL) or tap Open Rabby below.",
         );
       } else {
         setConnectError(
@@ -711,24 +842,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    let walletLabel =
+      (walletType && detectedWallets.find((w) => w.type === walletType)?.name) ||
+      getWalletInfo(selectedProvider)?.name ||
+      "Wallet";
+    if (walletType === "rabby" && !selectedProvider?.isRabby && selectedProvider?.isMetaMask) {
+      walletLabel = "Rabby Wallet";
+    }
+
     setIsConnecting(true);
 
     try {
-      const accounts = await selectedProvider.request({
-        method: "eth_requestAccounts",
+      const accounts = await requestAccountsFromProvider(selectedProvider, {
+        forceAccountPicker: isMobile ? false : (options?.forceAccountPicker ?? true),
       });
 
-      if (!accounts || accounts.length === 0) {
-        throw new Error("No accounts returned. Please unlock your wallet and try again.");
+      if (accounts.length === 0) {
+        throw new Error("No accounts returned. Unlock your wallet, pick an account, and try again.");
       }
 
-      const { browserProvider, browserSigner, chainId } =
-        await bindInjectedWalletSession(selectedProvider);
+      if (accounts.length === 1) {
+        await completeInjectedConnect(selectedProvider, accounts[0], walletLabel);
+        return;
+      }
 
-      setProvider(browserProvider);
-      setSigner(browserSigner);
-      setAddress(accounts[0]);
-      if (chainId != null) setChainId(chainId);
+      pendingProviderRef.current = selectedProvider;
+      setPendingConnectAccounts(accounts);
+      setPendingConnectWalletName(walletLabel);
     } catch (error: unknown) {
       console.error("Error connecting wallet:", error);
       const message = humanizeWalletConnectError(error);
@@ -737,7 +877,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsConnecting(false);
     }
-  }, [isMobile, detectedWallets, bindInjectedWalletSession]);
+  }, [isMobile, detectedWallets, completeInjectedConnect, cancelPendingConnect, copySiteUrlForRabbyWallet]);
 
   const disconnect = useCallback(() => {
     const prev = address;
@@ -750,6 +890,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
     activeInjectedRef.current = null;
+    pendingProviderRef.current = null;
+    setPendingConnectAccounts(null);
+    setPendingConnectWalletName(null);
     if (prev) {
       clearHyperliquidTradingSession(prev);
     }
@@ -807,8 +950,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       prepareHyperliquidSession,
       detectedWallets,
       isMobile,
+      walletBrowserKind,
+      hasInjectedProvider: walletBrowserKind !== "none",
+      copySiteUrlForRabbyWallet,
       connectError,
       clearConnectError,
+      pendingConnectAccounts,
+      pendingConnectWalletName,
+      confirmConnectAccount,
+      cancelPendingConnect,
       connect,
       disconnect,
       switchToArbitrum,

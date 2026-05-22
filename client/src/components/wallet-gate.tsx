@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWallet } from "@/lib/wallet-context";
+import { WalletAccountPicker } from "@/components/wallet-account-picker";
+import { RabbyMobileConnectHelp } from "@/components/rabby-mobile-connect-help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Wallet, Smartphone, Monitor, ArrowRight, Loader2, Mail, CheckCircle2, TrendingUp, Shield, Zap, AlertCircle, BookOpen, GraduationCap, CreditCard } from "lucide-react";
@@ -44,6 +46,12 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
     detectedWallets,
     connectError,
     clearConnectError,
+    pendingConnectAccounts,
+    pendingConnectWalletName,
+    confirmConnectAccount,
+    cancelPendingConnect,
+    walletBrowserKind,
+    hasInjectedProvider,
   } = useWallet();
   const [email, setEmail] = useState("");
   const [emailSubmitted, setEmailSubmitted] = useState(false);
@@ -77,7 +85,7 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const hasWallet = detectedWallets.length > 0 || !!window.ethereum;
+  const hasWallet = hasInjectedProvider || detectedWallets.length > 0 || !!window.ethereum;
 
   return (
     <div className="fixed inset-0 z-[9999] bg-background flex flex-col items-center justify-center overflow-y-auto">
@@ -134,38 +142,65 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {isMobile && !hasWallet ? (
+          {pendingConnectAccounts && pendingConnectAccounts.length > 0 ? (
+            <WalletAccountPicker
+              accounts={pendingConnectAccounts}
+              walletName={pendingConnectWalletName}
+              isSubmitting={isConnecting}
+              onSelect={(acc) => void confirmConnectAccount(acc)}
+              onCancel={() => cancelPendingConnect()}
+            />
+          ) : isMobile ? (
             <>
-              <Button
-                onClick={() => openInWalletBrowser("rabby")}
-                className="w-full h-12 gap-3 text-base font-semibold"
-                data-testid="button-open-rabby-mobile"
-              >
-                <Wallet className="h-5 w-5" />
-                Open in Rabby
-                <ArrowRight className="h-4 w-4 ml-auto" />
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => openInWalletBrowser("metamask")}
-                className="w-full h-12 gap-3 text-base font-semibold"
-                data-testid="button-open-metamask"
-              >
-                <Wallet className="h-5 w-5" />
-                Open in MetaMask
-                <ArrowRight className="h-4 w-4 ml-auto" />
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                After the app opens, unlock Rabby — the site usually connects automatically. If you still see this screen, tap Connect below (visible once you are inside the wallet browser).
-              </p>
-            </>
-          ) : hasWallet ? (
-            <>
+              <RabbyMobileConnectHelp
+                inWalletBrowser={hasInjectedProvider}
+                walletBrowserLabel={
+                  walletBrowserKind === "rabby"
+                    ? "Rabby"
+                    : walletBrowserKind === "metamask"
+                      ? "MetaMask"
+                      : hasInjectedProvider
+                        ? "Wallet"
+                        : undefined
+                }
+                onConnectInBrowser={() =>
+                  connect(walletBrowserKind === "metamask" ? "metamask" : "rabby", {
+                    forceAccountPicker: false,
+                  })
+                }
+                isConnecting={isConnecting}
+                onOpenRabby={() => openInWalletBrowser("rabby")}
+              />
+              {!hasInjectedProvider ? (
+                <>
+                  <Button
+                    onClick={() => openInWalletBrowser("rabby")}
+                    className="w-full h-12 gap-3 text-base font-semibold"
+                    data-testid="button-open-rabby-mobile"
+                  >
+                    <Wallet className="h-5 w-5" />
+                    Open in Rabby
+                    <ArrowRight className="h-4 w-4 ml-auto" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => openInWalletBrowser("metamask")}
+                    className="w-full h-12 gap-3 text-base font-semibold"
+                    data-testid="button-open-metamask"
+                  >
+                    <Wallet className="h-5 w-5" />
+                    Open in MetaMask
+                    <ArrowRight className="h-4 w-4 ml-auto" />
+                  </Button>
+                </>
+              ) : null}
+              {hasWallet ? (
+                <>
               {detectedWallets.length > 0 ? (
                 detectedWallets.map((wallet) => (
                   <Button
                     key={wallet.type}
-                    onClick={() => connect(wallet.type)}
+                    onClick={() => connect(wallet.type, { forceAccountPicker: false })}
                     disabled={isConnecting}
                     className="w-full h-12 gap-3 text-base font-semibold"
                     data-testid={`button-connect-${wallet.type}`}
@@ -181,7 +216,46 @@ export function WalletGate({ children }: { children: React.ReactNode }) {
                 ))
               ) : (
                 <Button
-                  onClick={() => connect()}
+                  onClick={() => connect(undefined, { forceAccountPicker: false })}
+                  disabled={isConnecting}
+                  className="w-full h-12 gap-3 text-base font-semibold"
+                  data-testid="button-connect-wallet"
+                >
+                  {isConnecting ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Wallet className="h-5 w-5" />
+                  )}
+                  {isConnecting ? "Connecting..." : "Connect Wallet"}
+                  {!isConnecting && <ArrowRight className="h-4 w-4 ml-auto" />}
+                </Button>
+              )}
+                </>
+              ) : null}
+            </>
+          ) : hasWallet ? (
+            <>
+              {detectedWallets.length > 0 ? (
+                detectedWallets.map((wallet) => (
+                  <Button
+                    key={wallet.type}
+                    onClick={() => connect(wallet.type, { forceAccountPicker: true })}
+                    disabled={isConnecting}
+                    className="w-full h-12 gap-3 text-base font-semibold"
+                    data-testid={`button-connect-${wallet.type}`}
+                  >
+                    {isConnecting ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Wallet className="h-5 w-5" />
+                    )}
+                    {isConnecting ? "Connecting..." : `Connect ${wallet.name}`}
+                    {!isConnecting && <ArrowRight className="h-4 w-4 ml-auto" />}
+                  </Button>
+                ))
+              ) : (
+                <Button
+                  onClick={() => connect(undefined, { forceAccountPicker: true })}
                   disabled={isConnecting}
                   className="w-full h-12 gap-3 text-base font-semibold"
                   data-testid="button-connect-wallet"

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/lib/wallet-context";
 import { Wallet, LogOut, AlertTriangle, ChevronDown } from "lucide-react";
@@ -23,14 +24,36 @@ export function WalletConnect() {
     chainId, 
     isConnected, 
     disconnect,
-    switchToArbitrum 
+    switchToArbitrum,
+    connect,
+    isConnecting,
+    pendingConnectAccounts,
   } = useWallet();
   const { walletUsdcArbitrum, displayTotalUsd, isLoadingWalletUsdc } = useTrading();
 
   const isWrongNetwork = isConnected && chainId !== ARBITRUM_CHAIN_ID;
+  const [accountPickOpen, setAccountPickOpen] = useState(false);
 
-  if (!isConnected) {
-    return <WalletConnectSheet />;
+  useEffect(() => {
+    if (pendingConnectAccounts && pendingConnectAccounts.length > 0) {
+      setAccountPickOpen(true);
+    }
+  }, [pendingConnectAccounts]);
+
+  if (!isConnected || (pendingConnectAccounts && pendingConnectAccounts.length > 0)) {
+    return (
+      <WalletConnectSheet
+        open={accountPickOpen}
+        onOpenChange={setAccountPickOpen}
+        trigger={
+          pendingConnectAccounts && pendingConnectAccounts.length > 0 ? (
+            <Button variant="outline" className="gap-2" data-testid="button-pick-account">
+              Choose account
+            </Button>
+          ) : undefined
+        }
+      />
+    );
   }
 
   if (isWrongNetwork) {
@@ -82,6 +105,13 @@ export function WalletConnect() {
           ) : null}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => void connect(undefined, { forceAccountPicker: true })}
+          disabled={isConnecting}
+          data-testid="button-switch-account"
+        >
+          Switch account
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
             navigator.clipboard.writeText(address!);
