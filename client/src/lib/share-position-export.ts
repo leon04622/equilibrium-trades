@@ -69,11 +69,21 @@ export function renderSharePositionPng(data: SharePositionSnapshot): Promise<Blo
     ctx.fillStyle = accent;
     ctx.fillText(sideLabel, 64, 200);
 
-    // ROE
-    ctx.font = "bold 96px ui-monospace, monospace";
+    // PnL (USD + ROE)
+    ctx.font = "bold 72px ui-monospace, monospace";
     ctx.fillStyle = accent;
-    const roeText = `${data.roePct >= 0 ? "+" : ""}${data.roePct.toFixed(1)}%`;
-    ctx.fillText(roeText, 48, 310);
+    const pnlAbs = Math.abs(data.unrealizedPnl);
+    const pnlStr =
+      pnlAbs >= 1000
+        ? pnlAbs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : pnlAbs.toFixed(2);
+    const pnlText = `${data.unrealizedPnl >= 0 ? "+" : "-"}$${pnlStr}`;
+    ctx.fillText(pnlText, 48, 290);
+
+    ctx.font = "bold 44px ui-monospace, monospace";
+    ctx.fillStyle = accent;
+    const roeText = `${data.roePct >= 0 ? "+" : ""}${data.roePct.toFixed(1)}% ROE`;
+    ctx.fillText(roeText, 48, 350);
 
     // Prices
     ctx.fillStyle = "#94a3b8";

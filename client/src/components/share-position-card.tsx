@@ -13,9 +13,19 @@ type Props = {
   className?: string;
 };
 
+function fmtPnlUsd(pnl: number): string {
+  if (!Number.isFinite(pnl) || Math.abs(pnl) < 1e-8) return "$0.00";
+  const sign = pnl >= 0 ? "+" : "-";
+  const abs = Math.abs(pnl);
+  if (abs >= 1000) {
+    return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
 /** Branded position card preview (HL-style layout, Equilibrium branding, no referral). */
 export function SharePositionCard({ data, className }: Props) {
-  const profit = data.roePct >= 0;
+  const profit = data.unrealizedPnl >= 0;
   const sideLabel = data.side === "long" ? "LONG" : "SHORT";
 
   return (
@@ -78,15 +88,25 @@ export function SharePositionCard({ data, className }: Props) {
           </span>
         </div>
 
-        <p
-          className={cn(
-            "mt-3 font-mono text-4xl font-bold tracking-tight sm:text-5xl",
-            profit ? "text-bullish" : "text-bearish",
-          )}
-        >
-          {profit ? "+" : ""}
-          {data.roePct.toFixed(1)}%
-        </p>
+        <div className="mt-3 space-y-1">
+          <p
+            className={cn(
+              "font-mono text-4xl font-bold tracking-tight sm:text-5xl",
+              profit ? "text-bullish" : "text-bearish",
+            )}
+          >
+            {fmtPnlUsd(data.unrealizedPnl)}
+          </p>
+          <p
+            className={cn(
+              "font-mono text-lg font-semibold tabular-nums sm:text-xl",
+              profit ? "text-bullish/90" : "text-bearish/90",
+            )}
+          >
+            {data.roePct >= 0 ? "+" : ""}
+            {data.roePct.toFixed(1)}% ROE
+          </p>
+        </div>
 
         <div className="mt-auto flex flex-wrap gap-6 pt-4 text-xs text-muted-foreground">
           <div>

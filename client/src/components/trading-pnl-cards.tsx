@@ -173,12 +173,18 @@ export function TradingPnlCards({ className }: TradingPnlCardsProps) {
     >
       <PnlCard
         label="Unrealized P&L"
-        value={loading ? "…" : formatSignedUsd(stats.totalUnrealized)}
+        value={
+          loading
+            ? "…"
+            : stats.openCount > 0
+              ? `${formatSignedUsd(stats.totalUnrealized)} (${formatSignedPct(stats.roePct)})`
+              : formatSignedUsd(stats.totalUnrealized)
+        }
         sub={
           loading
             ? undefined
             : stats.openCount > 0
-              ? `${formatSignedPct(stats.roePct)} ROE · ${stats.openCount} position${stats.openCount === 1 ? "" : "s"}`
+              ? `${stats.openCount} open position${stats.openCount === 1 ? "" : "s"}`
               : "No open positions"
         }
         tone={loading ? "neutral" : unrealTone}

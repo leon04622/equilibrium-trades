@@ -11,8 +11,14 @@ export type SharePositionSnapshot = {
 
 export function defaultShareCaption(s: SharePositionSnapshot): string {
   const dir = s.side === "long" ? "Long" : "Short";
-  const sign = s.roePct >= 0 ? "+" : "";
-  return `Trading $${s.coin} perps on Equilibrium — ${dir} ${s.leverage}x · ${sign}${s.roePct.toFixed(1)}% ROE`;
+  const pnlSign = s.unrealizedPnl >= 0 ? "+" : "-";
+  const pnlAbs = Math.abs(s.unrealizedPnl);
+  const pnlStr =
+    pnlAbs >= 1000
+      ? pnlAbs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : pnlAbs.toFixed(2);
+  const roeSign = s.roePct >= 0 ? "+" : "";
+  return `Trading $${s.coin} perps on Equilibrium — ${dir} ${s.leverage}x · ${pnlSign}$${pnlStr} · ${roeSign}${s.roePct.toFixed(1)}% ROE`;
 }
 
 export function tradingPageShareUrl(coin: string): string {
