@@ -32,6 +32,8 @@ import { ApexSovereign } from "@/components/apex-sovereign";
 import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { PremiumFeatureLock } from "@/components/premium-feature-lock";
 import { loadCachedCandles, saveCachedCandles } from "@/lib/chart-candle-storage";
+import { chartCandlePollMs } from "@/lib/chart-candle-poll";
+import { mergeHlCandleIntoSeries, subscribeHyperliquidCandles } from "@/lib/hyperliquid-candle-ws";
 import { computeSmmaSeries } from "@/lib/smma-worker-client";
 
 interface EducationalPatternSignal {
@@ -431,7 +433,8 @@ function PatternChartComponent({
   }, [coin, interval]);
 
   const historyLimit = CHART_HISTORY_LIMITS[interval] ?? 3000;
-  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=${historyLimit}`;
+  const candlePollMs = chartCandlePollMs(interval);
+  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=${historyLimit}&fresh=1`;
   const cachedCandles = useMemo(() => loadCachedCandles(coin, interval), [coin, interval]);
 
   const {
@@ -451,8 +454,8 @@ function PatternChartComponent({
       candlesStructurallyEqual(prev as CandleData[] | undefined, next as CandleData[] | undefined)
         ? (prev as CandleData[])
         : (next as CandleData[]),
-    refetchInterval: 15_000,
-    staleTime: 12_000,
+    refetchInterval: candlePollMs,
+    staleTime: Math.max(1_000, Math.floor(candlePollMs * 0.75)),
     retry: false,
     queryFn: async ({ signal }) => {
       const attempt = async () => {
@@ -474,6 +477,19 @@ function PatternChartComponent({
       }
     },
   });
+
+  // Live Hyperliquid `candle` WebSocket — extends wicks on the forming bar (matches HL UI).
+  useEffect(() => {
+    if (!coin || !interval) return;
+    return subscribeHyperliquidCandles(coin, interval, (update) => {
+      queryClient.setQueryData<CandleData[]>([candleQueryKey], (prev) => {
+        if (!prev?.length) return prev;
+        const merged = mergeHlCandleIntoSeries(prev, update);
+        saveCachedCandles(coin, interval, merged);
+        return merged;
+      });
+    });
+  }, [coin, interval, candleQueryKey, queryClient]);
 
   const noDataRetryKey = `${coin}:${interval}`;
   const noDataRetryCount = noDataRetryCounts[noDataRetryKey] ?? 0;

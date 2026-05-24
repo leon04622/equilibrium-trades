@@ -380,8 +380,8 @@ const candleCache = new Map<string, { data: HyperliquidCandle[]; expiresAt: numb
 // Short TTLs so charts stay aligned with Hyperliquid (still avoids hammering the API).
 // Set HL_DISABLE_CANDLE_CACHE=1 to always hit the network for default range requests.
 const CANDLE_CACHE_TTL: Record<string, number> = {
-  "1m":  2_500,
-  "3m":  3_000,
+  "1m":  2_000,
+  "3m":  2_000,
   "5m":  4_000,
   "15m": 5_000,
   "30m": 6_000,
@@ -397,7 +397,8 @@ export async function getCandles(
   interval: string,
   startTime?: number,
   endTime?: number,
-  limit: number = 500
+  limit: number = 500,
+  skipCache = false,
 ): Promise<HyperliquidCandle[]> {
   try {
     const end = endTime || Date.now();
@@ -420,7 +421,7 @@ export async function getCandles(
     const defaultRange = msPerCandle * candleCount;
     const start = startTime || end - defaultRange;
 
-    const cacheDisabled = process.env.HL_DISABLE_CANDLE_CACHE === "1";
+    const cacheDisabled = process.env.HL_DISABLE_CANDLE_CACHE === "1" || skipCache;
     // Include limit in key so 200 vs 500 candle requests don’t share the wrong slice.
     const cacheKey = `${coin}:${interval}:${candleCount}`;
     if (!cacheDisabled && !startTime && !endTime) {
