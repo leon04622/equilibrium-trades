@@ -446,7 +446,12 @@ export async function getCandles(
       }
 
       const raw: HyperliquidCandle[] = await response.json();
-      return [...raw].sort((a, b) => a.t - b.t);
+      const sorted = [...raw].sort((a, b) => a.t - b.t);
+      // HL returns chronological bars; keep only the most recent `candleCount` for this request.
+      if (!startTime && !endTime && sorted.length > candleCount) {
+        return sorted.slice(-candleCount);
+      }
+      return sorted;
     };
 
     let data = await fetchSnapshot();

@@ -33,6 +33,12 @@ import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { PremiumFeatureLock } from "@/components/premium-feature-lock";
 import { loadCachedCandles, saveCachedCandles } from "@/lib/chart-candle-storage";
 import { chartCandlePollMs } from "@/lib/chart-candle-poll";
+import {
+  countTimeGaps,
+  fingerprintCandleSeries,
+  mergeCandleSnapshots,
+  repairCandleSeries,
+} from "@/lib/chart-candle-merge";
 import { mergeHlCandleIntoSeries, subscribeHyperliquidCandles } from "@/lib/hyperliquid-candle-ws";
 import { computeSmmaSeries } from "@/lib/smma-worker-client";
 
@@ -165,17 +171,6 @@ function normalizeCandlesByTime(candles: CandleData[]): CandleData[] {
     latestByTime.set(candle.t, candle);
   }
   return [...latestByTime.values()].sort((a, b) => a.t - b.t);
-}
-
-function fingerprintCandles(candles: CandleData[]): string {
-  if (candles.length === 0) return "empty";
-  const last = candles[candles.length - 1]!;
-  return `${candles.length}:${last.t}:${last.o}:${last.h}:${last.l}:${last.c}:${last.v}`;
-}
-
-function candlesStructurallyEqual(a: CandleData[] | undefined, b: CandleData[] | undefined): boolean {
-  if (!a || !b) return a === b;
-  return fingerprintCandles(a) === fingerprintCandles(b);
 }
 
 type SmmaPoint = { time: Time; value: number };
@@ -448,12 +443,10 @@ function PatternChartComponent({
     // candlesLoading kept for React Query semantics; UI uses cache-aware flags below
     queryKey: [candleQueryKey],
     /** Never reuse another market's candles while the query key changes — that caused ghost charts until refresh. */
-    placeholderData: () =>
-      cachedCandles.length > 0 ? (cachedCandles as CandleData[]) : undefined,
-    structuralSharing: (prev, next) =>
-      candlesStructurallyEqual(prev as CandleData[] | undefined, next as CandleData[] | undefined)
-        ? (prev as CandleData[])
-        : (next as CandleData[]),
+    placeholderData: () => {
+      if (cachedCandles.length === 0) return undefined;
+      return repairCandleSeries(cachedCandles as CandleData[], interval);
+    },
     refetchInterval: candlePollMs,
     staleTime: Math.max(1_000, Math.floor(candlePollMs * 0.75)),
     retry: false,
@@ -461,7 +454,12 @@ function PatternChartComponent({
       const attempt = async () => {
         const res = await fetch(candleQueryKey, { signal, credentials: "include" });
         if (!res.ok) throw new Error(`candles ${res.status}`);
-        return (await res.json()) as CandleData[];
+        const raw = (await res.json()) as CandleData[];
+        const prev = queryClient.getQueryData<CandleData[]>([candleQueryKey]);
+        const merged = prev?.length
+          ? mergeCandleSnapshots(prev, raw, interval)
+          : raw;
+        return repairCandleSeries(merged, interval);
       };
       try {
         const data = await attempt();
@@ -484,7 +482,10 @@ function PatternChartComponent({
     return subscribeHyperliquidCandles(coin, interval, (update) => {
       queryClient.setQueryData<CandleData[]>([candleQueryKey], (prev) => {
         if (!prev?.length) return prev;
-        const merged = mergeHlCandleIntoSeries(prev, update);
+        const merged = repairCandleSeries(
+          mergeHlCandleIntoSeries(prev, update, interval),
+          interval,
+        );
         saveCachedCandles(coin, interval, merged);
         return merged;
       });
@@ -914,7 +915,7 @@ function PatternChartComponent({
     if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
     if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
 
-    const sorted = normalizeCandlesByTime(candles);
+    const sorted = repairCandleSeries(normalizeCandlesByTime(candles), interval);
     if (sorted.length === 0) return;
     const closes = sorted.map((c) => parsePrice(c.c));
     const times = sorted.map((c) => (c.t / 1000) as Time);
@@ -923,7 +924,7 @@ function PatternChartComponent({
     const lastTime = times[times.length - 1]!;
 
     const dataKey = `${coin}:${interval}`;
-    const fingerprint = fingerprintCandles(sorted);
+    const fingerprint = fingerprintCandleSeries(sorted, interval);
     if (
       chartDataReadyRef.current &&
       prevDataKeyRef.current === dataKey &&
@@ -1024,8 +1025,14 @@ function PatternChartComponent({
 
       const lenChanged = sorted.length !== prevCandlesLenRef.current;
       const timeWentBackward = lastCandle.t < prevLastTimeRef.current;
+      const hasGaps = countTimeGaps(sorted, interval) > 0;
+      const lastBarOnly =
+        !hasGaps &&
+        !lenChanged &&
+        !timeWentBackward &&
+        lastCandle.t === prevLastTimeRef.current;
 
-      if (sorted.length - prevCandlesLenRef.current > 2 || timeWentBackward) {
+      if (!lastBarOnly) {
         try {
           candleSeriesRef.current.setData(
             sorted.map((c, i) => ({
@@ -1054,6 +1061,26 @@ function PatternChartComponent({
             "full",
           );
           setLastVol(vols[vols.length - 1] ?? null);
+
+          if (!hideIndicators && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+            const rsiData = calcRSI(closes, times, 14);
+            if (rsiData.length > 0) {
+              rsiSeriesRef.current.setData(rsiData);
+              setLastRSI(rsiData[rsiData.length - 1]!.value);
+            }
+            if (rsiData.length >= 14) {
+              const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+              if (k.length > 0) {
+                stochKSeriesRef.current.setData(k);
+                setLastK(k[k.length - 1]!.value);
+              }
+              if (d.length > 0) {
+                stochDSeriesRef.current.setData(d);
+                setLastD(d[d.length - 1]!.value);
+              }
+            }
+          }
+
           if (preservedRange) {
             try {
               mainChartRef.current.timeScale().setVisibleLogicalRange(preservedRange);

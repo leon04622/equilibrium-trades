@@ -1,57 +1,19 @@
 /** Live OHLC from Hyperliquid `candle` WebSocket — matches venue chart wicks on the forming bar. */
 
-export type HlCandleWire = {
-  t: number;
-  o: number | string;
-  h: number | string;
-  l: number | string;
-  c: number | string;
-  v: number | string;
-};
+import { mergeCandleSnapshots, normalizeCandleTimeMs, type ChartCandle } from "@/lib/chart-candle-merge";
+
+export type HlCandleWire = ChartCandle;
 
 const HL_WS_URL = "wss://api.hyperliquid.xyz/ws";
-
-function toNum(v: number | string): number {
-  const n = typeof v === "number" ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : 0;
-}
 
 /** Merge venue candle update into history (extends high/low on the active bar). */
 export function mergeHlCandleIntoSeries(
   series: HlCandleWire[],
   update: HlCandleWire,
+  interval: string,
 ): HlCandleWire[] {
   if (series.length === 0) return [update];
-  const out = [...series];
-  const last = out[out.length - 1]!;
-  if (last.t === update.t) {
-    out[out.length - 1] = {
-      t: update.t,
-      o: last.o,
-      h: Math.max(toNum(last.h), toNum(update.h)),
-      l: Math.min(toNum(last.l), toNum(update.l)),
-      c: update.c,
-      v: update.v,
-    };
-    return out;
-  }
-  if (update.t > last.t) {
-    out.push(update);
-    return out;
-  }
-  const idx = out.findIndex((c) => c.t === update.t);
-  if (idx >= 0) {
-    const prev = out[idx]!;
-    out[idx] = {
-      t: update.t,
-      o: prev.o,
-      h: Math.max(toNum(prev.h), toNum(update.h)),
-      l: Math.min(toNum(prev.l), toNum(update.l)),
-      c: update.c,
-      v: update.v,
-    };
-  }
-  return out;
+  return mergeCandleSnapshots(series, [update], interval);
 }
 
 type CandleListener = (candle: HlCandleWire) => void;
@@ -84,7 +46,7 @@ function wireMessage(raw: unknown): HlCandleWireTagged | null {
   return {
     coin,
     interval,
-    t,
+    t: normalizeCandleTimeMs(t, interval),
     o: d.o as number | string,
     h: d.h as number | string,
     l: d.l as number | string,
