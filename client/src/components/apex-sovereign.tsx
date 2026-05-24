@@ -28,8 +28,6 @@ import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders"
 import {
   advanceTrailingRatchet,
   clampTpslDragPrice,
-  computeTrailingCallbackRateDecimal,
-  createTrailingSession,
   distanceToTriggerPercent,
   slLineColor,
   snapOrderPrice,
@@ -504,10 +502,6 @@ export function ApexSovereign({
             kind === "tp" ? spec.newPrice : (tpPriceRef.current ?? undefined);
           const sl =
             kind === "sl" ? spec.newPrice : (slPriceRef.current ?? undefined);
-          const cbRate =
-            kind === "sl"
-              ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, spec.newPrice)
-              : null;
           const fb = await placeTPSL(
             coinRef.current,
             pos.size,
@@ -515,7 +509,6 @@ export function ApexSovereign({
             tp,
             sl,
             pos.entryPrice,
-            cbRate != null ? { slTrailingCallbackRate: cbRate } : undefined,
           );
           if (fb.success) {
             onPendingClear(kind);
@@ -1055,11 +1048,6 @@ export function ApexSovereign({
           const isLong = pos.side === "long";
           const tp = finalKind === "tp" ? finalPrice : (tpPriceRef.current ?? undefined);
           const sl = finalKind === "sl" ? finalPrice : (slPriceRef.current ?? undefined);
-          const markAtDrop = pos.markPrice || refPx;
-          const cbRate =
-            finalKind === "sl"
-              ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, finalPrice)
-              : null;
           const result = await placeTPSL(
             coinRef.current,
             pos.size,
@@ -1067,22 +1055,9 @@ export function ApexSovereign({
             tp,
             sl,
             pos.entryPrice,
-            cbRate != null ? { slTrailingCallbackRate: cbRate } : undefined,
           );
           if (result.success) {
-            if (finalKind === "sl" && cbRate != null) {
-              const sess = createTrailingSession(
-                coinRef.current,
-                isLong,
-                markAtDrop,
-                finalPrice,
-                refPx,
-              );
-              if (sess) {
-                setTrailSession(sess);
-                trailSyncRef.current = { lastMs: 0, lastSentPx: finalPrice };
-              }
-            } else if (finalKind === "sl") {
+            if (finalKind === "sl") {
               setTrailSession(null);
             }
             toast({

@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
-import { computeTrailingCallbackRateDecimal } from "@/lib/trailing-stop-orchestrator";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,9 +84,6 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
       const newSl = editMode === "sl" && slInput ? parseFloat(slInput) : slPrice ?? 0;
       const markPx = position.markPrice || currentPrice || position.entryPrice;
       const isLong = position.side === "long";
-      const slCb =
-        newSl > 0 ? computeTrailingCallbackRateDecimal(isLong, markPx, newSl) : null;
-
       const result = await placeTPSL(
         position.coin,
         position.size,
@@ -95,7 +91,6 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
         newTp > 0 ? newTp : undefined,
         newSl > 0 ? newSl : undefined,
         position.entryPrice,
-        slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
       );
 
       if (result.success) {

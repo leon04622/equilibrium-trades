@@ -18,7 +18,6 @@ import { X, Pencil, Check } from "lucide-react";
 import { ghostTpslPrices, selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import {
   clampTpslDragPrice,
-  computeTrailingCallbackRateDecimal,
   slLineColor,
   snapOrderPrice,
 } from "@/lib/trailing-stop-orchestrator";
@@ -352,12 +351,6 @@ export function ChartOrderLines({
       const isLong = pos.side === "long";
       const tp = finalDragging === "tp" ? finalPrice : (tpPriceRef.current ?? undefined);
       const sl = finalDragging === "sl" ? finalPrice : (slPriceRef.current ?? undefined);
-      const markAtDrop = pos.markPrice || refPx;
-      const slCb =
-        finalDragging === "sl"
-          ? computeTrailingCallbackRateDecimal(isLong, markAtDrop, finalPrice)
-          : null;
-
       if (isolateSlDrag() && finalDragging === "sl") {
         toast({
           title: "SL isolate mode",
@@ -373,7 +366,6 @@ export function ChartOrderLines({
         tp,
         sl,
         pos.entryPrice,
-        slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
       );
       if (result.success) {
         toast({
@@ -455,11 +447,6 @@ export function ChartOrderLines({
       const isLong = position.side === "long";
       const tp = editMode === "tp" ? newPrice : (tpPrice ?? undefined);
       const sl = editMode === "sl" ? newPrice : (slPrice ?? undefined);
-      const markAtEdit = mark;
-      const slCb =
-        editMode === "sl"
-          ? computeTrailingCallbackRateDecimal(isLong, markAtEdit, newPrice)
-          : null;
       const result = await placeTPSL(
         coin,
         position.size,
@@ -467,7 +454,6 @@ export function ChartOrderLines({
         tp,
         sl,
         position.entryPrice,
-        slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
       );
       if (result.success) {
         toast({ title: `${editMode === "tp" ? "Take Profit" : "Stop Loss"} updated` });

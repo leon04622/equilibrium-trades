@@ -71,7 +71,10 @@ export function selectTpSlOrders(
   let tpOrder: HLOpenOrder | undefined;
   let slOrder: HLOpenOrder | undefined;
   for (const o of coinOrders) {
-    const k = orderKindForTpsl(o, position, markPx);
+    const k: TpslOrderKind =
+      o.hlTpsl === "tp" || o.hlTpsl === "sl"
+        ? o.hlTpsl
+        : orderKindForTpsl(o, position, markPx);
     if (k === "tp" && !tpOrder) tpOrder = o;
     if (k === "sl" && !slOrder) slOrder = o;
   }

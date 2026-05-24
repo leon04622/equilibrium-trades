@@ -65,9 +65,11 @@ export interface Indicator {
 
 export interface PlaceTpslOptions {
   /**
-   * When set with `slPrice`, attempts venue `trailingStopMarket` first (callback vs mark),
-   * then falls back to a fixed reduce-only stop trigger at `slPrice`.
+   * Opt-in only. Default SL is a **fixed** reduce-only trigger at `slPrice` (reliable at your set price).
+   * Native venue trailing stops trail from favorable price moves and do not behave like a fixed stop.
    */
+  useNativeTrailingSl?: boolean;
+  /** Required when `useNativeTrailingSl` is true — callback vs mark (e.g. 0.02 = 2%). */
   slTrailingCallbackRate?: number;
 }
 
@@ -84,6 +86,8 @@ export interface HLOpenOrder {
   /** From HL `frontendOpenOrders` / WS when present — chart TP/SL mapping. */
   isTrigger?: boolean;
   reduceOnly?: boolean;
+  /** Venue `tpsl` field when present — authoritative for SL vs TP. */
+  hlTpsl?: "tp" | "sl";
 }
 
 interface TradingContextType {
@@ -875,7 +879,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
 
       const results: Array<{ success: boolean; error?: string }> = [];
-      const useTrailingSl = updateSl && options?.slTrailingCallbackRate != null && options.slTrailingCallbackRate > 0;
+      const useTrailingSl =
+        updateSl &&
+        options?.useNativeTrailingSl === true &&
+        options.slTrailingCallbackRate != null &&
+        options.slTrailingCallbackRate > 0;
+      const orderSize = pos?.size && pos.size > 0 ? pos.size : size;
       let tpSynced = false;
       let slSynced = false;
 
@@ -886,7 +895,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           newPrice: tpSnap,
           isBuy: !isLong,
           size:
-            parseFloat(String(tpOrder.sz)) > 0 ? parseFloat(String(tpOrder.sz)) : size,
+            parseFloat(String(tpOrder.sz)) > 0 ? parseFloat(String(tpOrder.sz)) : orderSize,
           tpsl: "tp",
         });
         if (mod.ok) {
@@ -910,7 +919,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           newPrice: slSnap,
           isBuy: !isLong,
           size:
-            parseFloat(String(slOrder.sz)) > 0 ? parseFloat(String(slOrder.sz)) : size,
+            parseFloat(String(slOrder.sz)) > 0 ? parseFloat(String(slOrder.sz)) : orderSize,
           tpsl: "sl",
         });
         if (mod.ok) {
@@ -925,17 +934,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         return { success: true };
       }
 
+      const ordersToCancel: Array<{ oid: number }> = [];
       if (pos) {
-        const existingOrders = openOrders.filter(
-          (o) => o.coin === coin && isVenueTpslCandidate(o),
-        );
-        for (const order of existingOrders) {
+        for (const order of openOrders.filter((o) => o.coin === coin && isVenueTpslCandidate(o))) {
           const kind = orderKindForTpsl(order, pos, markPrice);
           const shouldCancel =
             (kind === "tp" && updateTp && !tpSynced) ||
             (kind === "sl" && updateSl && !slSynced);
           if (shouldCancel && order.oid) {
-            await hlCancelOrder(signer, coin, order.oid);
+            ordersToCancel.push({ oid: order.oid });
           }
         }
       }
@@ -944,7 +951,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         const tpResult = await placeTriggerOrder(signer, {
           coin,
           isBuy: !isLong,
-          size,
+          size: orderSize,
           triggerPrice: tpSnap,
           isStopLoss: false,
           reduceOnly: true,
@@ -953,21 +960,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
 
       if (updateSl && slSnap != null && !slSynced) {
-        const cb = options?.slTrailingCallbackRate;
-        let slResult: { success: boolean; error?: string } | Awaited<ReturnType<typeof placeTriggerOrder>>;
-        if (cb != null && cb > 0) {
+        let slResult: { success: boolean; error?: string };
+        if (useTrailingSl) {
           slResult = await placeTrailingStopMarketOrder(signer, {
             coin,
             isBuy: !isLong,
-            size,
-            callbackRate: cb,
+            size: orderSize,
+            callbackRate: options!.slTrailingCallbackRate!,
             anchorTriggerPx: slSnap,
           });
           if (!slResult.success) {
             slResult = await placeTriggerOrder(signer, {
               coin,
               isBuy: !isLong,
-              size,
+              size: orderSize,
               triggerPrice: slSnap,
               isStopLoss: true,
               reduceOnly: true,
@@ -977,13 +983,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           slResult = await placeTriggerOrder(signer, {
             coin,
             isBuy: !isLong,
-            size,
+            size: orderSize,
             triggerPrice: slSnap,
             isStopLoss: true,
             reduceOnly: true,
           });
         }
         results.push(slResult);
+      }
+
+      const placeFailed = results.some((r) => !r.success);
+      if (!placeFailed) {
+        for (const { oid } of ordersToCancel) {
+          await hlCancelOrder(signer, coin, oid);
+        }
       }
 
       await refreshAccount();

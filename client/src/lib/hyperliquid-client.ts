@@ -1206,7 +1206,7 @@ export async function placeTrailingStopMarketOrder(
     const action: Record<string, unknown> = {
       type: "order",
       orders: [orderWire],
-      grouping: "na",
+      grouping: "positionTpsl",
     };
     if (shouldAttachBuilderToOrders(signerAddress)) {
       action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
@@ -1225,16 +1225,16 @@ export async function placeTrailingStopMarketOrder(
     console.log("[placeTrailingStopMarketOrder] response:", JSON.stringify(result));
 
     if (result.status === "ok") {
-      const statuses = result.response?.data?.statuses || [];
-      const resting = statuses.find((s: any) => s.resting);
-      const error = statuses.find((s: any) => s.error);
-      if (error) {
-        return { success: false, error: error.error };
+      const parsed = parseOrderPlacementStatuses(result.response?.data?.statuses);
+      if (parsed.error) {
+        return { success: false, error: parsed.error };
+      }
+      if (parsed.orderId) {
+        return { success: true, orderId: parsed.orderId, status: "open" };
       }
       return {
-        success: true,
-        orderId: resting?.resting?.oid?.toString() || "unknown",
-        status: "open",
+        success: false,
+        error: "Trailing stop was not accepted on the exchange (no resting order).",
       };
     }
 
@@ -1246,6 +1246,26 @@ export async function placeTrailingStopMarketOrder(
     console.error("Place trailing stop error:", error);
     return { success: false, error: error.message || "Failed to place trailing stop" };
   }
+}
+
+function parseOrderPlacementStatuses(
+  statuses: unknown,
+): { orderId?: string; error?: string } {
+  if (!Array.isArray(statuses) || statuses.length === 0) {
+    return { error: "Exchange returned no order status." };
+  }
+  for (const st of statuses) {
+    if (st && typeof st === "object" && "error" in st) {
+      return { error: String((st as { error: string }).error) };
+    }
+    if (st && typeof st === "object" && "resting" in st) {
+      const oid = (st as { resting?: { oid?: number | string } }).resting?.oid;
+      if (oid != null) {
+        return { orderId: String(oid) };
+      }
+    }
+  }
+  return { error: "Order was not accepted on the exchange (no resting order)." };
 }
 
 export async function placeTriggerOrder(
@@ -1298,7 +1318,7 @@ export async function placeTriggerOrder(
     const action: Record<string, unknown> = {
       type: "order",
       orders: [orderWire],
-      grouping: "na",
+      grouping: order.reduceOnly !== false ? "positionTpsl" : "na",
     };
     if (shouldAttachBuilderToOrders(signerAddress)) {
       action.builder = { b: BUILDER_ADDRESS, f: HL_BUILDER_FEE_F };
@@ -1328,19 +1348,21 @@ export async function placeTriggerOrder(
     console.log(`[placeTriggerOrder] ${tpsl.toUpperCase()} response:`, JSON.stringify(result));
 
     if (result.status === "ok") {
-      const statuses = result.response?.data?.statuses || [];
-      const resting = statuses.find((s: any) => s.resting);
-      const error = statuses.find((s: any) => s.error);
-      
-      if (error) {
-        console.error(`[placeTriggerOrder] ${tpsl.toUpperCase()} order error:`, error.error);
-        return { success: false, error: error.error };
+      const parsed = parseOrderPlacementStatuses(result.response?.data?.statuses);
+      if (parsed.error) {
+        console.error(`[placeTriggerOrder] ${tpsl.toUpperCase()} order error:`, parsed.error);
+        return { success: false, error: parsed.error };
       }
-      
+      if (parsed.orderId) {
+        return {
+          success: true,
+          orderId: parsed.orderId,
+          status: "open",
+        };
+      }
       return {
-        success: true,
-        orderId: resting?.resting?.oid?.toString() || "unknown",
-        status: "open",
+        success: false,
+        error: `${tpsl.toUpperCase()} was not accepted on the exchange (no resting order).`,
       };
     }
 

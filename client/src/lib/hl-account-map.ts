@@ -38,6 +38,9 @@ export function convertRawFrontendOrdersToHl(raw: unknown[]): HLOpenOrder[] {
     // Do not infer TP/SL from triggerCondition "above"/"below" alone — wrong for shorts.
     const oidRaw = ord.oid;
     const oidNum = typeof oidRaw === "string" ? parseInt(oidRaw, 10) : Number(oidRaw);
+    const hlTpslRaw = (ord.tpsl || tc || "").toLowerCase();
+    const hlTpsl: "tp" | "sl" | undefined =
+      hlTpslRaw === "tp" ? "tp" : hlTpslRaw === "sl" ? "sl" : undefined;
     return {
       coin: ord.coin,
       oid: Number.isFinite(oidNum) ? oidNum : 0,
@@ -50,6 +53,7 @@ export function convertRawFrontendOrdersToHl(raw: unknown[]): HLOpenOrder[] {
       triggerPx: ord.triggerPx,
       isTrigger: ord.isTrigger === true,
       reduceOnly: ord.reduceOnly === true,
+      hlTpsl,
     };
   });
 }

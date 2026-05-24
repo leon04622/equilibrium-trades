@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTrading, HLOpenOrder } from "@/lib/trading-context";
-import { computeTrailingCallbackRateDecimal } from "@/lib/trailing-stop-orchestrator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -200,8 +199,6 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
       }
     }
     
-    const slCb =
-      sl && markPrice > 0 ? computeTrailingCallbackRateDecimal(isLong, markPrice, sl) : null;
     const result = await placeTPSL(
       tpslDialog.coin,
       tpslDialog.size,
@@ -209,7 +206,6 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
       tp,
       sl,
       entryPrice || undefined,
-      slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
     );
     
     if (result.success) {

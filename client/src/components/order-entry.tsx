@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Loader2, ShieldCheck, Zap } from "lucide-react";
 import { useTrading } from "@/lib/trading-context";
-import { computeTrailingCallbackRateDecimal } from "@/lib/trailing-stop-orchestrator";
 import { useWallet } from "@/lib/wallet-context";
 import {
   placeOrder as placeHyperliquidOrder,
@@ -210,17 +209,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
         if (tpSlErr) {
           toast({ title: "TP/SL Skipped", description: tpSlErr, variant: "destructive" });
         } else {
-          const slCb =
-            sl != null ? computeTrailingCallbackRateDecimal(isBuy, fillPrice, sl) : null;
-          const tpslRes = await placeTPSL(
-            coin,
-            qty,
-            isBuy,
-            tp,
-            sl,
-            fillPrice,
-            slCb != null ? { slTrailingCallbackRate: slCb } : undefined,
-          );
+          const tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl, fillPrice);
           if (tpslRes.success) {
             toast({
               title: "TP/SL Set",
