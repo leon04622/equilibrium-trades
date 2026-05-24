@@ -25,6 +25,7 @@ import {
 import { snapOrderPrice } from "./trailing-stop-orchestrator";
 import { getArbitrumEthBalance } from "./arbitrum-gas";
 import { getArbitrumUsdcBalances } from "./arbitrum-usdc";
+import { queryClient } from "./queryClient";
 import { SubscriptionClient, WebSocketTransport } from "@nktkas/hyperliquid";
 
 export interface Position {
@@ -254,12 +255,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [withdrawable, setWithdrawable] = useState(0);
   const [accountValue, setAccountValue] = useState(0);
   const [spotUsdcTotal, setSpotUsdcTotal] = useState(0);
-  const [unifiedAccountUsd, setUnifiedAccountUsd] = useState(0);
   const [walletUsdcArbitrum, setWalletUsdcArbitrum] = useState(0);
   const [walletUsdcBridged, setWalletUsdcBridged] = useState(0);
   const [walletEthArbitrum, setWalletEthArbitrum] = useState(0);
   const [walletUsdcReady, setWalletUsdcReady] = useState(false);
   const walletUsdcFetchGenRef = useRef(0);
+  const refreshAccountGenRef = useRef(0);
   const [marginUsed, setMarginUsed] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [openOrders, setOpenOrders] = useState<HLOpenOrder[]>([]);
@@ -284,6 +285,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
   const connected = walletConnected;
   const address = walletAddress || "";
+  /** Perp + HL spot — derived so WS perp updates stay in sync with headline totals. */
+  const unifiedAccountUsd = accountValue + spotUsdcTotal;
   const displayTotalUsd = unifiedAccountUsd + walletUsdcArbitrum;
 
   const refreshWalletUsdc = useCallback(async (options?: { silent?: boolean }): Promise<{
@@ -351,6 +354,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const refreshAccount = useCallback(async (options?: { silent?: boolean }) => {
     if (!walletAddress) return;
 
+    const gen = ++refreshAccountGenRef.current;
     const silent = options?.silent ?? false;
     if (!silent) setIsLoadingAccount(true);
     setHlAccountFetchError(null);
@@ -362,6 +366,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         getOpenOrders(walletAddress),
         getSpotState(walletAddress),
       ]);
+
+      if (refreshAccountGenRef.current !== gen) return;
 
       let spotUsdc = 0;
       const usdcRow = spotState?.balances?.find((b) => b.coin === "USDC");
@@ -377,10 +383,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           setBalance,
           setWithdrawable,
         });
-        const perpVal = parseFloat(accountState.marginSummary?.accountValue || "0") || 0;
-        setUnifiedAccountUsd(perpVal + spotUsdc);
-      } else {
-        setUnifiedAccountUsd(spotUsdc);
       }
 
       const perpForSnap = accountState
@@ -403,8 +405,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
             spotUsdc: spotUsdc,
             totalUsd: unifiedSnap,
           }),
-        }).catch(() => {});
+        })
+          .then(() => {
+            if (refreshAccountGenRef.current === gen) {
+              void queryClient.invalidateQueries({ queryKey: ["/api/user/sync", walletAddress] });
+            }
+          })
+          .catch(() => {});
       }
+
+      if (refreshAccountGenRef.current !== gen) return;
 
       const mids = currentPricesRef.current;
       const hlRows = mapClearinghouseAssetPositionsToDashboard(accountState?.assetPositions, mids);
@@ -441,10 +451,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setHlAccountFetchError(null);
 
     } catch (error) {
+      if (refreshAccountGenRef.current !== gen) return;
       console.error("Error fetching exchange account:", error);
       setHlAccountFetchError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (!silent) setIsLoadingAccount(false);
+      if (refreshAccountGenRef.current === gen && !silent) setIsLoadingAccount(false);
     }
   }, [walletAddress]);
 
@@ -473,7 +484,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setWithdrawable(0);
       setAccountValue(0);
       setSpotUsdcTotal(0);
-      setUnifiedAccountUsd(0);
       setMarginUsed(0);
       lastHlBalanceSnapRef.current = "";
     }

@@ -79,6 +79,7 @@ export default function Portfolio() {
     unifiedAccountUsd,
     walletUsdcArbitrum,
     walletUsdcBridged,
+    spotUsdcTotal,
     isLoadingWalletUsdc,
   } = useTrading();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
@@ -115,8 +116,9 @@ export default function Portfolio() {
   const cctpAttestationCelebratedRef = useRef(false);
 
   const totalEquity =
-    displayTotalUsd > 0 ? displayTotalUsd : (accountValue || 0) + walletUsdcArbitrum;
-  const hlTradingUsd = unifiedAccountUsd > 0 ? unifiedAccountUsd : accountValue || 0;
+    displayTotalUsd > 0 ? displayTotalUsd : (accountValue || 0) + (spotUsdcTotal || 0) + walletUsdcArbitrum;
+  const hlTradingUsd =
+    unifiedAccountUsd > 0 ? unifiedAccountUsd : (accountValue || 0) + (spotUsdcTotal || 0);
   const availableBalance = balance || 0;
   const withdrawablePerp = withdrawable || 0;
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
@@ -392,6 +394,8 @@ export default function Portfolio() {
     setDepositCfgLoadError(null);
     setDepositOpen(true);
     if (!address) return;
+    setArbUsdcBalance(walletUsdcArbitrum);
+    setArbBridgedUsdcBalance(walletUsdcBridged);
     setIsLoadingArbBalance(true);
     try {
       const cfg = await fetchHyperliquidDepositConfig();

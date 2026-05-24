@@ -379,6 +379,7 @@ function PatternChartComponent({
   const [visiblePriceRange, setVisiblePriceRange] = useState<{ min: number; max: number } | null>(null);
   /** Bumps on throttled chart interaction so Apex Sovereign SVG resyncs after Y-scale changes. */
   const [chartLayoutTick, setChartLayoutTick] = useState(0);
+  const [tpslDragging, setTpslDragging] = useState(false);
 
   // Pane resize state
   const [weights, setWeights] = useState([6, 2, 2]);
@@ -628,6 +629,19 @@ function PatternChartComponent({
     if (Number.isFinite(currentPrice)) return currentPrice;
     return null;
   }, [candles, activeSignal, currentPrice, parsePrice]);
+
+  useEffect(() => {
+    const chart = mainChartRef.current;
+    if (!chart) return;
+    chart.applyOptions({
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: !tpslDragging,
+        horzTouchDrag: !tpslDragging,
+        vertTouchDrag: false,
+      },
+    });
+  }, [tpslDragging]);
 
   const activeSignalStatus = activeSignal ? getPatternStatusPresentation(activeSignal.patternStatus) : null;
   const liveSmmaReason = activeSignal ? buildLiveSmmaReason(activeSignal, smaStatus, liveChartPrice) : "";
@@ -1182,6 +1196,7 @@ function PatternChartComponent({
                   pendingOverride={nativeTpslOverride}
                   onPendingCommit={onTpslPendingCommit}
                   onPendingClear={onTpslPendingClear}
+                  onDraggingChange={setTpslDragging}
                 />
                 <ChartOrderLines
                   coin={coin}
@@ -1246,6 +1261,7 @@ function PatternChartComponent({
               pendingOverride={nativeTpslOverride}
               onPendingCommit={onTpslPendingCommit}
               onPendingClear={onTpslPendingClear}
+              onDraggingChange={setTpslDragging}
             />
             <ChartOrderLines
               coin={coin}

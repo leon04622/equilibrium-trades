@@ -44,6 +44,10 @@ const HL_LIQ = "#ff8900";
 const HL_GUTTER = 72;
 /** Vertical hit band (px) for TP/SL line drag — narrow so chart panning works elsewhere. */
 const TPSL_STRIP_HALF_PX = 14;
+/** Min vertical movement before TP/SL drag activates (avoids accidental moves while panning). */
+const DRAG_ACTIVATE_PX = 10;
+/** Horizontal movement beyond this ratio vs vertical cancels drag (pan intent). */
+const DRAG_PAN_ABORT_RATIO = 1.35;
 const TAG_BG = "rgba(19, 23, 34, 0.96)";
 /** Cap drag-time coordinate→price visual updates (~10/s matches HL refill guidance). */
 const DRAG_VISUAL_MIN_MS = 100;
@@ -124,6 +128,14 @@ export function ApexSovereign({
   const [box, setBox] = useState({ w: 0, h: 0 });
 
   const dragKindRef = useRef<TpslSide | null>(null);
+  const pendingDragRef = useRef<{
+    kind: TpslSide;
+    ghost: boolean;
+    startPrice: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const dragActivatedRef = useRef(false);
   const dragFromGhostRef = useRef(false);
   const dragStartPriceRef = useRef<number | null>(null);
   const activePointerElRef = useRef<HTMLElement | null>(null);
@@ -817,6 +829,8 @@ export function ApexSovereign({
   /** Orchestrator lifecycle: chart recreation (renderKey) must reset interaction state. */
   useEffect(() => {
     dragKindRef.current = null;
+    pendingDragRef.current = null;
+    dragActivatedRef.current = false;
     dragFromGhostRef.current = false;
     dragStartPriceRef.current = null;
     pendingClientYRef.current = null;
@@ -858,29 +872,25 @@ export function ApexSovereign({
       } catch {
         /* ignore */
       }
-      dragKindRef.current = kind;
+      pendingDragRef.current = {
+        kind,
+        ghost: opts.ghost,
+        startPrice: opts.startPrice,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      dragActivatedRef.current = false;
+      dragKindRef.current = null;
       dragFromGhostRef.current = opts.ghost;
       dragStartPriceRef.current = opts.startPrice;
       pendingClientYRef.current = e.clientY;
-      onDraggingChange?.(true);
-      flushDragFrame();
 
       const blockWheel = (we: WheelEvent) => {
         we.preventDefault();
       };
       document.addEventListener("wheel", blockWheel, { passive: false, capture: true });
 
-      const onMove = (ev: PointerEvent) => {
-        if (!dragKindRef.current) return;
-        pendingClientYRef.current = ev.clientY;
-        scheduleDragFrame();
-      };
-
-      const onUp = async (ev: PointerEvent) => {
-        document.removeEventListener("wheel", blockWheel, { capture: true });
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
+      const releasePointer = () => {
         if (activePointerElRef.current && activePointerIdRef.current !== null) {
           try {
             activePointerElRef.current.releasePointerCapture(activePointerIdRef.current);
@@ -890,8 +900,75 @@ export function ApexSovereign({
         }
         activePointerElRef.current = null;
         activePointerIdRef.current = null;
+      };
 
+      const cleanupListeners = () => {
+        document.removeEventListener("wheel", blockWheel, { capture: true });
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+
+      const abortDrag = (notifyEnd: boolean) => {
+        cleanupListeners();
+        releasePointer();
+        pendingDragRef.current = null;
+        dragActivatedRef.current = false;
+        dragKindRef.current = null;
+        dragFromGhostRef.current = false;
+        dragStartPriceRef.current = null;
+        pendingClientYRef.current = null;
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        if (dragVisualThrottleTimerRef.current) {
+          clearTimeout(dragVisualThrottleTimerRef.current);
+          dragVisualThrottleTimerRef.current = null;
+        }
+        if (notifyEnd) onDraggingChange?.(false);
+      };
+
+      const activateDrag = () => {
+        const pending = pendingDragRef.current;
+        if (!pending || dragActivatedRef.current) return;
+        dragActivatedRef.current = true;
+        pendingDragRef.current = null;
+        dragKindRef.current = pending.kind;
+        dragFromGhostRef.current = pending.ghost;
+        dragStartPriceRef.current = pending.startPrice;
+        onDraggingChange?.(true);
+        flushDragFrame();
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        if (pendingDragRef.current && !dragActivatedRef.current) {
+          const { startX, startY } = pendingDragRef.current;
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * DRAG_PAN_ABORT_RATIO) {
+            abortDrag(false);
+            return;
+          }
+          if (Math.abs(dy) >= DRAG_ACTIVATE_PX && Math.abs(dy) > Math.abs(dx) * 1.15) {
+            activateDrag();
+          } else {
+            return;
+          }
+        }
+        if (!dragKindRef.current) return;
+        pendingClientYRef.current = ev.clientY;
+        scheduleDragFrame();
+      };
+
+      const onUp = async (ev: PointerEvent) => {
+        cleanupListeners();
+        releasePointer();
+
+        const wasActivated = dragActivatedRef.current;
         const finalKind = dragKindRef.current;
+        pendingDragRef.current = null;
+        dragActivatedRef.current = false;
         dragKindRef.current = null;
         onDraggingChange?.(false);
         pendingClientYRef.current = null;
@@ -904,7 +981,7 @@ export function ApexSovereign({
           dragVisualThrottleTimerRef.current = null;
         }
 
-        if (!finalKind || !positionRef.current) return;
+        if (!wasActivated || !finalKind || !positionRef.current) return;
         const pos = positionRef.current;
         const refPx = currentPriceRef.current;
         const rawY = coordinateToPriceRef.current(ev.clientY);
@@ -1099,6 +1176,7 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
+            if (e.pointerType === "touch") return;
             const price = effTp && effTp > 0 ? effTp : ghostTp && ghostTp > 0 ? ghostTp : null;
             if (price == null) return;
             beginDrag(e, "tp", { ghost: !(effTp && effTp > 0), startPrice: price });
@@ -1201,6 +1279,7 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
+            if (e.pointerType === "touch") return;
             const price =
               mergedEffSl && mergedEffSl > 0
                 ? mergedEffSl
