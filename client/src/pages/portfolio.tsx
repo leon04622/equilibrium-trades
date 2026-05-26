@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +62,14 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useUserSync } from "@/context/AuthContext";
 import { StatePanel } from "@/components/state-panel";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
+import {
+  computeEffectiveWithdrawableUsdc,
+  fetchUserAbstraction,
+  isUnifiedStyleAbstraction,
+  UNIFIED_TRANSFER_BLOCKED,
+  UNIFIED_WITHDRAW_HINT,
+  type HlUserAbstraction,
+} from "@/lib/hl-unified-funding";
 
 export default function Portfolio() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -127,6 +135,27 @@ export default function Portfolio() {
   const withdrawablePerp = withdrawable || 0;
   const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
   const totalMarginUsed = marginUsed || 0;
+  const [hlAbstraction, setHlAbstraction] = useState<HlUserAbstraction | null>(null);
+
+  useEffect(() => {
+    if (!address) {
+      setHlAbstraction(null);
+      return;
+    }
+    void fetchUserAbstraction(address).then(setHlAbstraction);
+  }, [address]);
+
+  const isUnifiedAccount = isUnifiedStyleAbstraction(hlAbstraction);
+  const effectiveWithdrawable = useMemo(
+    () =>
+      computeEffectiveWithdrawableUsdc({
+        withdrawable: withdrawablePerp,
+        accountValue: accountValue || 0,
+        marginUsed: totalMarginUsed,
+        abstraction: hlAbstraction,
+      }),
+    [withdrawablePerp, accountValue, totalMarginUsed, hlAbstraction],
+  );
 
   const usdcSpotBalance = spotBalances.find(b => b.coin === "USDC");
   const usdcSpotAvailable = usdcSpotBalance
@@ -255,6 +284,14 @@ export default function Portfolio() {
       return;
     }
 
+    if (isUnifiedStyleAbstraction(hlAbstraction)) {
+      const msg = UNIFIED_TRANSFER_BLOCKED;
+      setTransferStep("");
+      setTransferResult({ success: false, error: msg });
+      toast({ title: "Unified account", description: msg });
+      return;
+    }
+
     // Step 3: Spot → Perp — align with Hyperliquid unified USDC (official app default) once per wallet
     if (transferToPerp) {
       setTransferring(true);
@@ -312,7 +349,7 @@ export default function Portfolio() {
   };
 
   const openWithdrawDialog = () => {
-    const safeMax = Math.floor(withdrawablePerp * 100) / 100;
+    const safeMax = Math.floor(effectiveWithdrawable * 100) / 100;
     setWithdrawAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
     setWithdrawDest(address || "");
     setWithdrawResult(null);
@@ -354,9 +391,18 @@ export default function Portfolio() {
       setWithdrawResult({ success: false, error: "Please enter a valid amount greater than 0." });
       return;
     }
-    if (amount > withdrawablePerp) {
+    const maxWithdraw = computeEffectiveWithdrawableUsdc({
+      withdrawable: withdrawablePerp,
+      accountValue: accountValue || 0,
+      marginUsed: totalMarginUsed,
+      abstraction: hlAbstraction,
+    });
+    if (amount > maxWithdraw) {
       setWithdrawStep("");
-      setWithdrawResult({ success: false, error: `Amount exceeds withdrawable balance of ${withdrawablePerp.toFixed(2)} USDC.` });
+      setWithdrawResult({
+        success: false,
+        error: `Amount exceeds withdrawable balance of ${maxWithdraw.toFixed(2)} USDC.`,
+      });
       return;
     }
     if (!withdrawDest || !/^0x[0-9a-fA-F]{40}$/.test(withdrawDest)) {
@@ -366,6 +412,27 @@ export default function Portfolio() {
     }
 
     setWithdrawing(true);
+
+    const abstractionMode =
+      hlAbstraction ?? (address ? await fetchUserAbstraction(address) : null);
+    if (abstractionMode && !isUnifiedStyleAbstraction(abstractionMode)) {
+      setWithdrawStep("One-time setup: enabling unified USDC on Hyperliquid (same as app.hyperliquid)…");
+      const prep = await ensureUnifiedAccountModeBeforeSpotToPerpTransfer(activeSigner);
+      if (!prep.ok) {
+        setWithdrawing(false);
+        setWithdrawStep("");
+        const msg = prep.error || "Unified account setup did not complete.";
+        setWithdrawResult({ success: false, error: msg });
+        toast({
+          title: prep.userRejected ? "Setup cancelled" : "Account setup required",
+          description: msg,
+          variant: "destructive",
+        });
+        return;
+      }
+      setHlAbstraction("unifiedAccount");
+    }
+
     setWithdrawStep("Requesting signature from your wallet — check MetaMask/your wallet app...");
 
     try {
@@ -1038,12 +1105,17 @@ export default function Portfolio() {
             <DialogDescription>
               Move USDC between your Spot and Perp accounts. Your funds stay in your wallet — no custody involved.
             </DialogDescription>
-            {transferToPerp && (
+            {transferToPerp && !isUnifiedAccount && (
               <p className="text-xs text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2 leading-relaxed">
                 The first time you move <strong className="text-foreground">Spot → Perp</strong> from this device,
                 Equilibrium applies Hyperliquid’s <strong className="text-foreground">unified account</strong>{" "}
                 (recommended by Hyperliquid — single USDC pool for spot and perp margin), so you do not need to change
                 HIP-3 or account mode manually on the HL website.
+              </p>
+            )}
+            {isUnifiedAccount && (
+              <p className="text-xs text-muted-foreground rounded-md border border-primary/25 bg-primary/5 px-3 py-2 leading-relaxed">
+                {UNIFIED_TRANSFER_BLOCKED}
               </p>
             )}
           </DialogHeader>
@@ -1432,8 +1504,13 @@ export default function Portfolio() {
               Withdraw USDC to Wallet
             </DialogTitle>
             <DialogDescription>
-              Send USDC from your perp account to any Arbitrum wallet. Funds arrive on Arbitrum within minutes.
+              Send USDC from your Hyperliquid balance to your Arbitrum wallet (≈1 USDC fee, a few minutes).
             </DialogDescription>
+            {isUnifiedAccount && (
+              <p className="text-xs text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2 leading-relaxed">
+                {UNIFIED_WITHDRAW_HINT}
+              </p>
+            )}
           </DialogHeader>
 
           {!signer && (
@@ -1447,7 +1524,7 @@ export default function Portfolio() {
             {/* Balance info */}
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 text-sm">
               <span className="text-muted-foreground">Withdrawable Balance</span>
-              <span className="font-semibold font-mono">{formatPrice(withdrawablePerp)} USDC</span>
+              <span className="font-semibold font-mono">{formatPrice(effectiveWithdrawable)} USDC</span>
             </div>
 
             {/* Amount */}
@@ -1468,13 +1545,13 @@ export default function Portfolio() {
                   variant="outline"
                   size="sm"
                   className="shrink-0"
-                  onClick={() => setWithdrawAmount((Math.floor(withdrawablePerp * 100) / 100).toFixed(2))}
+                  onClick={() => setWithdrawAmount((Math.floor(effectiveWithdrawable * 100) / 100).toFixed(2))}
                   data-testid="button-withdraw-max"
                 >
                   Max
                 </Button>
               </div>
-              {withdrawablePerp <= 0 && (
+              {effectiveWithdrawable <= 0 && (
                 <p className="text-xs text-amber-500">No withdrawable USDC. Open positions may be using your margin — close them first or wait for them to settle.</p>
               )}
             </div>
@@ -1535,7 +1612,7 @@ export default function Portfolio() {
                 withdrawing ||
                 !withdrawAmount ||
                 parseFloat(withdrawAmount) <= 0 ||
-                parseFloat(withdrawAmount) > withdrawablePerp ||
+                parseFloat(withdrawAmount) > effectiveWithdrawable ||
                 !withdrawDest ||
                 !/^0x[0-9a-fA-F]{40}$/.test(withdrawDest)
               }

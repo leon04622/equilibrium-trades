@@ -1506,10 +1506,15 @@ export async function transferUsdcBetweenAccounts(
         ? String(result.error)
         : JSON.stringify(result);
 
-    return { success: false, error: errMsg };
+    const { formatHyperliquidFundingError } = await import("./hl-unified-funding");
+    return { success: false, error: formatHyperliquidFundingError(errMsg) };
   } catch (error: any) {
     console.error("Transfer error:", error);
-    return { success: false, error: error.message || "Transfer failed" };
+    const { formatHyperliquidFundingError } = await import("./hl-unified-funding");
+    return {
+      success: false,
+      error: formatHyperliquidFundingError(error.message || "Transfer failed"),
+    };
   }
 }
 
@@ -1633,6 +1638,15 @@ export async function ensureUnifiedAccountModeBeforeSpotToPerpTransfer(
     return { ok: false, error: "Could not read wallet address." };
   }
 
+  const { fetchUserAbstraction, isUnifiedStyleAbstraction } = await import("./hl-unified-funding");
+  const onChainMode = await fetchUserAbstraction(addr);
+  if (isUnifiedStyleAbstraction(onChainMode)) {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(hlUnifiedPrepStorageKey(addr), "1");
+    }
+    return { ok: true, skipped: true };
+  }
+
   if (typeof localStorage !== "undefined" && localStorage.getItem(hlUnifiedPrepStorageKey(addr)) === "1") {
     return { ok: true, skipped: true };
   }
@@ -1753,10 +1767,15 @@ export async function withdrawUsdcToWallet(
         ? String(result.error)
         : JSON.stringify(result);
 
-    return { success: false, error: errMsg };
+    const { formatHyperliquidFundingError } = await import("./hl-unified-funding");
+    return { success: false, error: formatHyperliquidFundingError(errMsg) };
   } catch (error: any) {
     console.error("Withdrawal error:", error);
-    return { success: false, error: error.message || "Withdrawal failed" };
+    const { formatHyperliquidFundingError } = await import("./hl-unified-funding");
+    return {
+      success: false,
+      error: formatHyperliquidFundingError(error.message || "Withdrawal failed"),
+    };
   }
 }
 

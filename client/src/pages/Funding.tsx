@@ -33,10 +33,18 @@ import { UnifiedBalanceCard } from "@/components/unified-balance-card";
 import { useDepositSheet } from "@/lib/deposit-sheet-context";
 import {
   depositUsdcToHyperliquid,
+  ensureUnifiedAccountModeBeforeSpotToPerpTransfer,
   withdrawUsdcToWallet,
   type CctpDepositStep,
   type HyperliquidDepositConfig,
 } from "@/lib/hyperliquid-client";
+import {
+  computeEffectiveWithdrawableUsdc,
+  fetchUserAbstraction,
+  isUnifiedStyleAbstraction,
+  UNIFIED_WITHDRAW_HINT,
+  type HlUserAbstraction,
+} from "@/lib/hl-unified-funding";
 import { queryClient } from "@/lib/queryClient";
 import { StatePanel } from "@/components/state-panel";
 import { PoweredByHyperliquid } from "@/components/powered-by-hyperliquid";
@@ -61,6 +69,8 @@ export default function Funding() {
   const {
     connected,
     withdrawable,
+    accountValue,
+    marginUsed,
     refreshAccount,
     walletUsdcArbitrum,
     walletUsdcBridged,
@@ -91,6 +101,28 @@ export default function Funding() {
   const cctpAttestationCelebratedRef = useRef(false);
 
   const withdrawablePerp = withdrawable || 0;
+  const [hlAbstraction, setHlAbstraction] = useState<HlUserAbstraction | null>(null);
+
+  useEffect(() => {
+    if (!address) {
+      setHlAbstraction(null);
+      return;
+    }
+    void fetchUserAbstraction(address).then(setHlAbstraction);
+  }, [address]);
+
+  const isUnifiedAccount = isUnifiedStyleAbstraction(hlAbstraction);
+  const effectiveWithdrawable = useMemo(
+    () =>
+      computeEffectiveWithdrawableUsdc({
+        withdrawable: withdrawablePerp,
+        accountValue: accountValue || 0,
+        marginUsed: marginUsed || 0,
+        abstraction: hlAbstraction,
+      }),
+    [withdrawablePerp, accountValue, marginUsed, hlAbstraction],
+  );
+
   const isOnArbitrum = chainId === 42161;
   const hasResumableDeposit = isCctpPostBurnResumeEligible(userSync?.cctpBridgeProgress);
 
@@ -228,9 +260,18 @@ export default function Funding() {
       setWithdrawResult({ success: false, error: "Please enter a valid amount greater than 0." });
       return;
     }
-    if (amount > withdrawablePerp) {
+    const maxWithdraw = computeEffectiveWithdrawableUsdc({
+      withdrawable: withdrawablePerp,
+      accountValue: accountValue || 0,
+      marginUsed: marginUsed || 0,
+      abstraction: hlAbstraction,
+    });
+    if (amount > maxWithdraw) {
       setWithdrawStep("");
-      setWithdrawResult({ success: false, error: `Amount exceeds withdrawable balance of ${withdrawablePerp.toFixed(2)} USDC.` });
+      setWithdrawResult({
+        success: false,
+        error: `Amount exceeds withdrawable balance of ${maxWithdraw.toFixed(2)} USDC.`,
+      });
       return;
     }
     if (!withdrawDest || !/^0x[0-9a-fA-F]{40}$/.test(withdrawDest)) {
@@ -240,6 +281,27 @@ export default function Funding() {
     }
 
     setWithdrawing(true);
+
+    const abstractionMode =
+      hlAbstraction ?? (address ? await fetchUserAbstraction(address) : null);
+    if (abstractionMode && !isUnifiedStyleAbstraction(abstractionMode)) {
+      setWithdrawStep("One-time setup: enabling unified USDC on Hyperliquid (same as app.hyperliquid)…");
+      const prep = await ensureUnifiedAccountModeBeforeSpotToPerpTransfer(activeSigner);
+      if (!prep.ok) {
+        setWithdrawing(false);
+        setWithdrawStep("");
+        const msg = prep.error || "Unified account setup did not complete.";
+        setWithdrawResult({ success: false, error: msg });
+        toast({
+          title: prep.userRejected ? "Setup cancelled" : "Account setup required",
+          description: msg,
+          variant: "destructive",
+        });
+        return;
+      }
+      setHlAbstraction("unifiedAccount");
+    }
+
     setWithdrawStep("Requesting signature from your wallet - check your wallet app...");
 
     try {
@@ -770,10 +832,15 @@ export default function Funding() {
                 Withdraw USDC
               </CardTitle>
               <CardDescription>
-                Send withdrawable USDC from your perp account back to an Arbitrum wallet address.
+                Send USDC from your Hyperliquid balance to your Arbitrum wallet (≈1 USDC fee, a few minutes).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              {isUnifiedAccount && (
+                <p className="text-xs text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2 leading-relaxed">
+                  {UNIFIED_WITHDRAW_HINT}
+                </p>
+              )}
               {!connected && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -784,7 +851,7 @@ export default function Funding() {
               <div className="rounded-xl border bg-muted/30 p-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Withdrawable balance</span>
-                  <span className="font-semibold">{formatPrice(withdrawablePerp)} USDC</span>
+                  <span className="font-semibold">{formatPrice(effectiveWithdrawable)} USDC</span>
                 </div>
               </div>
 
@@ -802,7 +869,7 @@ export default function Funding() {
                   <Button
                     variant="outline"
                     type="button"
-                    onClick={() => setWithdrawAmount((Math.floor(withdrawablePerp * 100) / 100).toFixed(2))}
+                    onClick={() => setWithdrawAmount((Math.floor(effectiveWithdrawable * 100) / 100).toFixed(2))}
                     data-testid="button-funding-withdraw-max"
                   >
                     Max
@@ -846,7 +913,12 @@ export default function Funding() {
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={handleWithdraw}
-                  disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0 || withdrawing || withdrawablePerp <= 0}
+                  disabled={
+                    !withdrawAmount ||
+                    parseFloat(withdrawAmount) <= 0 ||
+                    withdrawing ||
+                    effectiveWithdrawable <= 0
+                  }
                   data-testid="button-funding-withdraw-confirm"
                 >
                   {withdrawing ? (
