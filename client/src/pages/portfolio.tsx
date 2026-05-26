@@ -67,7 +67,9 @@ import {
   fetchUserAbstraction,
   isUnifiedStyleAbstraction,
   UNIFIED_TRANSFER_BLOCKED,
+  UNIFIED_SPOT_TO_PERP_SUCCESS,
   UNIFIED_WITHDRAW_HINT,
+  isHyperliquidUnifiedTransferBlockedError,
   type HlUserAbstraction,
 } from "@/lib/hl-unified-funding";
 
@@ -209,21 +211,33 @@ export default function Portfolio() {
   const maxTransferAmount = transferToPerp ? usdcSpotAvailable : withdrawablePerp;
 
   const openTransferDialog = (preferToPerp: boolean) => {
-    // Smart direction: if the preferred direction has no funds, switch to the other direction
-    let toPerp = preferToPerp;
-    if (preferToPerp && usdcSpotAvailable <= 0 && withdrawablePerp > 0) {
-      toPerp = false; // No spot USDC, but has perp balance — switch to Perp→Spot
-    } else if (!preferToPerp && withdrawablePerp <= 0 && usdcSpotAvailable > 0) {
-      toPerp = true; // No perp balance, but has spot USDC — switch to Spot→Perp
-    }
-    const max = toPerp ? usdcSpotAvailable : withdrawablePerp;
-    // Floor to 2 decimal places so the amount never exceeds the actual available balance
-    const safeMax = Math.floor(max * 100) / 100;
-    setTransferToPerp(toPerp);
-    setTransferAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
-    setTransferResult(null);
-    setTransferStep("");
-    setTransferOpen(true);
+    void (async () => {
+      if (address) {
+        const mode = await fetchUserAbstraction(address);
+        if (mode) setHlAbstraction(mode);
+        if (isUnifiedStyleAbstraction(mode)) {
+          setTransferResult(null);
+          setTransferStep("");
+          setTransferOpen(true);
+          setTransferToPerp(preferToPerp);
+          return;
+        }
+      }
+      // Smart direction: if the preferred direction has no funds, switch to the other direction
+      let toPerp = preferToPerp;
+      if (preferToPerp && usdcSpotAvailable <= 0 && withdrawablePerp > 0) {
+        toPerp = false;
+      } else if (!preferToPerp && withdrawablePerp <= 0 && usdcSpotAvailable > 0) {
+        toPerp = true;
+      }
+      const max = toPerp ? usdcSpotAvailable : withdrawablePerp;
+      const safeMax = Math.floor(max * 100) / 100;
+      setTransferToPerp(toPerp);
+      setTransferAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+      setTransferResult(null);
+      setTransferStep("");
+      setTransferOpen(true);
+    })();
   };
 
   useEffect(() => {
@@ -284,7 +298,12 @@ export default function Portfolio() {
       return;
     }
 
-    if (isUnifiedStyleAbstraction(hlAbstraction)) {
+    const walletAddr = await activeSigner.getAddress();
+    const abstractionMode =
+      (await fetchUserAbstraction(walletAddr)) ?? hlAbstraction;
+    if (abstractionMode) setHlAbstraction(abstractionMode);
+
+    if (isUnifiedStyleAbstraction(abstractionMode)) {
       const msg = UNIFIED_TRANSFER_BLOCKED;
       setTransferStep("");
       setTransferResult({ success: false, error: msg });
@@ -292,26 +311,37 @@ export default function Portfolio() {
       return;
     }
 
-    // Step 3: Spot → Perp — align with Hyperliquid unified USDC (official app default) once per wallet
+    // Spot → Perp on legacy accounts: enable unified USDC (merges balances) — do NOT call usdClassTransfer after.
     if (transferToPerp) {
       setTransferring(true);
-      setTransferStep("One-time Hyperliquid setup: enabling unified USDC balance (same as app.hyperliquid)…");
+      setTransferStep("Enabling unified USDC on Hyperliquid (merges spot + perp — same as app.hyperliquid)…");
       const prep = await ensureUnifiedAccountModeBeforeSpotToPerpTransfer(activeSigner);
+      setTransferring(false);
+      setTransferStep("");
       if (!prep.ok) {
-        setTransferring(false);
-        setTransferStep("");
         const msg = prep.error || "Unified account setup did not complete.";
         setTransferResult({ success: false, error: msg });
         toast({
-          title: prep.userRejected ? "Setup cancelled" : "Unified account setup failed",
+          title: prep.userRejected ? "Setup cancelled" : "Setup failed",
           description: msg,
           variant: "destructive",
         });
         return;
       }
+      setHlAbstraction("unifiedAccount");
+      setTransferResult({ success: true, error: undefined });
+      toast({
+        title: "Unified USDC enabled",
+        description: UNIFIED_SPOT_TO_PERP_SUCCESS,
+      });
+      setTimeout(() => {
+        setTransferOpen(false);
+        handleRefresh();
+      }, 2000);
+      return;
     }
 
-    // Step 4: Execute transfer
+    // Perp → Spot (legacy accounts only)
     setTransferring(true);
     setTransferStep("Requesting signature from your wallet — check MetaMask/your wallet app...");
     console.log(`[Transfer] Calling transferUsdcBetweenAccounts: ${amount} USDC, toPerp=${transferToPerp}`);
@@ -320,6 +350,13 @@ export default function Portfolio() {
       const result = await transferUsdcBetweenAccounts(activeSigner, amount, transferToPerp);
       console.log("[Transfer] Result:", result);
       setTransferStep("");
+      if (!result.success && result.error && isHyperliquidUnifiedTransferBlockedError(result.error)) {
+        setHlAbstraction("unifiedAccount");
+        const msg = UNIFIED_TRANSFER_BLOCKED;
+        setTransferResult({ success: false, error: msg });
+        toast({ title: "Unified account", description: msg });
+        return;
+      }
       setTransferResult(result);
 
       if (result.success) {
@@ -1056,15 +1093,27 @@ export default function Portfolio() {
 
                           <div className="flex items-center gap-2">
                             {isUsdc ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openTransferDialog(true)}
-                                data-testid={`button-transfer-spot-${balance.coin}`}
-                              >
-                                <ArrowRightLeft className="h-3 w-3 mr-1" />
-                                Transfer to Perp
-                              </Button>
+                              isUnifiedAccount ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={openWithdrawDialog}
+                                  data-testid={`button-withdraw-spot-${balance.coin}`}
+                                >
+                                  <ArrowUpFromLine className="h-3 w-3 mr-1" />
+                                  Withdraw
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openTransferDialog(true)}
+                                  data-testid={`button-transfer-spot-${balance.coin}`}
+                                >
+                                  <ArrowRightLeft className="h-3 w-3 mr-1" />
+                                  Use for perps
+                                </Button>
+                              )
                             ) : (
                               <Link to={`/trading?coin=${balance.coin}`}>
                                 <Button variant="outline" size="sm" data-testid={`button-trade-spot-${balance.coin}`}>
@@ -1107,10 +1156,9 @@ export default function Portfolio() {
             </DialogDescription>
             {transferToPerp && !isUnifiedAccount && (
               <p className="text-xs text-muted-foreground rounded-md border border-border/80 bg-muted/40 px-3 py-2 leading-relaxed">
-                The first time you move <strong className="text-foreground">Spot → Perp</strong> from this device,
-                Equilibrium applies Hyperliquid’s <strong className="text-foreground">unified account</strong>{" "}
-                (recommended by Hyperliquid — single USDC pool for spot and perp margin), so you do not need to change
-                HIP-3 or account mode manually on the HL website.
+                <strong className="text-foreground">Spot → Perp</strong> enables Hyperliquid’s{" "}
+                <strong className="text-foreground">unified USDC</strong> (one pool for spot and perp). Hyperliquid does
+                not allow a separate transfer after that — your spot USDC becomes available for perps automatically.
               </p>
             )}
             {isUnifiedAccount && (
@@ -1120,13 +1168,27 @@ export default function Portfolio() {
             )}
           </DialogHeader>
 
-          {!signer && (
+          {isUnifiedAccount ? (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 text-sm">
+                <span className="text-muted-foreground">Available to withdraw</span>
+                <span className="font-semibold font-mono">{formatPrice(effectiveWithdrawable)} USDC</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your {formatPrice(usdcSpotAvailable)} spot USDC and perp balance are already one pool. Trade perps on the
+                Exchange page, or withdraw to Arbitrum below.
+              </p>
+            </div>
+          ) : null}
+
+          {!isUnifiedAccount && !signer && (
             <div className="flex items-start gap-2 p-3 rounded-lg text-sm bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>Wallet signing not available. Please go to the Exchange page, disconnect and reconnect your wallet, then return here to transfer.</span>
             </div>
           )}
 
+          {!isUnifiedAccount && (
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50 text-sm">
               <div className="flex-1 text-center">
@@ -1237,17 +1299,26 @@ export default function Portfolio() {
                 )}
                 <span className="break-all">
                   {transferResult.success
-                    ? `Successfully transferred ${transferAmount} USDC to ${transferToPerp ? "Perp" : "Spot"} account!`
+                    ? transferToPerp
+                      ? UNIFIED_SPOT_TO_PERP_SUCCESS
+                      : `Successfully transferred ${transferAmount} USDC to Spot account!`
                     : transferResult.error || "Transfer failed"}
                 </span>
               </div>
             )}
           </div>
+          )}
 
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setTransferOpen(false)} data-testid="button-transfer-cancel">
               Cancel
             </Button>
+            {isUnifiedAccount ? (
+              <Button onClick={() => { setTransferOpen(false); openWithdrawDialog(); }} data-testid="button-transfer-go-withdraw">
+                <ArrowUpFromLine className="h-4 w-4 mr-2" />
+                Withdraw to wallet
+              </Button>
+            ) : (
             <Button
               onClick={handleTransfer}
               disabled={transferring || !transferAmount || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > maxTransferAmount}
@@ -1256,15 +1327,16 @@ export default function Portfolio() {
               {transferring ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Transferring...
+                  {transferToPerp ? "Enabling…" : "Transferring…"}
                 </>
               ) : (
                 <>
-                  <ArrowRightLeft className="h-4 w-4 mr-2" />
-                  Transfer USDC
+                  {transferToPerp ? <ArrowRightLeft className="h-4 w-4 mr-2" /> : <ArrowRightLeft className="h-4 w-4 mr-2" />}
+                  {transferToPerp ? "Enable unified USDC" : "Transfer USDC"}
                 </>
               )}
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

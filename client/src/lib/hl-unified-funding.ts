@@ -52,16 +52,25 @@ export function computeEffectiveWithdrawableUsdc(args: {
   return Math.max(reported, freeEquity);
 }
 
+export function isHyperliquidUnifiedTransferBlockedError(raw: string): boolean {
+  const lower = raw.toLowerCase();
+  return (
+    lower.includes("unified account is active") ||
+    (lower.includes("unified") && lower.includes("disabled")) ||
+    (lower.includes("unified") && lower.includes("action disabled"))
+  );
+}
+
 export function formatHyperliquidFundingError(raw: string): string {
   const lower = raw.toLowerCase();
+  if (isHyperliquidUnifiedTransferBlockedError(raw)) {
+    return UNIFIED_TRANSFER_BLOCKED;
+  }
   if (
     (lower.includes("unified") || lower.includes("abstraction")) &&
     (lower.includes("transfer") || lower.includes("usdclass") || lower.includes("spot") || lower.includes("perp"))
   ) {
-    return (
-      "Your Hyperliquid account uses unified USDC (spot and perp share one balance). " +
-      "You do not need a Spot↔Perp transfer — use Withdraw to send USDC to your Arbitrum wallet."
-    );
+    return UNIFIED_TRANSFER_BLOCKED;
   }
   if (lower.includes("unified") && lower.includes("withdraw")) {
     return (
@@ -76,4 +85,7 @@ export const UNIFIED_WITHDRAW_HINT =
   "Unified account: one USDC pool for spot and perp. Withdraw sends from your Hyperliquid balance to Arbitrum (≈1 USDC fee).";
 
 export const UNIFIED_TRANSFER_BLOCKED =
-  "Unified account — spot and perp already share one USDC balance. No transfer needed. Use Withdraw to move funds to your wallet.";
+  "Unified account — spot and perp share one USDC balance. Transfers are disabled by Hyperliquid. Use Withdraw to send USDC to your Arbitrum wallet, or trade perps directly — no Spot→Perp move needed.";
+
+export const UNIFIED_SPOT_TO_PERP_SUCCESS =
+  "Unified USDC enabled. Your spot and perp balances are merged — you can trade perps immediately. No separate transfer is required.";
