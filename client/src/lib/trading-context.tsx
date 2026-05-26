@@ -98,6 +98,8 @@ interface TradingContextType {
   accountValue: number;
   /** Native USDC total on spot (from `spotClearinghouseState`). */
   spotUsdcTotal: number;
+  /** USDC on spot available to use (total − hold). */
+  spotUsdcAvailable: number;
   /** Perp account value + spot USDC total (unified HL equity). */
   unifiedAccountUsd: number;
   /** Native USDC on Arbitrum in the connected wallet (Revolut / external sends). */
@@ -262,6 +264,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [withdrawable, setWithdrawable] = useState(0);
   const [accountValue, setAccountValue] = useState(0);
   const [spotUsdcTotal, setSpotUsdcTotal] = useState(0);
+  const [spotUsdcAvailable, setSpotUsdcAvailable] = useState(0);
   const [walletUsdcArbitrum, setWalletUsdcArbitrum] = useState(0);
   const [walletUsdcBridged, setWalletUsdcBridged] = useState(0);
   const [walletEthArbitrum, setWalletEthArbitrum] = useState(0);
@@ -378,11 +381,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       if (refreshAccountGenRef.current !== gen) return;
 
       let spotUsdc = 0;
+      let spotUsdcAvail = 0;
       const usdcRow = spotState?.balances?.find((b) => b.coin === "USDC");
       if (usdcRow) {
-        spotUsdc = parseFloat(usdcRow.total || "0") || 0;
+        const total = parseFloat(usdcRow.total || "0") || 0;
+        const hold = parseFloat(usdcRow.hold || "0") || 0;
+        spotUsdc = total;
+        spotUsdcAvail = Math.max(0, total - hold);
       }
       setSpotUsdcTotal(spotUsdc);
+      setSpotUsdcAvailable(spotUsdcAvail);
 
       if (accountState) {
         applyMarginSummaryFromAccountState(accountState, {
@@ -1060,6 +1068,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       withdrawable,
       accountValue,
       spotUsdcTotal,
+      spotUsdcAvailable,
       unifiedAccountUsd,
       walletUsdcArbitrum,
       walletUsdcBridged,

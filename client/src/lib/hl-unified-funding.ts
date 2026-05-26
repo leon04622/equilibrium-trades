@@ -39,17 +39,60 @@ export function isUnifiedStyleAbstraction(mode: HlUserAbstraction | null | undef
   return mode === "unifiedAccount" || mode === "portfolioMargin";
 }
 
-/** Withdrawable USDC — on unified accounts HL may report withdrawable lower than free equity. */
+/**
+ * Hyperliquid unified / portfolio-margin accounts expose USDC in `spotClearinghouseState`;
+ * perp `clearinghouseState.withdrawable` is often 0 while spot holds the real balance.
+ */
+export function inferUnifiedUsdcPoolFromBalances(args: {
+  spotUsdcAvailable: number;
+  withdrawable: number;
+  accountValue: number;
+}): boolean {
+  return (
+    args.spotUsdcAvailable > 0.01 &&
+    args.withdrawable < 0.01 &&
+    args.accountValue < args.spotUsdcAvailable + 1
+  );
+}
+
+export function usesUnifiedUsdcPool(args: {
+  abstraction: HlUserAbstraction | null | undefined;
+  spotUsdcAvailable: number;
+  withdrawable: number;
+  accountValue: number;
+}): boolean {
+  return (
+    isUnifiedStyleAbstraction(args.abstraction) ||
+    inferUnifiedUsdcPoolFromBalances({
+      spotUsdcAvailable: args.spotUsdcAvailable,
+      withdrawable: args.withdrawable,
+      accountValue: args.accountValue,
+    })
+  );
+}
+
+/** Withdrawable USDC — unified accounts must include spot USDC (total − hold). */
 export function computeEffectiveWithdrawableUsdc(args: {
   withdrawable: number;
   accountValue: number;
   marginUsed: number;
   abstraction: HlUserAbstraction | null | undefined;
+  spotUsdcAvailable?: number;
 }): number {
   const reported = Math.max(0, args.withdrawable);
-  if (!isUnifiedStyleAbstraction(args.abstraction)) return reported;
+  const spotAvail = Math.max(0, args.spotUsdcAvailable ?? 0);
+  if (
+    !usesUnifiedUsdcPool({
+      abstraction: args.abstraction,
+      spotUsdcAvailable: spotAvail,
+      withdrawable: reported,
+      accountValue: args.accountValue,
+    })
+  ) {
+    return reported;
+  }
   const freeEquity = Math.max(0, args.accountValue - args.marginUsed);
-  return Math.max(reported, freeEquity);
+  return Math.max(reported, freeEquity, spotAvail);
 }
 
 export function isHyperliquidUnifiedTransferBlockedError(raw: string): boolean {

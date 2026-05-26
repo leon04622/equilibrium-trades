@@ -66,6 +66,7 @@ import {
   computeEffectiveWithdrawableUsdc,
   fetchUserAbstraction,
   isUnifiedStyleAbstraction,
+  usesUnifiedUsdcPool,
   UNIFIED_TRANSFER_BLOCKED,
   UNIFIED_SPOT_TO_PERP_SUCCESS,
   UNIFIED_WITHDRAW_HINT,
@@ -92,6 +93,7 @@ export default function Portfolio() {
     walletUsdcBridged,
     walletUsdcTotal,
     spotUsdcTotal,
+    spotUsdcAvailable,
     isLoadingWalletUsdc,
   } = useTrading();
   const { address, signer, provider, chainId, switchToArbitrum } = useWallet();
@@ -147,7 +149,17 @@ export default function Portfolio() {
     void fetchUserAbstraction(address).then(setHlAbstraction);
   }, [address]);
 
-  const isUnifiedAccount = isUnifiedStyleAbstraction(hlAbstraction);
+  const usdcSpotBalance = spotBalances.find(b => b.coin === "USDC");
+  const usdcSpotAvailable = usdcSpotBalance
+    ? Math.max(0, parseFloat(usdcSpotBalance.total) - parseFloat(usdcSpotBalance.hold || "0"))
+    : spotUsdcAvailable || 0;
+
+  const isUnifiedAccount = usesUnifiedUsdcPool({
+    abstraction: hlAbstraction,
+    spotUsdcAvailable: usdcSpotAvailable,
+    withdrawable: withdrawablePerp,
+    accountValue: accountValue || 0,
+  });
   const effectiveWithdrawable = useMemo(
     () =>
       computeEffectiveWithdrawableUsdc({
@@ -155,14 +167,10 @@ export default function Portfolio() {
         accountValue: accountValue || 0,
         marginUsed: totalMarginUsed,
         abstraction: hlAbstraction,
+        spotUsdcAvailable: usdcSpotAvailable,
       }),
-    [withdrawablePerp, accountValue, totalMarginUsed, hlAbstraction],
+    [withdrawablePerp, accountValue, totalMarginUsed, hlAbstraction, usdcSpotAvailable],
   );
-
-  const usdcSpotBalance = spotBalances.find(b => b.coin === "USDC");
-  const usdcSpotAvailable = usdcSpotBalance
-    ? parseFloat(usdcSpotBalance.total) - parseFloat(usdcSpotBalance.hold)
-    : 0;
 
   const fetchSpotBalances = async () => {
     if (!address) return;
@@ -386,12 +394,25 @@ export default function Portfolio() {
   };
 
   const openWithdrawDialog = () => {
-    const safeMax = Math.floor(effectiveWithdrawable * 100) / 100;
-    setWithdrawAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
-    setWithdrawDest(address || "");
-    setWithdrawResult(null);
-    setWithdrawStep("");
-    setWithdrawOpen(true);
+    void (async () => {
+      if (address) {
+        const mode = await fetchUserAbstraction(address);
+        if (mode) setHlAbstraction(mode);
+      }
+      const max = computeEffectiveWithdrawableUsdc({
+        withdrawable: withdrawablePerp,
+        accountValue: accountValue || 0,
+        marginUsed: totalMarginUsed,
+        abstraction: hlAbstraction,
+        spotUsdcAvailable: usdcSpotAvailable,
+      });
+      const safeMax = Math.floor(max * 100) / 100;
+      setWithdrawAmount(safeMax > 0 ? safeMax.toFixed(2) : "");
+      setWithdrawDest(address || "");
+      setWithdrawResult(null);
+      setWithdrawStep("");
+      setWithdrawOpen(true);
+    })();
   };
 
   const handleWithdraw = async () => {
@@ -433,6 +454,7 @@ export default function Portfolio() {
       accountValue: accountValue || 0,
       marginUsed: totalMarginUsed,
       abstraction: hlAbstraction,
+      spotUsdcAvailable: usdcSpotAvailable,
     });
     if (amount > maxWithdraw) {
       setWithdrawStep("");

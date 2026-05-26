@@ -42,6 +42,7 @@ import {
   computeEffectiveWithdrawableUsdc,
   fetchUserAbstraction,
   isUnifiedStyleAbstraction,
+  usesUnifiedUsdcPool,
   UNIFIED_WITHDRAW_HINT,
   type HlUserAbstraction,
 } from "@/lib/hl-unified-funding";
@@ -77,6 +78,7 @@ export default function Funding() {
     walletEthArbitrum,
     displayTotalUsd,
     unifiedAccountUsd,
+    spotUsdcAvailable,
     isLoadingWalletUsdc,
     refreshWalletUsdc,
   } = useTrading();
@@ -111,7 +113,12 @@ export default function Funding() {
     void fetchUserAbstraction(address).then(setHlAbstraction);
   }, [address]);
 
-  const isUnifiedAccount = isUnifiedStyleAbstraction(hlAbstraction);
+  const isUnifiedAccount = usesUnifiedUsdcPool({
+    abstraction: hlAbstraction,
+    spotUsdcAvailable: spotUsdcAvailable || 0,
+    withdrawable: withdrawablePerp,
+    accountValue: accountValue || 0,
+  });
   const effectiveWithdrawable = useMemo(
     () =>
       computeEffectiveWithdrawableUsdc({
@@ -119,8 +126,9 @@ export default function Funding() {
         accountValue: accountValue || 0,
         marginUsed: marginUsed || 0,
         abstraction: hlAbstraction,
+        spotUsdcAvailable: spotUsdcAvailable || 0,
       }),
-    [withdrawablePerp, accountValue, marginUsed, hlAbstraction],
+    [withdrawablePerp, accountValue, marginUsed, hlAbstraction, spotUsdcAvailable],
   );
 
   const isOnArbitrum = chainId === 42161;
@@ -265,6 +273,7 @@ export default function Funding() {
       accountValue: accountValue || 0,
       marginUsed: marginUsed || 0,
       abstraction: hlAbstraction,
+      spotUsdcAvailable: spotUsdcAvailable || 0,
     });
     if (amount > maxWithdraw) {
       setWithdrawStep("");
