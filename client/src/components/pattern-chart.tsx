@@ -36,6 +36,7 @@ import { chartCandlePollMs } from "@/lib/chart-candle-poll";
 import {
   countTimeGaps,
   fingerprintCandleSeries,
+  isFormingBarUpdate,
   mergeCandleSnapshots,
   repairCandleSeries,
 } from "@/lib/chart-candle-merge";
@@ -357,6 +358,10 @@ function PatternChartComponent({
   const lastChartFingerprintRef = useRef("");
   const layoutTickRafRef = useRef(0);
   const visibleRangeCacheRef = useRef<{ min: number; max: number } | null>(null);
+  const heavyIndicatorTimerRef = useRef<number | null>(null);
+  const heavyIndicatorRunRef = useRef(0);
+  const wsRafRef = useRef(0);
+  const wsPendingUpdateRef = useRef<CandleData | null>(null);
 
   /** Keeps optimistic TP/SL prices until openOrders refresh (Apex Sovereign + order lines contract). */
   const [nativeTpslOverride, setNativeTpslOverride] = useState<{ tp: number | null; sl: number | null }>({
@@ -419,6 +424,15 @@ function PatternChartComponent({
     prevDataKeyRef.current = "";
     lastChartFingerprintRef.current = "";
     preferredVisibleBarsRef.current = null;
+    if (heavyIndicatorTimerRef.current) {
+      clearTimeout(heavyIndicatorTimerRef.current);
+      heavyIndicatorTimerRef.current = null;
+    }
+    if (wsRafRef.current) {
+      cancelAnimationFrame(wsRafRef.current);
+      wsRafRef.current = 0;
+    }
+    wsPendingUpdateRef.current = null;
     setLastVol(null);
     setLastRSI(null);
     setLastK(null);
@@ -429,7 +443,7 @@ function PatternChartComponent({
 
   const historyLimit = CHART_HISTORY_LIMITS[interval] ?? 3000;
   const candlePollMs = chartCandlePollMs(interval);
-  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=${historyLimit}&fresh=1`;
+  const candleQueryKey = `/api/hyperliquid/candles/${coin}?interval=${interval}&limit=${historyLimit}`;
   const cachedCandles = useMemo(() => loadCachedCandles(coin, interval), [coin, interval]);
 
   const {
@@ -480,14 +494,19 @@ function PatternChartComponent({
   useEffect(() => {
     if (!coin || !interval) return;
     return subscribeHyperliquidCandles(coin, interval, (update) => {
-      queryClient.setQueryData<CandleData[]>([candleQueryKey], (prev) => {
-        if (!prev?.length) return prev;
-        const merged = repairCandleSeries(
-          mergeHlCandleIntoSeries(prev, update, interval),
-          interval,
-        );
-        saveCachedCandles(coin, interval, merged);
-        return merged;
+      wsPendingUpdateRef.current = update as CandleData;
+      if (wsRafRef.current) return;
+      wsRafRef.current = requestAnimationFrame(() => {
+        wsRafRef.current = 0;
+        const tick = wsPendingUpdateRef.current;
+        wsPendingUpdateRef.current = null;
+        if (!tick) return;
+        queryClient.setQueryData<CandleData[]>([candleQueryKey], (prev) => {
+          if (!prev?.length) return prev;
+          const merged = mergeHlCandleIntoSeries(prev, tick, interval);
+          saveCachedCandles(coin, interval, merged);
+          return merged;
+        });
       });
     });
   }, [coin, interval, candleQueryKey, queryClient]);
@@ -799,9 +818,15 @@ function PatternChartComponent({
       } catch (_) {}
     });
 
-    // LW v5 has no price-scale visible-range subscription; refresh Y-range when series data changes
-    // (time-axis + resize observers already call syncVisiblePriceRange).
-    const onSeriesData = () => syncVisiblePriceRange();
+    // LW v5 has no price-scale visible-range subscription; throttle Y-range + overlay sync on tick updates.
+    let lastSeriesDataSync = 0;
+    const onSeriesData = () => {
+      const now = performance.now();
+      if (now - lastSeriesDataSync < 80) return;
+      lastSeriesDataSync = now;
+      syncVisiblePriceRange();
+      scheduleLayoutTick();
+    };
     candleSeries.subscribeDataChanged(onSeriesData);
     cleanups.push(() => {
       try {
@@ -904,8 +929,72 @@ function PatternChartComponent({
       mainChartRef.current = null;
       cleanups.forEach(fn => fn());
       if (layoutTickRafRef.current) cancelAnimationFrame(layoutTickRafRef.current);
+      if (heavyIndicatorTimerRef.current) clearTimeout(heavyIndicatorTimerRef.current);
     };
   }, [theme, hideIndicators, coin, interval]);
+
+  const scheduleHeavyIndicators = useCallback(
+    (
+      sorted: CandleData[],
+      closes: number[],
+      times: Time[],
+      vols: number[],
+      lastTime: Time,
+      lastCandle: CandleData,
+      hideInd: boolean,
+    ) => {
+      if (heavyIndicatorTimerRef.current) return;
+      heavyIndicatorTimerRef.current = window.setTimeout(() => {
+        heavyIndicatorTimerRef.current = null;
+        const runId = ++heavyIndicatorRunRef.current;
+        void (async () => {
+          const sm = await computeSmmaSeries(closes, times);
+          if (runId !== heavyIndicatorRunRef.current) return;
+          if (!candleSeriesRef.current || !sma21SeriesRef.current || !sma200SeriesRef.current) return;
+          if (!volumeSmaSeriesRef.current) return;
+          if (!hideInd && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) {
+            return;
+          }
+          try {
+            applySmmaToChart(
+              sma21SeriesRef.current,
+              sma200SeriesRef.current,
+              sm.sma21,
+              sm.sma200,
+              lastTime,
+              sorted.length,
+              "tail",
+            );
+            if (vols.length >= 20) {
+              const vs = calcSMA(vols, times, 20);
+              if (vs.length > 0) volumeSmaSeriesRef.current.update(vs[vs.length - 1]!);
+            }
+            if (!hideInd && rsiSeriesRef.current && stochKSeriesRef.current && stochDSeriesRef.current) {
+              const rsiData = calcRSI(closes, times, 14);
+              if (rsiData.length > 0) {
+                rsiSeriesRef.current.update(rsiData[rsiData.length - 1]!);
+                setLastRSI(rsiData[rsiData.length - 1]!.value);
+              }
+              if (rsiData.length >= 14) {
+                const { k, d } = calcStochRSI(rsiData, 14, 3, 3);
+                if (k.length > 0) {
+                  stochKSeriesRef.current.update(k[k.length - 1]!);
+                  setLastK(k[k.length - 1]!.value);
+                }
+                if (d.length > 0) {
+                  stochDSeriesRef.current.update(d[d.length - 1]!);
+                  setLastD(d[d.length - 1]!.value);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("[chart] heavy indicator refresh error:", e);
+          }
+        })();
+      }, 220);
+    },
+    [],
+  );
 
   // ── Data update — smart setData vs update(); SMMA computed in Web Worker (same formula) ──
   useEffect(() => {
@@ -933,7 +1022,45 @@ function PatternChartComponent({
       return;
     }
 
+    const isKeyChange = prevDataKeyRef.current !== dataKey;
+    const isFirstLoad = !chartDataReadyRef.current;
+    const formingBarOnly =
+      chartDataReadyRef.current &&
+      !isKeyChange &&
+      !isFirstLoad &&
+      isFormingBarUpdate(prevCandlesLenRef.current, prevLastTimeRef.current, sorted, interval);
+
+    if (formingBarOnly) {
+      try {
+        candleSeriesRef.current.update({
+          time: lastTime,
+          open: parsePrice(lastCandle.o),
+          high: parsePrice(lastCandle.h),
+          low: parsePrice(lastCandle.l),
+          close: parsePrice(lastCandle.c),
+        });
+        volumeSeriesRef.current.update({
+          time: lastTime,
+          value: parsePrice(lastCandle.v),
+          color:
+            parsePrice(lastCandle.c) >= parsePrice(lastCandle.o)
+              ? "rgba(38,166,154,0.6)"
+              : "rgba(239,83,80,0.6)",
+        });
+        setLastVol(parsePrice(lastCandle.v));
+      } catch (e) {
+        console.warn("[chart] forming-bar update error:", e);
+      }
+      lastChartFingerprintRef.current = fingerprint;
+      scheduleHeavyIndicators(sorted, closes, times, vols, lastTime, lastCandle, hideIndicators);
+      return;
+    }
+
     const runId = ++chartSmmaRunRef.current;
+    if (heavyIndicatorTimerRef.current) {
+      clearTimeout(heavyIndicatorTimerRef.current);
+      heavyIndicatorTimerRef.current = null;
+    }
 
     void (async () => {
       const sm = await computeSmmaSeries(closes, times);
@@ -942,9 +1069,6 @@ function PatternChartComponent({
       if (!sma21SeriesRef.current || !sma200SeriesRef.current) return;
       if (!volumeSeriesRef.current || !volumeSmaSeriesRef.current) return;
       if (!hideIndicators && (!rsiSeriesRef.current || !stochKSeriesRef.current || !stochDSeriesRef.current)) return;
-
-      const isKeyChange = prevDataKeyRef.current !== dataKey;
-      const isFirstLoad = !chartDataReadyRef.current;
 
       if (isKeyChange || isFirstLoad) {
         if (isKeyChange) preferredVisibleBarsRef.current = null;
@@ -1161,7 +1285,7 @@ function PatternChartComponent({
       chartDataReadyRef.current = true;
       setLastRenderedDataKey(dataKey);
     })();
-  }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion]);
+  }, [candles, parsePrice, hideIndicators, coin, interval, chartVersion, scheduleHeavyIndicators]);
 
   useEffect(() => {
     setNativeTpslOverride({ tp: null, sl: null });

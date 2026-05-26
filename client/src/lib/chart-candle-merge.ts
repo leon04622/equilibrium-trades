@@ -78,6 +78,9 @@ export function countTimeGaps(candles: ChartCandle[], interval: string): number 
   return gaps;
 }
 
+/** Max synthetic flat bars per gap — avoids huge flat stretches that make the chart look broken. */
+const MAX_SYNTHETIC_BARS_PER_GAP = 6;
+
 /** Insert flat bars for missing intervals (HL sometimes omits zero-volume bars). */
 export function fillMissingCandles(candles: ChartCandle[], interval: string): ChartCandle[] {
   const step = CHART_INTERVAL_MS[interval];
@@ -91,12 +94,27 @@ export function fillMissingCandles(candles: ChartCandle[], interval: string): Ch
     const next = candles[i + 1]!;
     let t = cur.t + step;
     const close = cur.c;
-    while (t < next.t - step * 0.5) {
+    let synthetic = 0;
+    while (t < next.t - step * 0.5 && synthetic < MAX_SYNTHETIC_BARS_PER_GAP) {
       out.push({ t, o: close, h: close, l: close, c: close, v: 0 });
       t += step;
+      synthetic++;
     }
   }
   return out;
+}
+
+/** True when series length and last bar time are unchanged (forming bar wick/close updates only). */
+export function isFormingBarUpdate(
+  prevLen: number,
+  prevLastTimeMs: number,
+  candles: ChartCandle[],
+  interval: string,
+): boolean {
+  if (candles.length === 0 || candles.length !== prevLen) return false;
+  const last = candles[candles.length - 1]!;
+  if (last.t !== prevLastTimeMs) return false;
+  return countTimeGaps(candles, interval) === 0;
 }
 
 export function repairCandleSeries(candles: ChartCandle[], interval: string): ChartCandle[] {
