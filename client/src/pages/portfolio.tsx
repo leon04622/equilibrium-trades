@@ -75,10 +75,12 @@ export default function Portfolio() {
     withdrawable,
     currentPrices,
     refreshAccount,
+    refreshWalletUsdc,
     displayTotalUsd,
     unifiedAccountUsd,
     walletUsdcArbitrum,
     walletUsdcBridged,
+    walletUsdcTotal,
     spotUsdcTotal,
     isLoadingWalletUsdc,
   } = useTrading();
@@ -116,7 +118,9 @@ export default function Portfolio() {
   const cctpAttestationCelebratedRef = useRef(false);
 
   const totalEquity =
-    displayTotalUsd > 0 ? displayTotalUsd : (accountValue || 0) + (spotUsdcTotal || 0) + walletUsdcArbitrum;
+    displayTotalUsd > 0
+      ? displayTotalUsd
+      : (accountValue || 0) + (spotUsdcTotal || 0) + walletUsdcTotal;
   const hlTradingUsd =
     unifiedAccountUsd > 0 ? unifiedAccountUsd : (accountValue || 0) + (spotUsdcTotal || 0);
   const availableBalance = balance || 0;
@@ -157,8 +161,9 @@ export default function Portfolio() {
   }, [connected, address]);
 
   const handleRefresh = () => {
-    refreshAccount();
-    fetchSpotBalances();
+    void refreshAccount();
+    void refreshWalletUsdc();
+    void fetchSpotBalances();
   };
 
   const formatPrice = (val: number) => {
@@ -702,9 +707,16 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {isLoadingWalletUsdc ? "…" : `$${formatPrice(walletUsdcArbitrum)}`}
+              {isLoadingWalletUsdc ? "…" : `$${formatPrice(walletUsdcTotal)}`}
             </div>
-            <p className="text-xs text-muted-foreground">Arbitrum (not yet trading)</p>
+            <p className="text-xs text-muted-foreground">
+              Arbitrum wallet
+              {walletUsdcBridged >= 0.01 && walletUsdcArbitrum >= 0.01
+                ? ` · ${formatPrice(walletUsdcArbitrum)} native + ${formatPrice(walletUsdcBridged)} USDC.e`
+                : walletUsdcBridged >= 0.01
+                  ? " · includes USDC.e (swap to native to deposit)"
+                  : " (not yet on Hyperliquid)"}
+            </p>
             {walletUsdcArbitrum >= 0.01 && (
               <Button
                 type="button"
@@ -731,12 +743,17 @@ export default function Portfolio() {
 
         <Card data-testid="card-available-balance">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Perp Balance</CardTitle>
+            <CardTitle className="text-sm font-medium">Perp Available</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">${formatPrice(availableBalance)}</div>
-            <p className="text-xs text-muted-foreground">Free for trading</p>
+            <p className="text-xs text-muted-foreground">
+              Free collateral for new perp orders
+              {withdrawablePerp > 0 && withdrawablePerp !== availableBalance
+                ? ` · ${formatPrice(withdrawablePerp)} withdrawable`
+                : ""}
+            </p>
           </CardContent>
         </Card>
 

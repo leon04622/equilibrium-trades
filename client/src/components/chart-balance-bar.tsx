@@ -15,6 +15,7 @@ export function ChartBalanceBar({ className }: ChartBalanceBarProps) {
     displayTotalUsd,
     unifiedAccountUsd,
     walletUsdcArbitrum,
+    walletUsdcTotal,
     isLoadingWalletUsdc,
     isLoadingAccount,
   } = useTrading();
@@ -43,11 +44,11 @@ export function ChartBalanceBar({ className }: ChartBalanceBarProps) {
         <span className="hidden sm:inline font-medium">
           {loading ? "…" : `$${unifiedAccountUsd.toFixed(2)}`}
         </span>
-        {hasWallet && (
+        {walletUsdcTotal >= 0.01 && (
           <>
             <span className="hidden md:inline text-muted-foreground/60">|</span>
             <span className="hidden md:inline text-amber-700 dark:text-amber-400">
-              Wallet ${walletUsdcArbitrum.toFixed(2)}
+              Wallet ${walletUsdcTotal.toFixed(2)}
             </span>
           </>
         )}

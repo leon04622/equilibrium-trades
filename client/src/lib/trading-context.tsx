@@ -102,7 +102,10 @@ interface TradingContextType {
   unifiedAccountUsd: number;
   /** Native USDC on Arbitrum in the connected wallet (Revolut / external sends). */
   walletUsdcArbitrum: number;
+  /** Legacy USDC.e on Arbitrum (shown in totals; swap to native before CCTP deposit). */
   walletUsdcBridged: number;
+  /** Native + bridged USDC in the connected wallet. */
+  walletUsdcTotal: number;
   /** Native ETH on Arbitrum in the connected wallet (pays CCTP burn gas). */
   walletEthArbitrum: number;
   /** Trading + wallet USDC — what users see as "total balance". */
@@ -291,7 +294,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const address = walletAddress || "";
   /** Perp + HL spot — derived so WS perp updates stay in sync with headline totals. */
   const unifiedAccountUsd = accountValue + spotUsdcTotal;
-  const displayTotalUsd = unifiedAccountUsd + walletUsdcArbitrum;
+  const walletUsdcTotal = walletUsdcArbitrum + walletUsdcBridged;
+  const displayTotalUsd = unifiedAccountUsd + walletUsdcTotal;
 
   const refreshWalletUsdc = useCallback(async (options?: { silent?: boolean }): Promise<{
     native: number;
@@ -1059,6 +1063,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       unifiedAccountUsd,
       walletUsdcArbitrum,
       walletUsdcBridged,
+      walletUsdcTotal,
       walletEthArbitrum,
       displayTotalUsd,
       isLoadingWalletUsdc: !walletUsdcReady,

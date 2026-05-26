@@ -200,9 +200,9 @@ export function TradingPnlCards({ className }: TradingPnlCardsProps) {
       />
 
       <PnlCard
-        label="Available"
+        label="Perp available"
         value={loading ? "…" : formatUsd(balance)}
-        sub={marginUsed > 0 ? `${formatUsd(marginUsed)} in margin` : "Free collateral"}
+        sub={marginUsed > 0 ? `${formatUsd(marginUsed)} in margin` : "Free perp collateral"}
         tone="neutral"
       />
     </div>

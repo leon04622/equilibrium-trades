@@ -17,6 +17,7 @@ export function AccountEquity() {
     spotUsdcTotal,
     unifiedAccountUsd,
     walletUsdcArbitrum,
+    walletUsdcTotal,
     displayTotalUsd,
     balance,
     marginUsed,
@@ -39,7 +40,7 @@ export function AccountEquity() {
   const displayTotal =
     displayTotalUsd > 0
       ? displayTotalUsd
-      : displayTrading + walletUsdcArbitrum;
+      : displayTrading + walletUsdcTotal;
 
   const formatValue = (v: number) => {
     if (v === 0) return "$0.00";
@@ -124,7 +125,7 @@ export function AccountEquity() {
 
             <div className="flex justify-between text-[11px]">
               <span className="text-muted-foreground">In wallet (Arbitrum)</span>
-              <span className="font-mono">{formatValue(walletUsdcArbitrum)}</span>
+              <span className="font-mono">{formatValue(walletUsdcTotal)}</span>
             </div>
             <div className="flex justify-between text-[11px]">
               <span className="text-muted-foreground">Ready to trade</span>

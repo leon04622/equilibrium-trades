@@ -24,15 +24,17 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
     unifiedAccountUsd,
     walletUsdcArbitrum,
     walletUsdcBridged,
+    walletUsdcTotal,
     isLoadingWalletUsdc,
     connected,
   } = useTrading();
   const { openAddToTrading } = useDepositSheet();
 
   const trading = unifiedAccountUsd;
-  const wallet = walletUsdcArbitrum;
+  const wallet = walletUsdcTotal;
+  const walletNative = walletUsdcArbitrum;
   const total = trading + wallet;
-  const hasWalletFunds = wallet >= 0.01;
+  const hasWalletFunds = walletNative >= 0.01;
   const loading = isLoadingWalletUsdc && total <= 0 && unifiedAccountUsd <= 0;
 
   if (!connected) return null;
@@ -85,9 +87,14 @@ export function UnifiedBalanceCard({ className, compact = false }: UnifiedBalanc
             In your wallet (Arbitrum)
           </div>
           <p className="mt-1 font-mono font-semibold text-foreground">{fmtUsd(wallet)}</p>
+          {(walletUsdcBridged ?? 0) >= 0.01 && walletNative >= 0.01 ? (
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {fmtUsd(walletNative)} native · {fmtUsd(walletUsdcBridged)} USDC.e
+            </p>
+          ) : null}
           {hasWalletFunds ? (
             <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">
-              Tap Add to trading to use it for orders
+              Tap Add to trading to use native USDC for orders
             </p>
           ) : (
             <p className="mt-0.5 text-[10px] text-muted-foreground">Send USDC here — it shows up automatically</p>

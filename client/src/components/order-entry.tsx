@@ -57,7 +57,8 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
   const [previewSide, setPreviewSide] = useState<"long" | "short">("long");
   const isSpot = isSpotCoin(coin);
 
-  const { balance, refreshAccount, placeTPSL } = useTrading();
+  const { balance, walletUsdcArbitrum, walletUsdcTotal, unifiedAccountUsd, refreshAccount, placeTPSL } =
+    useTrading();
   const {
     address: walletAddr,
     isConnected,
@@ -304,12 +305,27 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
         ))}
       </div>
 
-      {/* Balance summary */}
-      <div className="rounded-xl border bg-card/60 px-3 py-2 text-[11px]">
+      {/* Balance summary — perp free collateral (HL); wallet USDC is separate until deposited */}
+      <div className="rounded-xl border bg-card/60 px-3 py-2 text-[11px] space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Available</span>
+          <span className="text-muted-foreground">Perp available</span>
           <span className="font-mono text-foreground">${fmt(balance)}</span>
         </div>
+        {!isSpot && (
+          <div className="flex items-center justify-between text-muted-foreground/90">
+            <span>HL account (perp + spot)</span>
+            <span className="font-mono">${fmt(unifiedAccountUsd)}</span>
+          </div>
+        )}
+        {walletUsdcTotal >= 0.01 && (
+          <div className="flex items-center justify-between text-amber-700 dark:text-amber-400">
+            <span>Wallet USDC (Arbitrum)</span>
+            <span className="font-mono">${fmt(walletUsdcTotal)}</span>
+          </div>
+        )}
+        {walletUsdcArbitrum < 0.01 && walletUsdcTotal >= 0.01 && (
+          <p className="text-[10px] text-destructive">USDC.e only — swap to native USDC to deposit for trading.</p>
+        )}
       </div>
 
       {/* Size */}
