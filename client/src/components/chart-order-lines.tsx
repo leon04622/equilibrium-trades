@@ -94,10 +94,10 @@ function slDragDebugEnabled(): boolean {
   }
 }
 
-/** Dev: `localStorage.setItem("isolate_sl_drag","1")` — SL drag end skips placeTPSL (prove UI-only). */
+/** Dev-only: `localStorage.setItem("isolate_sl_drag","1")` skips placeTPSL on SL drag (never in production). */
 function isolateSlDrag(): boolean {
   try {
-    return localStorage.getItem("isolate_sl_drag") === "1";
+    return import.meta.env.DEV && localStorage.getItem("isolate_sl_drag") === "1";
   } catch {
     return false;
   }

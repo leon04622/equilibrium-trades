@@ -23,6 +23,11 @@ import {
   selectTpSlOrders,
 } from "./chart-tpsl-from-orders";
 import { snapOrderPrice } from "./trailing-stop-orchestrator";
+import {
+  verifyVenueTpslResting,
+  waitForClearinghousePosition,
+  waitedPositionToPosition,
+} from "./tpsl-venue-verify";
 import { getArbitrumEthBalance } from "./arbitrum-gas";
 import { getArbitrumUsdcBalances } from "./arbitrum-usdc";
 import { queryClient } from "./queryClient";
@@ -835,7 +840,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     isPlacingTPSLRef.current = true;
 
     try {
-      const pos = positions.find(p => p.coin === coin);
+      let pos = positions.find((p) => p.coin === coin && p.size > 0);
+      if (!pos && walletAddress && (tpPrice != null || slPrice != null)) {
+        const waited = await waitForClearinghousePosition(walletAddress, coin);
+        if (waited) pos = waitedPositionToPosition(waited);
+      }
       const refPrice = entryPriceOverride || pos?.entryPrice || currentPrices[coin] || 0;
       const markPrice = pos?.markPrice || currentPrices[coin] || refPrice;
       const snapRef = markPrice > 0 ? markPrice : refPrice;
@@ -897,6 +906,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         options.slTrailingCallbackRate != null &&
         options.slTrailingCallbackRate > 0;
       const orderSize = pos?.size && pos.size > 0 ? pos.size : size;
+      if ((updateTp || updateSl) && orderSize <= 0) {
+        return {
+          success: false,
+          error: "Position size not available yet — wait a moment and set TP/SL again.",
+        };
+      }
       let tpSynced = false;
       let slSynced = false;
 
@@ -943,6 +958,30 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
       if (tpSynced && (!updateSl || slSynced)) {
         await refreshAccount();
+        if (walletAddress && pos && (updateTp || updateSl)) {
+          const { tpOk, slOk } = await verifyVenueTpslResting({
+            walletAddress,
+            coin,
+            position: pos,
+            snapRef,
+            expectedTp: updateTp ? tpSnap : null,
+            expectedSl: updateSl ? slSnap : null,
+          });
+          if (updateSl && slSnap != null && !slOk) {
+            return {
+              success: false,
+              error:
+                "Stop loss modify was not confirmed on Hyperliquid. Set SL again from the chart or Positions tab.",
+            };
+          }
+          if (updateTp && tpSnap != null && !tpOk) {
+            return {
+              success: false,
+              error:
+                "Take profit modify was not confirmed on Hyperliquid. Set TP again from the chart or Positions tab.",
+            };
+          }
+        }
         return { success: true };
       }
 
@@ -1013,9 +1052,102 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
       await refreshAccount();
 
-      const errors = results.filter(r => !r.success).map(r => r.error);
+      const errors = results.filter((r) => !r.success).map((r) => r.error);
       if (errors.length > 0) {
         return { success: false, error: errors.join(", ") };
+      }
+
+      if (walletAddress && pos && (updateTp || updateSl)) {
+        const verifyPos = pos;
+        let { tpOk, slOk } = await verifyVenueTpslResting({
+          walletAddress,
+          coin,
+          position: verifyPos,
+          snapRef,
+          expectedTp: updateTp ? tpSnap : null,
+          expectedSl: updateSl ? slSnap : null,
+        });
+
+        if (updateSl && slSnap != null && !slOk && !slSynced) {
+          console.warn("[placeTPSL] SL not on venue after place — retrying once");
+          const retrySl = await placeTriggerOrder(signer, {
+            coin,
+            isBuy: !isLong,
+            size: orderSize,
+            triggerPrice: slSnap,
+            isStopLoss: true,
+            reduceOnly: true,
+          });
+          if (retrySl.success) {
+            await refreshAccount();
+            ({ tpOk, slOk } = await verifyVenueTpslResting({
+              walletAddress,
+              coin,
+              position: verifyPos,
+              snapRef,
+              expectedTp: updateTp ? tpSnap : null,
+              expectedSl: slSnap,
+              attempts: 4,
+            }));
+          } else {
+            return {
+              success: false,
+              error:
+                retrySl.error ||
+                "Stop loss was not confirmed on Hyperliquid. Check open orders on app.hyperliquid.xyz.",
+            };
+          }
+        }
+
+        if (updateTp && tpSnap != null && !tpOk && !tpSynced) {
+          const retryTp = await placeTriggerOrder(signer, {
+            coin,
+            isBuy: !isLong,
+            size: orderSize,
+            triggerPrice: tpSnap,
+            isStopLoss: false,
+            reduceOnly: true,
+          });
+          if (!retryTp.success) {
+            return {
+              success: false,
+              error:
+                retryTp.error ||
+                "Take profit was not confirmed on Hyperliquid. Check open orders on app.hyperliquid.xyz.",
+            };
+          }
+          await refreshAccount();
+          ({ tpOk, slOk } = await verifyVenueTpslResting({
+            walletAddress,
+            coin,
+            position: verifyPos,
+            snapRef,
+            expectedTp: tpSnap,
+            expectedSl: updateSl ? slSnap : null,
+            attempts: 4,
+          }));
+        }
+
+        if (updateSl && slSnap != null && !slOk) {
+          return {
+            success: false,
+            error:
+              "Stop loss is not resting on Hyperliquid — your position may be unprotected. Set SL again from the chart or Positions tab.",
+          };
+        }
+        if (updateTp && tpSnap != null && !tpOk) {
+          return {
+            success: false,
+            error:
+              "Take profit is not resting on Hyperliquid. Set TP again from the chart or Positions tab.",
+          };
+        }
+      } else if (walletAddress && !pos && updateSl && slSnap != null) {
+        return {
+          success: false,
+          error:
+            "No open position found on Hyperliquid — stop loss was not placed. Refresh and try again.",
+        };
       }
 
       return { success: true };

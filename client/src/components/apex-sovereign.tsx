@@ -40,12 +40,14 @@ const HL_SL = "#f6465d";
 const HL_ENTRY = "#22d3ee";
 const HL_LIQ = "#ff8900";
 const HL_GUTTER = 72;
-/** Vertical hit band (px) for TP/SL line drag — narrow so chart panning works elsewhere. */
-const TPSL_STRIP_HALF_PX = 14;
+/** Vertical hit band (px) for TP/SL line drag — narrow so chart panning works elsewhere (HL-style). */
+const TPSL_STRIP_HALF_PX = 8;
 /** Min vertical movement before TP/SL drag activates (avoids accidental moves while panning). */
-const DRAG_ACTIVATE_PX = 10;
-/** Horizontal movement beyond this ratio vs vertical cancels drag (pan intent). */
-const DRAG_PAN_ABORT_RATIO = 1.35;
+const DRAG_ACTIVATE_PX = 14;
+/** Horizontal movement vs vertical above this ratio aborts drag (user is panning the chart). */
+const DRAG_PAN_ABORT_RATIO = 1.05;
+/** Horizontal movement (px) that always counts as pan intent when ≥ vertical delta. */
+const DRAG_PAN_ABORT_MIN_DX = 6;
 const TAG_BG = "rgba(19, 23, 34, 0.96)";
 /** Cap drag-time coordinate→price visual updates (~10/s matches HL refill guidance). */
 const DRAG_VISUAL_MIN_MS = 100;
@@ -132,6 +134,8 @@ export function ApexSovereign({
     startPrice: number;
     startX: number;
     startY: number;
+    pointerId: number;
+    targetEl: HTMLElement;
   } | null>(null);
   const dragActivatedRef = useRef(false);
   const dragFromGhostRef = useRef(false);
@@ -855,22 +859,15 @@ export function ApexSovereign({
     (e: React.PointerEvent, kind: TpslSide, opts: { ghost: boolean; startPrice: number }) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
       if ((e.target as HTMLElement).closest("[data-sovereign-chip]")) return;
-      e.preventDefault();
-      e.stopPropagation();
       const el = e.currentTarget as HTMLElement;
-      try {
-        el.setPointerCapture(e.pointerId);
-        activePointerElRef.current = el;
-        activePointerIdRef.current = e.pointerId;
-      } catch {
-        /* ignore */
-      }
       pendingDragRef.current = {
         kind,
         ghost: opts.ghost,
         startPrice: opts.startPrice,
         startX: e.clientX,
         startY: e.clientY,
+        pointerId: e.pointerId,
+        targetEl: el,
       };
       dragActivatedRef.current = false;
       dragKindRef.current = null;
@@ -930,6 +927,13 @@ export function ApexSovereign({
         dragKindRef.current = pending.kind;
         dragFromGhostRef.current = pending.ghost;
         dragStartPriceRef.current = pending.startPrice;
+        try {
+          pending.targetEl.setPointerCapture(pending.pointerId);
+          activePointerElRef.current = pending.targetEl;
+          activePointerIdRef.current = pending.pointerId;
+        } catch {
+          /* ignore */
+        }
         onDraggingChange?.(true);
         flushDragFrame();
       };
@@ -939,11 +943,16 @@ export function ApexSovereign({
           const { startX, startY } = pendingDragRef.current;
           const dx = ev.clientX - startX;
           const dy = ev.clientY - startY;
-          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * DRAG_PAN_ABORT_RATIO) {
+          const adx = Math.abs(dx);
+          const ady = Math.abs(dy);
+          if (
+            adx >= DRAG_PAN_ABORT_MIN_DX &&
+            (adx >= ady || adx > ady * DRAG_PAN_ABORT_RATIO)
+          ) {
             abortDrag(false);
             return;
           }
-          if (Math.abs(dy) >= DRAG_ACTIVATE_PX && Math.abs(dy) > Math.abs(dx) * 1.15) {
+          if (ady >= DRAG_ACTIVATE_PX && ady > adx * 1.2) {
             activateDrag();
           } else {
             return;
@@ -1151,7 +1160,6 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
-            if (e.pointerType === "touch") return;
             const price = effTp && effTp > 0 ? effTp : ghostTp && ghostTp > 0 ? ghostTp : null;
             if (price == null) return;
             beginDrag(e, "tp", { ghost: !(effTp && effTp > 0), startPrice: price });
@@ -1254,7 +1262,6 @@ export function ApexSovereign({
           fill="transparent"
           style={{ cursor: "ns-resize", touchAction: "none" }}
           onPointerDown={(e) => {
-            if (e.pointerType === "touch") return;
             const price =
               mergedEffSl && mergedEffSl > 0
                 ? mergedEffSl

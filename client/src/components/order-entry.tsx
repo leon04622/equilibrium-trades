@@ -193,7 +193,7 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
 
       await refreshAccount();
 
-      // Place TP/SL if provided
+      // Place TP/SL if provided — wait for position on venue before submit (post-fill race).
       const tp = takeProfit ? parseFloat(takeProfit) : undefined;
       const sl = stopLoss ? parseFloat(stopLoss) : undefined;
 
@@ -210,14 +210,25 @@ export function OrderEntry({ coin, currentPrice, onOrderSubmit, pairLabel, aiPat
         if (tpSlErr) {
           toast({ title: "TP/SL Skipped", description: tpSlErr, variant: "destructive" });
         } else {
-          const tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl, fillPrice);
+          let tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl, fillPrice);
+          if (!tpslRes.success && sl) {
+            await refreshAccount();
+            tpslRes = await placeTPSL(coin, qty, isBuy, tp, sl, fillPrice);
+          }
           if (tpslRes.success) {
             toast({
-              title: "TP/SL Set",
-              description: `${tp ? `TP $${fmt(tp)}` : ""}${tp && sl ? "  ·  " : ""}${sl ? `SL $${fmt(sl)}` : ""}`,
+              title: sl ? "TP/SL on Hyperliquid" : "Take profit on Hyperliquid",
+              description: `${tp ? `TP $${fmt(tp)}` : ""}${tp && sl ? "  ·  " : ""}${sl ? `SL $${fmt(sl)} resting on exchange` : ""}`,
             });
           } else {
-            toast({ title: "TP/SL Failed", description: tpslRes.error, variant: "destructive" });
+            toast({
+              title: sl ? "Stop loss NOT on exchange" : "TP/SL Failed",
+              description:
+                tpslRes.error ||
+                "Your position may be open without protection. Set SL on the chart or Positions tab immediately.",
+              variant: "destructive",
+              duration: 12000,
+            });
           }
         }
       }

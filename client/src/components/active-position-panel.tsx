@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useTrading, HLOpenOrder } from "@/lib/trading-context";
+import { useState, useCallback, useMemo } from "react";
+import { useTrading } from "@/lib/trading-context";
+import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,31 +39,16 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
   const [slInput, setSlInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const position = positions.find(p => p.coin === coin);
+  const position = positions.find((p) => p.coin === coin);
 
-  // Use a ref so getOrderType has a stable identity (empty dep array).
-  // This prevents the "more hooks than previous render" error that occurs
-  // when position's reference changes on every polling cycle, causing
-  // getOrderType → tpOrder/slOrder → downstream callbacks to all cascade-recreate.
-  const positionRef = useRef(position);
-  useEffect(() => { positionRef.current = position; });
-
-  const getOrderType = useCallback((order: HLOpenOrder): "tp" | "sl" | "other" => {
-    const pos = positionRef.current;
-    if (!pos) return "other";
-    if (order.orderType === "stop_loss") return "sl";
-    if (order.orderType === "take_profit") return "tp";
-    const triggerPrice = order.triggerPx ? parseFloat(order.triggerPx) : parseFloat(order.limitPx);
-    return pos.side === "long"
-      ? triggerPrice < pos.entryPrice ? "sl" : "tp"
-      : triggerPrice > pos.entryPrice ? "sl" : "tp";
-  }, []); // stable — reads from ref, never needs to re-create
-
-  const coinOrders = openOrders.filter(o => o.coin === coin);
-  const tpOrder = coinOrders.find(o => getOrderType(o) === "tp");
-  const slOrder = coinOrders.find(o => getOrderType(o) === "sl");
-  const tpPrice = tpOrder ? parseFloat(tpOrder.triggerPx || tpOrder.limitPx) : null;
-  const slPrice = slOrder ? parseFloat(slOrder.triggerPx || slOrder.limitPx) : null;
+  const { tpOrder, slOrder, tpPrice, slPrice } = useMemo(
+    () =>
+      position
+        ? selectTpSlOrders(coin, position, openOrders)
+        : { tpOrder: undefined, slOrder: undefined, tpPrice: null, slPrice: null },
+    [coin, position, openOrders],
+  );
+  const hasExchangeSl = slOrder?.oid != null && slOrder.oid > 0;
 
   const startEdit = useCallback((mode: EditMode) => {
     setEditMode(mode);
@@ -192,6 +178,16 @@ export function ActivePositionPanel({ coin, currentPrice }: ActivePositionPanelP
           </div>
         )}
       </div>
+
+      {!hasExchangeSl && (
+        <div
+          className="px-3 py-2 text-xs bg-destructive/15 text-destructive border-b border-destructive/25"
+          data-testid="no-exchange-sl-warning"
+        >
+          No stop loss on Hyperliquid — drag the red line on the chart or set SL below. Until then your
+          position is not protected.
+        </div>
+      )}
 
       {/* TP / SL rows */}
       <div className="divide-y">

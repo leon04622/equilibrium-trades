@@ -14,6 +14,7 @@ import {
 } from "@/components/share-position-dialog";
 import type { SharePositionSnapshot } from "@/lib/share-position-types";
 import type { Position } from "@/lib/trading-context";
+import { selectTpSlOrders } from "@/lib/chart-tpsl-from-orders";
 
 interface BottomTradingPanelProps {
   coin?: string;
@@ -120,35 +121,22 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
     }
   };
 
-  const openTPSLDialog = (pos: any) => {
-    const posOrders = openOrders.filter(o => o.coin === pos.coin);
-    const tpOrder = posOrders.find(o => {
-      if (o.orderType === "take_profit") return true;
-      if (o.triggerPx && pos.side === "long" && parseFloat(o.triggerPx) > pos.entryPrice) return true;
-      if (o.triggerPx && pos.side === "short" && parseFloat(o.triggerPx) < pos.entryPrice) return true;
-      return false;
-    });
-    const slOrder = posOrders.find(o => {
-      if (o.orderType === "stop_loss") return true;
-      if (o.triggerPx && pos.side === "long" && parseFloat(o.triggerPx) < pos.entryPrice) return true;
-      if (o.triggerPx && pos.side === "short" && parseFloat(o.triggerPx) > pos.entryPrice) return true;
-      return false;
-    });
-    
+  const openTPSLDialog = (pos: Position) => {
     const markPrice = currentPrices[pos.coin] || pos.markPrice || pos.entryPrice;
-    
+    const { tpOrder, slOrder, tpPrice, slPrice } = selectTpSlOrders(pos.coin, pos, openOrders);
+
     setTpslDialog({
       open: true,
       coin: pos.coin,
       side: pos.side,
       size: pos.size,
       entryPrice: pos.entryPrice,
-      markPrice: markPrice,
-      currentTP: tpOrder ? parseFloat(tpOrder.triggerPx!) : undefined,
-      currentSL: slOrder ? parseFloat(slOrder.triggerPx!) : undefined,
+      markPrice,
+      currentTP: tpPrice ?? undefined,
+      currentSL: slPrice ?? undefined,
     });
-    setTpPrice(tpOrder?.triggerPx || "");
-    setSlPrice(slOrder?.triggerPx || "");
+    setTpPrice(tpPrice != null ? String(tpPrice) : "");
+    setSlPrice(slPrice != null ? String(slPrice) : "");
   };
 
   const handleSetTPSL = async () => {
@@ -223,26 +211,12 @@ export function BottomTradingPanel({ coin, onCoinChange }: BottomTradingPanelPro
     }
   };
 
-  const getTPSLDisplay = (pos: any) => {
-    const posOrders = openOrders.filter(o => o.coin === pos.coin && o.triggerPx);
-    let tp = "--";
-    let sl = "--";
-    
-    posOrders.forEach(o => {
-      const trigger = parseFloat(o.triggerPx!);
-      const isTP = o.orderType === "take_profit" ||
-        (o.orderType !== "stop_loss" && (
-          (pos.side === "long" && trigger > pos.entryPrice) ||
-          (pos.side === "short" && trigger < pos.entryPrice)
-        ));
-      if (isTP) {
-        tp = formatPrice(trigger);
-      } else {
-        sl = formatPrice(trigger);
-      }
-    });
-    
-    return { tp, sl };
+  const getTPSLDisplay = (pos: Position) => {
+    const { tpPrice, slPrice } = selectTpSlOrders(pos.coin, pos, openOrders);
+    return {
+      tp: tpPrice != null && tpPrice > 0 ? formatPrice(tpPrice) : "--",
+      sl: slPrice != null && slPrice > 0 ? formatPrice(slPrice) : "--",
+    };
   };
 
   const formatPrice = (p: number | string) => {
