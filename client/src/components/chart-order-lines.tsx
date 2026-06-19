@@ -779,11 +779,14 @@ export function ChartOrderLines({
           ? { ...bandStyle, zIndex: z }
           : { position: "absolute", left: 0, right: 0, ...centerStyle, zIndex: z };
 
+        const isDraggableRow = line.canEdit && !!line.editType;
+
         return (
           <div
             key={line.key}
             className={cn("absolute left-0 right-0", tpslHot && "group/tpsl")}
-            style={outerStyle}
+            style={isDraggableRow ? { ...outerStyle, pointerEvents: "auto" } : outerStyle}
+            onPointerDown={isDraggableRow ? (e) => beginTpslDrag(e, { price: line.price, isGhost: line.isGhost, editType: line.editType }) : undefined}
           >
             {!line.canvasLine && (
               <div
